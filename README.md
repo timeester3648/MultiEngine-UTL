@@ -162,9 +162,9 @@ Coordinate transformations, mathematical constans and helper functions.
 <!-- TOC --><a name="work-in-progress"></a>
 ## Work in progress
 
-* "utl::`shell`::" module that allows cross-platform access to command line commants;
+* "utl::`shell`::" module that allows cross-platform access to command line commands;
 * Coordinate transformation function in "utl::math::";
-* Bitselect adn branchless ternary in "utl::math::";
+* Bitselect and branchless ternary in "utl::math::";
 
 
 
@@ -178,6 +178,9 @@ Coordinate transformations, mathematical constans and helper functions.
 
 <!-- TOC --><a name="version-history"></a>
 ## Version history
+
+* 00.02
+    * Finished initial draft documentation.
 
 * 00.01
     * Uploaded initial draft with "voidstream", "argcv", "table", "timer", "sleep", "random" and "math" modules.
