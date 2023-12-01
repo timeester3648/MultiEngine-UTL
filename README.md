@@ -1,3 +1,6 @@
+
+
+
 # Prototyping utils
 
 This is a collection of various utilities that aim to provide a set of concise "helpers" that allow prototying with minimal boilerplate. Most of the following modules were created during my work in gamedev and university projects.
@@ -14,6 +17,30 @@ This is a collection of various utilities that aim to provide a set of concise "
 
 ## Modules
 
+### utl::voidstream::
+"voidstream" that functions as std::ostream with no output.
+Can be passed to interfaces that use streams to silence their output.
+	
+	 # ::vstreambuf #
+	 Stream buffer that overflows with no output, usage example:
+	    > std::ofstream output_stream(&vstreambuf);
+	    > output_stream << VALUE; // produces nothing
+	
+	 # ::vout #
+	 Output stream that produces no output, usage example:
+	    > vout << VALUE; // produces nothing
+	
+### utl::argcv::
+Parsers that convert argc, argv[] to std::string.
+	
+	 # ::exe_path(), ::exe_path_view() #
+	 Parses executable path from argcv as std::string or std::string_view.
+	 Views have lower overhead, but keep pointers to original data.
+	
+	 # ::command_line_args(), ::command_line_args_view() #
+	 Parses command line arguments from argcv as std::string or std::string_view.
+	 Views have lower overhead, but keep pointers to original data.
+	
 
 ## Requirements
 
