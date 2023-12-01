@@ -65,19 +65,19 @@ namespace utl {
 
 
 
-	// ### utl::voidstream:: ###
-	// "voidstream" that functions as std::ostream with no output.
-	// Can be passed to interfaces that use streams to silence their output.
-	//
-	// # ::vstreambuf #
-	// Stream buffer that overflows with no output, usage example:
-	//    > std::ofstream output_stream(&vstreambuf);
-	//    > output_stream << VALUE; // produces nothing
-	//
-	// # ::vout #
-	// Output stream that produces no output, usage example:
-	//    > vout << VALUE; // produces nothing
-	//
+	 // ### utl::voidstream:: ###
+	 // "voidstream" that functions like std::ostream with no output.
+	 // Can be passed to interfaces that use streams to silence their output.
+	
+	 // # ::vstreambuf #
+	 // Stream buffer that overflows with no output, usage example:
+	 //   > std::ofstream output_stream(&vstreambuf);
+	 //   > output_stream << VALUE; // produces nothing
+	
+	 //# ::vout #
+	 //Output stream that produces no output, usage example:
+	 //   > vout << VALUE; // produces nothing
+	
 	namespace voidstream {
 
 		class VoidStreamBuf : public std::streambuf {
@@ -351,7 +351,7 @@ namespace utl {
 	//
 	// # ::hybrid() #
 	// Recommended option, similar precision to spinlock with minimal CPU usage.
-	// Uses system sleep with estimated error with spinlock sleep at the end.
+	// Uses system sleep with statistically estimated error with spinlock sleep at the end.
 	// Adjusts system sleep error estimate with every call.
 	// Expected error: ~1-2 ms
 	//
@@ -458,10 +458,10 @@ namespace utl {
 	// ### utl::math:: ###
 	// Coordinate transformations, mathematical constans and helper functions.
 	// 
-	// ::abs(), ::sign(), ::sqr(), ::cube(), deg_to_rad(), rad_to_deg()
+	// # ::abs(), ::sign(), ::sqr(), ::cube(), deg_to_rad(), rad_to_deg() #
 	// Constexpr templated functions, useful when writing expressions with a "textbook form" math.
 	//
-	// ::uint_difference()
+	// # ::uint_difference() #
 	// Returns abs(uint - uint) with respect to uint size and possible overflow.
 	//
 	namespace math {
