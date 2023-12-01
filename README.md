@@ -2,9 +2,23 @@
 
 This is a collection of various utilities that aim to provide a set of concise "helpers" that allow prototying with minimal boilerplate. Most of the following modules were created during my work in gamedev and university projects.
 
+1. [design_principles](#design_principles)
+2. [modules](#modules)
+    1. [voidstream](#voidstream)
+    2. [argcv](#argcv)
+    3. [table](#table)
+    4. [timer](#timer)
+    5. [sleep](#sleep)
+    6. [random](#random)
+    7. [math](#math)
+3. [work_in_progress](#work_in_progress)
+4. [requirements](#requirements)
+5. [version_history](#version_history)
+6. [license](#license)
 
 
-## Design principles
+
+## Design principles <a name="design_principles"></a>
 
 * Library should be header only;
 * Each module should be self-contained and reside in a separate namespace;
@@ -16,9 +30,9 @@ This is a collection of various utilities that aim to provide a set of concise "
 
 
 
-## Modules
+## Modules <a name="modules"></a>
 
-### utl::voidstream::
+### utl::voidstream:: <a name="voidstream"></a>
 "voidstream" that functions like std::ostream with no output.
 Can be passed to interfaces that use streams to silence their output.
 	
@@ -31,7 +45,7 @@ Can be passed to interfaces that use streams to silence their output.
 	 Output stream that produces no output, usage example:
 	    > vout << VALUE; // produces nothing
 	
-### utl::argcv::
+### utl::argcv:: <a name="argcv"></a>
 Parsers that convert argc, argv[] to std::string.
 	
 	 # ::exe_path(), ::exe_path_view() #
@@ -42,7 +56,7 @@ Parsers that convert argc, argv[] to std::string.
 	 Parses command line arguments from argcv as std::string or std::string_view.
 	 Views have lower overhead, but keep pointers to original data.
 	
-### utl::table::
+### utl::table:: <a name="table"></a>
 Functions used to display results in a tabular fashion.
 	
 	 # ::create() #
@@ -63,7 +77,7 @@ Functions used to display results in a tabular fashion.
 	 Draws a single table cell, if multiple arguments are passed, draws each one in a new cell.
 	 Accepts any type with a defined "<<" ostream operator.
 	
-### utl::timer::
+### utl::timer:: <a name="timer"></a>
 Global-state timer with built-in formatting. Functions for local date and time.
 	
 	 # ::start() #
@@ -86,7 +100,7 @@ Global-state timer with built-in formatting. Functions for local date and time.
 	 Current local date and time in format "%y-%m-%d-%H-%M-%S".
 	 Less readable that usual format, but can be used in filenames which prohibit ":" usage.
 	
-### utl::sleep::
+### utl::sleep:: <a name="sleep"></a>
 Various implementation of sleep(), used for precise delays.
 	
 	 # ::spinlock() #
@@ -103,7 +117,7 @@ Various implementation of sleep(), used for precise delays.
 	 Worst precision, frees CPU.
 	 Expected error: ~10-20 ms
 
-### utl::random::
+### utl::random:: <a name="random"></a>
 Various convenient random functions, utilizes rand() internally.
 If good quality random is necessary use std::random generators instead.
 	
@@ -121,7 +135,7 @@ If good quality random is necessary use std::random generators instead.
 	 Produces "c A + (1-c) B" with random "0 < c < 1" assuming objects "A", "B" support arithmetic operations.
 	 Useful for vector and color operations.
 
-### utl::math::
+### utl::math:: <a name="math"></a>
 Coordinate transformations, mathematical constans and helper functions.
 	 
 	 # ::abs(), ::sign(), ::sqr(), ::cube(), deg_to_rad(), rad_to_deg() #
@@ -132,28 +146,28 @@ Coordinate transformations, mathematical constans and helper functions.
 		
 
 
-## Work in progress
+## Work in progress <a name="work_in_progress"></a>
 
-* "utl::'shell'::" module that allows cross-platform access to command line commants;
+* "utl::&#8203shell::" module that allows cross-platform access to command line commants;
 * Coordinate transformation function in "utl::math::";
 * Bitselect adn branchless ternary in "utl::math::";
 
 
 
-## Requirements
+## Requirements <a name="requirements"></a>
 
 * Requires C++17 support;
 * Some modules require POSIX-compliant system (Linux) or Windows.
 
 
 
-## Version history
+## Version history <a name="version_history"></a>
 
 * 00.01
     * Uploaded initial draft with "voidstream", "argcv", "table", "timer", "sleep", "random" and "math" modules.
 
 
 
-## License
+## License <a name="license"></a>
 
 This project is licensed under the MIT License - see the LICENSE.md file for details
