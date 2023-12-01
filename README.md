@@ -42,17 +42,6 @@ Parsers that convert argc, argv[] to std::string.
 	 Parses command line arguments from argcv as std::string or std::string_view.
 	 Views have lower overhead, but keep pointers to original data.
 	
-### utl::argcv::
-Parsers that convert argc, argv[] to std::string.
-	
-	 # ::exe_path(), ::exe_path_view() #
-	 Parses executable path from argcv as std::string or std::string_view.
-	 Views have lower overhead, but keep pointers to original data.
-	
-	 # ::command_line_args(), ::command_line_args_view() #
-	 Parses command line arguments from argcv as std::string or std::string_view.
-	 Views have lower overhead, but keep pointers to original data.
-	
 ### utl::table::
 Functions used to display results in a tabular fashion.
 	
@@ -145,7 +134,7 @@ Coordinate transformations, mathematical constans and helper functions.
 
 ## Work in progress
 
-* "utl::shell::" module that allows cross-platform access to command line commants;
+* "utl::'shell'::" module that allows cross-platform access to command line commants;
 * Coordinate transformation function in "utl::math::";
 * Bitselect adn branchless ternary in "utl::math::";
 
