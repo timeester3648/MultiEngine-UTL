@@ -2,23 +2,28 @@
 
 This is a collection of various utilities that aim to provide a set of concise "helpers" that allow prototying with minimal boilerplate. Most of the following modules were created during my work in gamedev and university projects.
 
-1. [design_principles](#design_principles)
-2. [modules](#modules)
-    1. [voidstream](#voidstream)
-    2. [argcv](#argcv)
-    3. [table](#table)
-    4. [timer](#timer)
-    5. [sleep](#sleep)
-    6. [random](#random)
-    7. [math](#math)
-3. [work_in_progress](#work_in_progress)
-4. [requirements](#requirements)
-5. [version_history](#version_history)
-6. [license](#license)
+<!-- TOC start -->
+
+- [Design principles](#design-principles)
+- [Modules](#modules)
+   * [utl::voidstream::](#utlvoidstream)
+   * [utl::argcv::](#utlargcv)
+   * [utl::table::](#utltable)
+   * [utl::timer::](#utltimer)
+   * [utl::sleep::](#utlsleep)
+   * [utl::random::](#utlrandom)
+   * [utl::math::](#utlmath)
+- [Work in progress](#work-in-progress)
+- [Requirements](#requirements)
+- [Version history](#version-history)
+- [License](#license)
+
+<!-- TOC end -->
 
 
 
-## Design principles <a name="design_principles"></a>
+<!-- TOC --><a name="design-principles"></a>
+## Design principles
 
 * Library should be header only;
 * Each module should be self-contained and reside in a separate namespace;
@@ -30,9 +35,11 @@ This is a collection of various utilities that aim to provide a set of concise "
 
 
 
-## Modules <a name="modules"></a>
+<!-- TOC --><a name="modules"></a>
+## Modules
 
-### utl::voidstream:: <a name="voidstream"></a>
+<!-- TOC --><a name="utlvoidstream"></a>
+### utl::voidstream::
 "voidstream" that functions like std::ostream with no output.
 Can be passed to interfaces that use streams to silence their output.
 	
@@ -45,7 +52,8 @@ Can be passed to interfaces that use streams to silence their output.
 	 Output stream that produces no output, usage example:
 	    > vout << VALUE; // produces nothing
 	
-### utl::argcv:: <a name="argcv"></a>
+<!-- TOC --><a name="utlargcv"></a>
+### utl::argcv::
 Parsers that convert argc, argv[] to std::string.
 	
 	 # ::exe_path(), ::exe_path_view() #
@@ -56,7 +64,8 @@ Parsers that convert argc, argv[] to std::string.
 	 Parses command line arguments from argcv as std::string or std::string_view.
 	 Views have lower overhead, but keep pointers to original data.
 	
-### utl::table:: <a name="table"></a>
+<!-- TOC --><a name="utltable"></a>
+### utl::table::
 Functions used to display results in a tabular fashion.
 	
 	 # ::create() #
@@ -77,7 +86,8 @@ Functions used to display results in a tabular fashion.
 	 Draws a single table cell, if multiple arguments are passed, draws each one in a new cell.
 	 Accepts any type with a defined "<<" ostream operator.
 	
-### utl::timer:: <a name="timer"></a>
+<!-- TOC --><a name="utltimer"></a>
+### utl::timer::
 Global-state timer with built-in formatting. Functions for local date and time.
 	
 	 # ::start() #
@@ -100,7 +110,8 @@ Global-state timer with built-in formatting. Functions for local date and time.
 	 Current local date and time in format "%y-%m-%d-%H-%M-%S".
 	 Less readable that usual format, but can be used in filenames which prohibit ":" usage.
 	
-### utl::sleep:: <a name="sleep"></a>
+<!-- TOC --><a name="utlsleep"></a>
+### utl::sleep::
 Various implementation of sleep(), used for precise delays.
 	
 	 # ::spinlock() #
@@ -117,7 +128,8 @@ Various implementation of sleep(), used for precise delays.
 	 Worst precision, frees CPU.
 	 Expected error: ~10-20 ms
 
-### utl::random:: <a name="random"></a>
+<!-- TOC --><a name="utlrandom"></a>
+### utl::random::
 Various convenient random functions, utilizes rand() internally.
 If good quality random is necessary use std::random generators instead.
 	
@@ -135,7 +147,8 @@ If good quality random is necessary use std::random generators instead.
 	 Produces "c A + (1-c) B" with random "0 < c < 1" assuming objects "A", "B" support arithmetic operations.
 	 Useful for vector and color operations.
 
-### utl::math:: <a name="math"></a>
+<!-- TOC --><a name="utlmath"></a>
+### utl::math::
 Coordinate transformations, mathematical constans and helper functions.
 	 
 	 # ::abs(), ::sign(), ::sqr(), ::cube(), deg_to_rad(), rad_to_deg() #
@@ -146,28 +159,32 @@ Coordinate transformations, mathematical constans and helper functions.
 		
 
 
-## Work in progress <a name="work_in_progress"></a>
+<!-- TOC --><a name="work-in-progress"></a>
+## Work in progress
 
-* "utl::&#8203shell::" module that allows cross-platform access to command line commants;
+* "utl::`shell`::" module that allows cross-platform access to command line commants;
 * Coordinate transformation function in "utl::math::";
 * Bitselect adn branchless ternary in "utl::math::";
 
 
 
-## Requirements <a name="requirements"></a>
+<!-- TOC --><a name="requirements"></a>
+## Requirements
 
 * Requires C++17 support;
 * Some modules require POSIX-compliant system (Linux) or Windows.
 
 
 
-## Version history <a name="version_history"></a>
+<!-- TOC --><a name="version-history"></a>
+## Version history
 
 * 00.01
     * Uploaded initial draft with "voidstream", "argcv", "table", "timer", "sleep", "random" and "math" modules.
 
 
 
-## License <a name="license"></a>
+<!-- TOC --><a name="license"></a>
+## License
 
 This project is licensed under the MIT License - see the LICENSE.md file for details
