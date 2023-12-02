@@ -10,6 +10,7 @@
 #define UTL_SLEEP
 #define UTL_RANDOM
 #define UTL_MATH
+#define UTL_SHELL
 
 
 
@@ -19,24 +20,25 @@
 #endif
 
 #ifdef UTL_ARGCV
-#include <vector>
 #include <string>
 #include <string_view>
+#include <vector>
 #endif
 
 #ifdef UTL_TABLE
-#include <ios>
-#include <iostream>
-#include <iomanip>
 #include <functional>
 #include <initializer_list>
+#include <iomanip>
+#include <ios>
+#include <iostream>
 #include <string>
+#include <vector>
 #endif
 
 #ifdef UTL_TIMER
-#include <iostream>
 #include <chrono>
 #include <ctime>
+#include <iostream>
 #include <string>
 #endif
 
@@ -54,6 +56,16 @@
 #include <type_traits>
 #endif
 
+#ifdef UTL_SHELL
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <ostream>
+#include <sstream>
+#include <string>
+#include <unordered_set>
+#endif
+
 #ifdef _MSC_VER
 #pragma warning(disable : 4996) //_CRT_SECURE_NO_WARNINGS
 	// Disables MSVC requiring "safe" versions of localtime() instead of standard ones
@@ -65,19 +77,20 @@ namespace utl {
 
 
 
-	 // ### utl::voidstream:: ###
-	 // "voidstream" that functions like std::ostream with no output.
-	 // Can be passed to interfaces that use streams to silence their output.
-	
-	 // # ::vstreambuf #
-	 // Stream buffer that overflows with no output, usage example:
-	 //   > std::ofstream output_stream(&vstreambuf);
-	 //   > output_stream << VALUE; // produces nothing
-	
-	 //# ::vout #
-	 //Output stream that produces no output, usage example:
-	 //   > vout << VALUE; // produces nothing
-	
+	// ### utl::voidstream:: ###
+	// "voidstream" that functions like std::ostream with no output.
+	// Can be passed to interfaces that use streams to silence their output.
+	//
+	// # ::vstreambuf #
+	// Stream buffer that overflows with no output, usage example:
+	//   > std::ofstream output_stream(&vstreambuf);
+	//   > output_stream << VALUE; // produces nothing
+	//
+	// # ::vout #
+	// Output stream that produces no output, usage example:
+	//   > vout << VALUE; // produces nothing
+	//
+	#ifdef UTL_VOIDSTREAM
 	namespace voidstream {
 
 		class VoidStreamBuf : public std::streambuf {
@@ -95,6 +108,7 @@ namespace utl {
 		inline VoidStreamBuf vstreambuf;
 		inline VoidStream vout;
 	}
+	#endif
 
 
 
@@ -109,8 +123,12 @@ namespace utl {
 	// Parses command line arguments from argcv as std::string or std::string_view.
 	// Views have lower overhead, but keep pointers to original data.
 	//
+	#ifdef UTL_ARGCV
 	namespace argcv {
 		inline std::string exe_path(char** argv) {
+			// argc == 1 is a reasonable assumption since the only way to achieve such launch
+			// is to run executable through a null-execv, most command-line programms assume
+			// such scenario to be either impossible or an error on user side
 			return std::string(argv[0]);
 		}
 
@@ -130,6 +148,7 @@ namespace utl {
 			return arguments;
 		}
 	}
+	#endif
 
 
 
@@ -154,6 +173,7 @@ namespace utl {
 	// Draws a single table cell, if multiple arguments are passed, draws each one in a new cell.
 	// Accepts any type with a defined "<<" ostream operator.
 	//
+	#ifdef UTL_TABLE
 	namespace table {
 		// Types
 		using _uint = std::streamsize;
@@ -242,6 +262,7 @@ namespace utl {
 			_output_stream.get() << "\n";
 		}
 	}
+	#endif
 
 
 
@@ -268,6 +289,7 @@ namespace utl {
 	// Current local date and time in format "%y-%m-%d-%H-%M-%S".
 	// Less readable that usual format, but can be used in filenames which prohibit ":" usage.
 	//
+	#ifdef UTL_TIMER
 	namespace timer {
 		using _clock = std::chrono::steady_clock;
 
@@ -339,6 +361,7 @@ namespace utl {
 			return std::string(mbstr);
 		}
 	}
+	#endif
 
 
 
@@ -358,6 +381,8 @@ namespace utl {
 	// # ::system() #
 	// Worst precision, frees CPU.
 	// Expected error: ~10-20 ms
+	//
+	#ifdef UTL_SLEEP
 	namespace sleep {
 		using _clock = std::chrono::steady_clock;
 		using _chrono_ns = std::chrono::nanoseconds;
@@ -404,8 +429,9 @@ namespace utl {
 			std::this_thread::sleep_for(_chrono_ns(static_cast<int64_t>(ms * 1e6)));
 		}
 	}
-
+	#endif
 	
+
 
 	// ### utl::random:: ###
 	// Various convenient random functions, utilizes rand() internally.
@@ -425,6 +451,7 @@ namespace utl {
 	// Produces "c A + (1-c) B" with random "0 < c < 1" assuming objects "A", "B" support arithmetic operations.
 	// Useful for vector and color operations.
 	//
+	#ifdef UTL_RANDOM
 	namespace random {
 
 		inline void seed(unsigned int random_seed) { srand(random_seed); }
@@ -452,18 +479,28 @@ namespace utl {
 			return A * coef + B * (1. - coef);
 		}
 	}
+	#endif
 
 
 
 	// ### utl::math:: ###
 	// Coordinate transformations, mathematical constans and helper functions.
 	// 
-	// # ::abs(), ::sign(), ::sqr(), ::cube(), deg_to_rad(), rad_to_deg() #
-	// Constexpr templated functions, useful when writing expressions with a "textbook form" math.
+	// # ::abs(), ::sign(), ::sqr(), ::cube(), ::midpoint(), deg_to_rad(), rad_to_deg() #
+	// Constexpr templated math functions, useful when writing expressions with a "textbook form" math.
 	//
 	// # ::uint_difference() #
 	// Returns abs(uint - uint) with respect to uint size and possible overflow.
 	//
+	// # ::ternary_branchless() #
+	// Branchless ternary operator. Slightly slower that regular ternary on most CPUs.
+	// Should not be used unless branchess qualifier is necessary (like in GPU computation).
+	//
+	// # ::ternary_bitselect() #
+	// Faster branchless ternary for integer types.
+	// If 2nd return is ommited, 0 is assumed, which allows for significant optimization.
+	//
+	#ifdef UTL_MATH
 	namespace math {
 		// Constants
 		constexpr double PI = 3.14159265358979323846;
@@ -486,6 +523,9 @@ namespace utl {
 		constexpr Type cube(Type x) { return x * x * x; }
 
 		template<typename Type, typename = std::enable_if_t<std::is_floating_point<Type>::value>>
+		constexpr Type midpoint(Type a, Type b) { return (a + b) * Type(0.5); }
+
+		template<typename Type, typename = std::enable_if_t<std::is_floating_point<Type>::value>>
 		constexpr Type deg_to_rad(Type degrees) {
 			constexpr Type FACTOR = Type(PI / 180.);
 			return degrees * FACTOR;
@@ -504,5 +544,134 @@ namespace utl {
 
 			return static_cast<UintType>(utl::math::abs(static_cast<WiderIntType>(a) - static_cast<WiderIntType>(b)));
 		}
+
+		// Branchless ternary
+		template<typename Type, typename = std::enable_if_t<std::is_arithmetic<Type>::value>>
+		constexpr Type ternary_branchless(bool condition, Type return_if_true, Type return_if_false) {
+			return (condition * return_if_true) + (!condition * return_if_false);
+		}
+
+		template<typename IntType, typename = std::enable_if_t<std::is_integral<IntType>::value>>
+		constexpr IntType ternary_bitselect(bool condition, IntType return_if_true, IntType return_if_false) {
+			return (return_if_true & -IntType(condition)) | (return_if_false & ~(-IntType(condition)));
+		}
+
+		template<typename IntType, typename = std::enable_if_t<std::is_integral<IntType>::value>>
+		constexpr IntType ternary_bitselect(bool condition, IntType return_if_true) {
+			return return_if_true & -IntType(condition);
+		}
+
 	}
+	#endif
+
+
+
+	// ### utl::shell:: ###
+	// Command line utils that allow simple creation of temporary files and command line
+	// calls with stdout and stderr piping (a task surprisingly untrivial in standard C++).
+	//
+	// # ::random_ascii_string() #
+	// Creates random ASCII string of given length.
+	// Uses chars in ['a', 'z'] range.
+	//
+	// # ::generate_temp_file() #
+	// Generates temporary .txt file with a random unique name, and returns it's filepath.
+	// Files generated during current runtime can be deleted with ::clear_temp_files().
+	// Uses relative path internally.
+	//
+	// # ::clear_temp_files() #
+	// Clears temporary files generated during current runtime.
+	//
+	// # ::erase_temp_file() #
+	// Clears a single temporary file with given filepath.
+	//
+	// # ::run_command() #
+	// Runs a command using the default system shell.
+	// Returns piped status (error code), stdout and stderr.
+	//
+	#ifdef UTL_SHELL
+	namespace shell {
+		// Types
+		struct CommandResult {
+			int status; // error code
+			std::string stdout_output;
+			std::string stderr_output;
+		};
+
+		// Internal state
+		inline std::unordered_set<std::string> _temp_files; // currently existing temp files
+
+		// File operations
+		inline std::string random_ascii_string(size_t length) {
+			constexpr char min_char = 'a';
+			constexpr char max_char = 'z';
+
+			std::string result(length, '0');
+			for (size_t i = 0; i < length; ++i) result[i] = static_cast<char>(min_char + rand() % (max_char - min_char + 1));
+			return result;
+		}
+
+		inline std::string generate_temp_file() {
+			constexpr size_t MAX_ATTEMPTS = 500; // shouldn't realistically be encountered but still
+			constexpr size_t NAME_LENGTH = 30;
+
+			// Try creating files until unique name is found
+			for (size_t i = 0; i < MAX_ATTEMPTS; ++i) {
+				const std::filesystem::path temp_path(random_ascii_string(NAME_LENGTH) + ".txt");
+
+				if (std::filesystem::exists(temp_path)) continue;
+
+				const std::ofstream temp_file(temp_path);
+
+				if (temp_file.good()) {
+					_temp_files.insert(temp_path.string());
+					return temp_path.string();
+				}
+				else {
+					return std::string();
+				}
+				
+			}
+
+			return std::string();
+		}
+
+		inline void clear_temp_files() {
+			for (const auto &file : _temp_files) std::filesystem::remove(file);
+			_temp_files.clear();
+		}
+
+		inline void erase_temp_file(const std::string &file) {
+			std::filesystem::remove(file);
+			_temp_files.erase(file);
+		}
+
+		// Command line operations
+		inline CommandResult run_command(const std::string &command) {
+			const auto stdout_file = utl::shell::generate_temp_file();
+			const auto stderr_file = utl::shell::generate_temp_file();
+
+			// Redirect stdout and stderr of the command to temporary files
+			std::ostringstream ss;
+			ss << command.c_str() << " >" << stdout_file << " 2>" << stderr_file;
+			const std::string modified_command = ss.str();
+
+			// Call command
+			const auto status = std::system(modified_command.c_str());
+
+			// Read stdout and stderr from temp files and remove them
+			std::ostringstream stdout_stream;
+			std::ostringstream stderr_stream;
+			stdout_stream << std::ifstream(stdout_file).rdbuf();
+			stderr_stream << std::ifstream(stderr_file).rdbuf();
+			utl::shell::erase_temp_file(stdout_file);
+			utl::shell::erase_temp_file(stderr_file);
+
+			// Return
+			CommandResult result = { status, stdout_stream.str(), stderr_stream.str() };
+
+			return result;
+		}
+	}
+	#endif
 }

@@ -1,4 +1,4 @@
-#include "dmb_utils.h"
+#include "proto_utils.hpp"
 
 #include <iostream>
 
@@ -49,8 +49,8 @@ int main(int argc, char* argv[]) {
 	// ### utl::sleep:: ##
 	std::cout << "\n\n### utl::sleep:: ###\n\n";
 
-	const int repeats = 6;
-	const auto sleep_duration_ms = 16.67;
+	constexpr int repeats = 6;
+	constexpr auto sleep_duration_ms = 16.67;
 
 	std::cout << "Sleeping for " << sleep_duration_ms << " ms.\n";
 
@@ -129,9 +129,37 @@ int main(int argc, char* argv[]) {
 		<< "rad_to_deg(PI) = " << math::rad_to_deg(math::PI) << "\n"
 		<< "\n"
 		<< "uint_difference(uint - uint) with respect to unsigned overflow:\n"
-		<< "uint_difference(5u, 17u) = " << math::uint_difference(5u, 17u) << "\n";
+		<< "uint_difference(5u, 17u) = " << math::uint_difference(5u, 17u) << "\n"
+		<< "\n"
+		<< "ternary_branchless(true, 3.12, -4.17) = " << math::ternary_branchless(true, 3.12, -4.17) << "\n"
+		<< "ternary_bitselect(true, 15, -5) = " << math::ternary_bitselect(true, 15, -5) << "\n"
+		<< "ternary_bitselect(false, 15) = " << math::ternary_bitselect(false, 15) << "\n";
 
 	
+
+	// ### utl::shell:: ###
+	std::cout << "\n\n### utl::shell:: ###\n\n";
+
+	std::cout
+		<< "random_ascii_string(20) = " << shell::random_ascii_string(20) << "\n"
+		<< "\n";
+
+	std::cout << "Generate temp file and fill it with text:\n";
+	const auto temp_file_path = shell::generate_temp_file();
+	std::ofstream(temp_file_path) << "~~~FILE CONTENT~~~";
+	std::cout << "generate_temp_file(): " << temp_file_path << "\n\n";
+
+	std::cout << "Run command to show file contents, this example assumes windows:\n";
+	const auto command_result = shell::run_command("type " + temp_file_path);
+	std::cout
+		<< "shell::run_command(\"type \" + <temp_file_path>)" << "\n"
+		<< "command_result.status = " << command_result.status << "\n"
+		<< "command_result.stdout_output = " << command_result.stdout_output << "\n"
+		<< "command_result.stderr_output = " << command_result.stderr_output << "\n";
+
+	shell::clear_temp_files();
+
+
 
 	// ### utl::timer:: ###
 	std::cout << "\n\n### utl::timer:: ###\n\n";

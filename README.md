@@ -13,6 +13,7 @@ This is a collection of various utilities that aim to provide a set of concise "
    * [utl::sleep::](#utlsleep)
    * [utl::random::](#utlrandom)
    * [utl::math::](#utlmath)
+   * [utl::shell::](#utlshell)
 - [Work in progress](#work-in-progress)
 - [Requirements](#requirements)
 - [Version history](#version-history)
@@ -26,6 +27,7 @@ This is a collection of various utilities that aim to provide a set of concise "
 ## Design principles
 
 * Library should be header only;
+* Library should be portable (Windows, Linux);
 * Each module should be self-contained and reside in a separate namespace;
 * Each module should toggleable through a define;
 * Boilerplate code on user side should be minimal;
@@ -148,23 +150,54 @@ If good quality random is necessary use std::random generators instead.
 	 Useful for vector and color operations.
 
 <!-- TOC --><a name="utlmath"></a>
-### utl::math::
+### utl::math:: ###
 Coordinate transformations, mathematical constans and helper functions.
 	 
-	 # ::abs(), ::sign(), ::sqr(), ::cube(), deg_to_rad(), rad_to_deg() #
-	 Constexpr templated functions, useful when writing expressions with a "textbook form" math.
+	 # ::abs(), ::sign(), ::sqr(), ::cube(), ::midpoint(), deg_to_rad(), rad_to_deg() #
+	 Constexpr templated math functions, useful when writing expressions with a "textbook form" math.
 	
 	 # ::uint_difference() #
 	 Returns abs(uint - uint) with respect to uint size and possible overflow.
+	
+	 # ::ternary_branchless() #
+	 Branchless ternary operator. Slightly slower that regular ternary on most CPUs.
+	 Should not be used unless branchess qualifier is necessary (like in GPU computation).
+	
+	 # ::ternary_bitselect() #
+	 Faster branchless ternary for integer types.
+	 If 2nd return is ommited, 0 is assumed, which allows for significant optimization.
+
+<!-- TOC --><a name="utlshell"></a>
+### utl::<wbr>shell::
+Command line utils that allow simple creation of temporary files and command line
+calls with stdout and stderr piping (a task surprisingly untrivial in standard C++).
+	
+	 # ::random_ascii_string() #
+	 Creates random ASCII string of given length.
+	 Uses chars in ['a', 'z'] range.
+	
+	 # ::generate_temp_file() #
+	 Generates temporary .txt file with a random unique name, and returns it's filepath.
+	 Files generated during current runtime can be deleted with ::clear_temp_files().
+	 Uses relative path internally.
+	
+	 # ::clear_temp_files() #
+	 Clears temporary files generated during current runtime.
+	
+	 # ::erase_temp_file() #
+	 Clears a single temporary file with given filepath.
+	
+	 # ::run_command() #
+	 Runs a command using the default system shell.
+	 Returns piped status (error code), stdout and stderr.
 		
 
 
 <!-- TOC --><a name="work-in-progress"></a>
 ## Work in progress
 
-* "utl::`shell`::" module that allows cross-platform access to command line commands;
 * Coordinate transformation function in "utl::math::";
-* Bitselect and branchless ternary in "utl::math::";
+* Compile time function that abstract away common compiler-specific defines.
 
 
 
@@ -178,6 +211,10 @@ Coordinate transformations, mathematical constans and helper functions.
 
 <!-- TOC --><a name="version-history"></a>
 ## Version history
+
+* 00.03
+    * Added utl::<wbr>shell module;
+    * Added mindpoint(), ternary_branchess() and ternary_bitselect() to utl::math.
 
 * 00.02
     * Finished initial draft documentation.
