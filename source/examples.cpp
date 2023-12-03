@@ -1,6 +1,9 @@
 #include "proto_utils.hpp"
 
 #include <iostream>
+#include <unordered_map>
+#include <tuple>
+
 
 
 int main(int argc, char* argv[]) {
@@ -159,6 +162,32 @@ int main(int argc, char* argv[]) {
 
 	shell::clear_temp_files();
 
+	// ### utl::stre:: ###
+	std::cout << "\n\n### utl::stre:: ###\n\n";
+
+	std::cout
+		<< "Some extensions of <type_traits> integrals consts:\n"
+		<< std::boolalpha
+		<< "is_printable<int>::value = " << stre::is_printable<int>::value << "\n"
+		<< "is_const_iterable_through<std::list<int>>::value = " << stre::is_const_iterable_through<std::list<int>>::value << "\n"
+		<< "is_tuple_like<std::string>::value = " << stre::is_tuple_like<std::string>::value << "\n"
+		<< "is_string<const char*>::value = " << stre::is_string<const char*>::value << "\n"
+		<< "is_to_str_convertible<std::vector<int>>::value = " << stre::is_to_str_convertible<std::vector<int>>::value << "\n"
+		<< "\n";
+
+	const std::tuple<int, double, std::string> tup = { 2, 3.14, "text" };
+	const std::vector<std::vector<int>> vec_of_vecs = { {1, 2, 3}, {4, 5, 6}, {7, 8, 9} };
+	const std::unordered_map<std::string, int> map = { {"key_1", 1}, {"key_2", 2} };
+	const std::tuple<std::vector<bool>, std::vector<std::string>, std::vector<std::pair<int, int>>> tup_of_vecs =
+		{ { true, false, false, true }, { "text_1", "text_2" }, { {4, 5}, {7, 8} } };
+
+	std::cout
+		<< "Behold joys of recursive template instantiation:\n"
+		<< "to_str(tuple) = " << stre::to_str(tup) << "\n"
+		<< "to_str(vector of vectors) = " << stre::to_str(vec_of_vecs) << "\n"
+		<< "to_str(unordered_map) = " << stre::to_str(map) << "\n"
+		<< "to_str(tuple of vectors with bools, strings and pairs) = " << stre::to_str(tup_of_vecs) << "\n";
+
 
 
 	// ### utl::timer:: ###
@@ -175,8 +204,6 @@ int main(int argc, char* argv[]) {
 		<< timer::elapsed_string_min() << "\n"
 		<< timer::elapsed_string_hours() << "\n"
 		<< timer::elapsed_string_fullform() << "\n";
-
-
 
 	return 0;
 }

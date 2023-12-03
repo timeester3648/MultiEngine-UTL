@@ -11,6 +11,7 @@
 #define UTL_RANDOM
 #define UTL_MATH
 #define UTL_SHELL
+#define UTL_STRE
 
 
 
@@ -44,6 +45,7 @@
 
 #ifdef UTL_SLEEP
 #include <chrono>
+#include <cmath>
 #include <thread>
 #endif
 
@@ -64,6 +66,13 @@
 #include <sstream>
 #include <string>
 #include <unordered_set>
+#endif
+
+#ifdef UTL_STRE
+#include <sstream>
+#include <string>
+#include <type_traits>
+#include <utility>
 #endif
 
 #ifdef _MSC_VER
@@ -292,6 +301,9 @@ namespace utl {
 	#ifdef UTL_TIMER
 	namespace timer {
 		using _clock = std::chrono::steady_clock;
+		using _chrono_ns = std::chrono::nanoseconds;
+
+		constexpr double NS_IN_MS = 1e6;
 
 		constexpr long long MS_IN_SEC = 1000;
 		constexpr long long MS_IN_MIN = 60 * MS_IN_SEC;
@@ -299,17 +311,20 @@ namespace utl {
 
 		inline _clock::time_point _start_timepoint;
 
-		void start() {
+		inline void start() {
 			_start_timepoint = _clock::now();
 		}
 
-		long long _elapsed_time_as_ms() { return std::chrono::duration_cast<std::chrono::milliseconds>(_clock::now() - _start_timepoint).count(); }
+		inline double _elapsed_time_as_ms() {
+			const auto elapsed = std::chrono::duration_cast<_chrono_ns>(_clock::now() - _start_timepoint).count();
+			return static_cast<double>(elapsed) / NS_IN_MS;
+		}
 
 		// Elapsed time
-		double elapsed_ms() { return static_cast<double>(_elapsed_time_as_ms()); }
-		double elapsed_sec() { return static_cast<double>(_elapsed_time_as_ms()) / MS_IN_SEC; }
-		double elapsed_min() { return static_cast<double>(_elapsed_time_as_ms()) / MS_IN_MIN; }
-		double elapsed_hours() { return static_cast<double>(_elapsed_time_as_ms()) / MS_IN_HOUR; }
+		double elapsed_ms() { return _elapsed_time_as_ms(); }
+		double elapsed_sec() { return _elapsed_time_as_ms() / static_cast<double>(MS_IN_SEC); }
+		double elapsed_min() { return _elapsed_time_as_ms() / static_cast<double>(MS_IN_MIN); }
+		double elapsed_hours() { return _elapsed_time_as_ms() / static_cast<double>(MS_IN_HOUR); }
 
 		// Elapsed string
 		std::string elapsed_string_ms() { return std::to_string(elapsed_ms()) + " ms"; }
@@ -319,7 +334,7 @@ namespace utl {
 
 		// Full form
 		std::string elapsed_string_fullform() {
-			long long unaccounted_ms = _elapsed_time_as_ms();
+			long long unaccounted_ms = static_cast<long long>(_elapsed_time_as_ms());
 
 			long long ms = 0;
 			long long min = 0;
@@ -416,7 +431,7 @@ namespace utl {
 				const double delta = observed - mean;
 				mean += delta / count;
 				m2 += delta * (observed - mean); // intermediate values 'm2' reduce numerical instability
-				const double variance = sqrt(m2 / (count - 1));
+				const double variance = std::sqrt(m2 / (count - 1));
 
 				estimate = mean + variance; // set estimate 1 standard deviation above the mean
 				// can be adjusted to make estimate more or less pessimistic
@@ -460,10 +475,10 @@ namespace utl {
 		inline int rand_int(int min, int max) { return min + rand() % (max - min + 1); }
 		inline int rand_uint(unsigned int min, unsigned int max) { return min + static_cast<unsigned int>(rand()) % (max - min + 1u); }
 
-		inline float rand_float() { return rand() / (RAND_MAX + 1.f); }
+		inline float rand_float() { return rand() / (static_cast<float>(RAND_MAX) + 1.f); }
 		inline float rand_float(float min, float max) { return min + (max - min) * rand_float(); }
 
-		inline double rand_double() { return rand() / (RAND_MAX + 1.); }
+		inline double rand_double() { return rand() / (static_cast<double>(RAND_MAX) + 1.); }
 		inline double rand_double(double min, double max) { return min + (max - min) * rand_double(); }
 
 		inline bool rand_bool() { return static_cast<bool>(rand() % 2); }
@@ -510,34 +525,34 @@ namespace utl {
 		constexpr double GOLDEN_RATIO = 1.6180339887498948482;
 
 		// Convenience functions
-		template<typename Type, typename = std::enable_if_t<std::is_scalar<Type>::value>>
+		template<typename Type, std::enable_if_t<std::is_scalar<Type>::value, bool> = true>
 		constexpr Type abs(Type x) { return (x > Type(0)) ? x : -x; }
 
-		template<typename Type, typename = std::enable_if_t<std::is_scalar<Type>::value>>
+		template<typename Type, std::enable_if_t<std::is_scalar<Type>::value, bool> = true>
 		constexpr Type sign(Type x) { return (x > Type(0)) ? Type(1) : Type(-1); }
 
-		template<typename Type, typename = std::enable_if_t<std::is_arithmetic<Type>::value>>
+		template<typename Type, std::enable_if_t<std::is_arithmetic<Type>::value, bool> = true>
 		constexpr Type sqr(Type x) { return x * x; }
 
-		template<typename Type, typename = std::enable_if_t<std::is_arithmetic<Type>::value>>
+		template<typename Type, std::enable_if_t<std::is_arithmetic<Type>::value, bool> = true>
 		constexpr Type cube(Type x) { return x * x * x; }
 
-		template<typename Type, typename = std::enable_if_t<std::is_floating_point<Type>::value>>
+		template<typename Type, std::enable_if_t<std::is_floating_point<Type>::value, bool> = true>
 		constexpr Type midpoint(Type a, Type b) { return (a + b) * Type(0.5); }
 
-		template<typename Type, typename = std::enable_if_t<std::is_floating_point<Type>::value>>
+		template<typename Type, std::enable_if_t<std::is_floating_point<Type>::value, bool> = true>
 		constexpr Type deg_to_rad(Type degrees) {
 			constexpr Type FACTOR = Type(PI / 180.);
 			return degrees * FACTOR;
 		}
 
-		template<typename Type, typename = std::enable_if_t<std::is_floating_point<Type>::value>>
+		template<typename Type, std::enable_if_t<std::is_floating_point<Type>::value, bool> = true>
 		constexpr Type rad_to_deg(Type radians) {
 			constexpr Type FACTOR = Type(180. / PI);
 			return radians * FACTOR;
 		}
 
-		template<typename UintType, typename = std::enable_if_t<std::is_integral<UintType>::value>>
+		template<typename UintType, std::enable_if_t<std::is_integral<UintType>::value, bool> = true>
 		constexpr UintType uint_difference(UintType a, UintType b) {
 			// Cast to widest type if there is a change values don't fit into a regular 'int'
 			using WiderIntType = std::conditional_t<(sizeof(UintType) >= sizeof(int)), int64_t, int>;
@@ -546,17 +561,17 @@ namespace utl {
 		}
 
 		// Branchless ternary
-		template<typename Type, typename = std::enable_if_t<std::is_arithmetic<Type>::value>>
+		template<typename Type, std::enable_if_t<std::is_arithmetic<Type>::value, bool> = true>
 		constexpr Type ternary_branchless(bool condition, Type return_if_true, Type return_if_false) {
 			return (condition * return_if_true) + (!condition * return_if_false);
 		}
 
-		template<typename IntType, typename = std::enable_if_t<std::is_integral<IntType>::value>>
+		template<typename IntType, std::enable_if_t<std::is_integral<IntType>::value, bool> = true>
 		constexpr IntType ternary_bitselect(bool condition, IntType return_if_true, IntType return_if_false) {
 			return (return_if_true & -IntType(condition)) | (return_if_false & ~(-IntType(condition)));
 		}
 
-		template<typename IntType, typename = std::enable_if_t<std::is_integral<IntType>::value>>
+		template<typename IntType, std::enable_if_t<std::is_integral<IntType>::value, bool> = true>
 		constexpr IntType ternary_bitselect(bool condition, IntType return_if_true) {
 			return return_if_true & -IntType(condition);
 		}
@@ -672,6 +687,217 @@ namespace utl {
 
 			return result;
 		}
+	}
+	#endif
+
+
+
+	// ### utl::stre:: ###
+	// String extensions, mainly a template ::to_str() method which works with all STL containers,
+	// including maps, sets and tuples with any level of mutual nesting. Also includes some
+	// expansions of <type_traits> header that allow categorizing types at compile-time.
+	//
+	// # ::is_printable<Type> #
+	// Integral constant, returns in "::value" whether Type can be printed through std::cout.
+	// Criteria: Existance of operator 'ANY_TYPE operator<<(std::ostream&, Type&)'
+	//
+	// # ::is_iterable_through<Type> #
+	// Integral constant, returns in "::value" whether Type can be iterated through.
+	// Criteria: Existance of .begin() and .end() with applicable operator()++
+	//
+	// # ::is_const_iterable_through<Type> #
+	// Integral constant, returns in "::value" whether Type can be const-iterated through.
+	// Criteria: Existance of .cbegin() and .cend() with applicable operator()++
+	//
+	// # ::is_tuple_like<Type> #
+	// Integral constant, returns in "::value" whether Type has a tuple-like structure.
+	// Tuple-like structure include std::tuple, std::pair, std::array, std::ranges::subrange (since C++20)
+	// Criteria: Existance of applicable std::get<0>() and std::tuple_size()
+	//
+	// # ::is_string<Type> #
+	// Integral constant, returns in "::value" whether Type is a char string.
+	// Criteria: Type can be decayed to std::string or a char* pointer
+	//
+	// # ::is_to_str_convertible<Type> #
+	// Integral constant, returns in "::value" whether Type can be converted to string through ::to_str().
+	// Criteria: Existance of a valid utl::stre::to_str() overload
+	//
+	// # ::to_str() #
+	// Converts any standard container or a custom container with necessary member functions to std::string.
+	// Works with tuples and tuple-like classes.
+	// Works with nested containers/tuples through recursive template instantiation, which
+	// resolves as long as types at the end of recursion have a valid operator<<() for ostreams.
+	//
+	#ifdef UTL_STRE
+	namespace stre {
+		// Is printable
+		template<typename Type, typename = void>
+		struct is_printable
+			: std::false_type {};
+
+		template<typename Type>
+		struct is_printable<
+			Type,
+			std::void_t<decltype(std::cout << std::declval<Type>())>
+		>
+			: std::true_type {};
+
+		// Is iterable through
+		template<typename Type, typename = void, typename = void>
+		struct is_iterable_through
+			: std::false_type {};
+
+		template<typename Type>
+		struct is_iterable_through<
+			Type,
+			std::void_t<decltype(std::declval<Type>().begin().operator++())>,
+			std::void_t<decltype(std::declval<Type>().end().operator++())>
+		>
+			: std::true_type {};
+
+		// Is const iterable through
+		template<typename Type, typename = void, typename = void>
+		struct is_const_iterable_through
+			: std::false_type {};
+
+		template<typename Type>
+		struct is_const_iterable_through<
+			Type,
+			std::void_t<decltype(std::declval<Type>().cbegin().operator++())>,
+			std::void_t<decltype(std::declval<Type>().cend().operator++())>
+		>
+			: std::true_type {};
+
+		// Is tuple-like
+		template<typename Type, typename = void, typename = void>
+		struct is_tuple_like
+			: std::false_type {};
+
+		template<typename Type>
+		struct is_tuple_like<
+			Type,
+			std::void_t<decltype(std::get<0>(std::declval<Type>()))>,
+			std::void_t<decltype(std::tuple_size<Type>::value)>
+		>
+			: std::true_type {};
+
+		// Is string
+		template<typename T>
+		struct is_string
+			:  std::disjunction<
+				std::is_same<char*, std::decay_t<T>>,
+				std::is_same<const char*, std::decay_t<T>>,
+				std::is_same<std::string, std::decay_t<T>>
+			> {};
+
+		// --- to_str() ---
+		// - delimers -
+		constexpr auto _CONTAINER_DELIMER_L = "{ ";
+		constexpr auto _CONTAINER_DELIMER_M = ", ";
+		constexpr auto _CONTAINER_DELIMER_R = " }";
+		constexpr auto _TUPLE_DELIMER_L = "< ";
+		constexpr auto _TUPLE_DELIMER_M = ", ";
+		constexpr auto _TUPLE_DELIMER_R = " >";
+
+		// - predeclarations -
+		template<typename Type, typename = void>
+		struct is_to_str_convertible
+			: std::false_type {};
+			// false_type half should be declared before to_str() to resolve circular dependency
+
+		template<
+			template<typename... Params> class TupleLikeType,
+			typename... Args
+		>
+		inline std::enable_if_t<
+			!utl::stre::is_const_iterable_through<TupleLikeType<Args...>>::value &&
+			utl::stre::is_tuple_like<TupleLikeType<Args...>>::value
+		, std::string> to_str(const typename TupleLikeType<Args...> &tuple);
+			// prefeclare to resolve circular dependency between to_str(container) and to_str(tuple)
+
+		// - to_str(container) -
+		template<
+			typename ContainerType
+		>
+		inline std::enable_if_t<
+			utl::stre::is_const_iterable_through<ContainerType>::value &&
+			!utl::stre::is_string<ContainerType>::value &&
+			(utl::stre::is_printable<typename ContainerType::value_type>::value ||
+			utl::stre::is_to_str_convertible<typename ContainerType::value_type>::value)
+		, std::string> to_str(const ContainerType &container) {
+
+			std::stringstream ss;
+
+			// Special case for empty containers
+			if (container.cbegin() == container.cend()) {
+				ss << _CONTAINER_DELIMER_L << _CONTAINER_DELIMER_R;
+				return ss.str();
+			}
+
+			// Iterate throught the container 'looking forward' by one step
+			// so we can know not to place the last delimer. Using -- or std::prev()
+			// is not and option since we only require iterators to be forward-iterable
+			ss << _CONTAINER_DELIMER_L;
+
+			auto it_next = container.cbegin(), it = it_next++;
+			for (; it_next != container.cend(); ++it_next, ++it)
+				if constexpr (utl::stre::is_to_str_convertible<ContainerType::value_type>::value)
+					ss << utl::stre::to_str(*it) << _CONTAINER_DELIMER_M;
+				else
+					ss << (*it) << _CONTAINER_DELIMER_M;
+
+			if constexpr (utl::stre::is_to_str_convertible<ContainerType::value_type>::value)
+				ss << utl::stre::to_str(*it) << _CONTAINER_DELIMER_R;
+			else
+				ss << (*it) << _CONTAINER_DELIMER_R;
+
+			return ss.str();
+		}
+
+		// - to_str(tuple) -
+		template<typename TupleElemType>
+		std::string _deduce_and_perform_string_conversion(const TupleElemType &elem) {
+			std::stringstream temp_ss;
+
+			if constexpr (utl::stre::is_to_str_convertible<TupleElemType>::value)
+				temp_ss << utl::stre::to_str(elem);
+			else
+				temp_ss << elem;
+
+			return temp_ss.str();
+		}
+
+		template<typename TupleLikeType, std::size_t... Is>
+		void _print_tuple_fold(std::stringstream& ss, const TupleLikeType& tuple, std::index_sequence<Is...>) {
+				((ss << (Is == 0 ? "" : _TUPLE_DELIMER_M) << _deduce_and_perform_string_conversion(std::get<Is>(tuple))), ...);
+		} // prints tuple to stream
+	
+		template<
+			template<typename... Params> class TupleLikeType,
+			typename... Args
+		>
+		inline std::enable_if_t<
+			!utl::stre::is_const_iterable_through<TupleLikeType<Args...>>::value &&
+			utl::stre::is_tuple_like<TupleLikeType<Args...>>::value
+		, std::string> to_str(const typename TupleLikeType<Args...> &tuple) {
+
+			std::stringstream ss;
+
+			// Print tuple using C++17 variadic folding with index sequence
+			ss << _TUPLE_DELIMER_L;
+			_print_tuple_fold(ss, tuple, std::index_sequence_for<Args...>{});
+			ss << _TUPLE_DELIMER_R;
+
+			return ss.str();
+		}
+
+		// - is_to_str_convertible -
+		template<typename Type>
+		struct is_to_str_convertible<
+			Type,
+			std::void_t<decltype(utl::stre::to_str(std::declval<Type>()))>
+		>
+			: std::true_type {};
 	}
 	#endif
 }

@@ -14,6 +14,7 @@ This is a collection of various utilities that aim to provide a set of concise "
    * [utl::random::](#utlrandom)
    * [utl::math::](#utlmath)
    * [utl::shell::](#utlshell)
+   * [utl::stre::](#utlstre)
 - [Work in progress](#work-in-progress)
 - [Requirements](#requirements)
 - [Version history](#version-history)
@@ -190,8 +191,45 @@ calls with stdout and stderr piping (a task surprisingly untrivial in standard C
 	 # ::run_command() #
 	 Runs a command using the default system shell.
 	 Returns piped status (error code), stdout and stderr.
-		
+	
+<!-- TOC --><a name="utlstre"></a>	
+### utl::stre::
+String extensions, mainly a template ::to_str() method which works with all STL containers,
+including maps, sets and tuples with any level of mutual nesting. Also includes some
+expansions of <type_traits> header that allow categorizing types at compile-time.
+	
+	 # ::is_printable<Type> #
+	 Integral constant, returns in "::value" whether Type can be printed through std::cout.
+	 Criteria: Existance of operator 'ANY_TYPE operator<<(std::ostream&, Type&)'
+	
+	 # ::is_iterable_through<Type> #
+	 Integral constant, returns in "::value" whether Type can be iterated through.
+	 Criteria: Existance of .begin() and .end() with applicable operator()++
+	
+	 # ::is_const_iterable_through<Type> #
+	 Integral constant, returns in "::value" whether Type can be const-iterated through.
+	 Criteria: Existance of .cbegin() and .cend() with applicable operator()++
+	
+	 # ::is_tuple_like<Type> #
+	 Integral constant, returns in "::value" whether Type has a tuple-like structure.
+	 Tuple-like structure include std::tuple, std::pair, std::array, std::ranges::subrange (since C++20)
+	 Criteria: Existance of applicable std::get<0>() and std::tuple_size()
+	
+	 # ::is_string<Type> #
+	 Integral constant, returns in "::value" whether Type is a char string.
+	 Criteria: Type can be decayed to std::string or a char* pointer
+	
+	 # ::is_to_str_convertible<Type> #
+	 Integral constant, returns in "::value" whether Type can be converted to string through ::to_str().
+	 Criteria: Existance of a valid utl::stre::to_str() overload
+	
+	 # ::to_str() #
+	 Converts any standard container or a custom container with necessary member functions to std::string.
+	 Works with tuples and tuple-like classes.
+	 Works with nested containers/tuples through recursive template instantiation, which
+	 resolves as long as types at the end of recursion have a valid operator<<() for ostreams.
 
+	
 
 <!-- TOC --><a name="work-in-progress"></a>
 ## Work in progress
@@ -211,6 +249,10 @@ calls with stdout and stderr piping (a task surprisingly untrivial in standard C
 
 <!-- TOC --><a name="version-history"></a>
 ## Version history
+
+* 00.04
+    * Added utl::stre module;
+    * Switched utl::timer to use nanoseconds internally, improved precision;
 
 * 00.03
     * Added utl::<wbr>shell module;
