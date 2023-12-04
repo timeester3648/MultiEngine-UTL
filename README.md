@@ -30,10 +30,9 @@ This is a collection of various utilities that aim to provide a set of concise "
 * Library should be header only;
 * Library should be portable (Windows, Linux);
 * Each module should be self-contained and reside in a separate namespace;
-* Each module should toggleable through a define;
+* Each module should toggleable through a '#define';
 * Boilerplate code on user side should be minimal;
 * Modern C++ idioms should be prefered both externally and internally;
-* Header should contain a duplicate set of documentation;
 * Usage examples should be provided for all major functions.
 
 
@@ -54,6 +53,8 @@ Can be passed to interfaces that use streams to silence their output.
 	 # ::vout #
 	 Output stream that produces no output, usage example:
 	    > vout << VALUE; // produces nothing
+
+[ [Full documentation](DOCS_LINK) ]
 	
 <!-- TOC --><a name="utlargcv"></a>
 ### utl::argcv::
@@ -235,7 +236,8 @@ expansions of <type_traits> header that allow categorizing types at compile-time
 ## Work in progress
 
 * Coordinate transformation function in "utl::math::";
-* Compile time function that abstract away common compiler-specific defines.
+* Improve stre::to_str() expansion for custon types;
+* Proper documentation with method parameters and built-in examples.
 
 
 
@@ -249,6 +251,10 @@ expansions of <type_traits> header that allow categorizing types at compile-time
 
 <!-- TOC --><a name="version-history"></a>
 ## Version history
+
+* 01.00
+    * Merged module utl::arcv into utl::<wbr>shell;
+    * Changed documentation style to separate files with better formatting;
 
 * 00.04
     * Added utl::stre module;
