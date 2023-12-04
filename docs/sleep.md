@@ -75,6 +75,8 @@ for (int i = 0; i < repeats; ++i) {
 
 Output:
 ```
+Sleeping for 16.67 ms.
+
 sleep::spinlock():
 16.6713 ms
 16.6709 ms
