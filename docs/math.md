@@ -1,6 +1,4 @@
 
-
-
 # utl::math
 
 [<- back to README.md](https://github.com/DmitriBogdanov/prototyping_utils/tree/master)
@@ -41,15 +39,21 @@ template<typename Type>
 Type midpoint(Type a, Type b); // (a + b) / 2
 
 // Degrees and radians
-template<typename Type>
-Type deg_to_rad(Type degrees);
+template<typename FloatType>
+FloatType deg_to_rad(FloatType degrees);
 
 template<typename Type>
-Type rad_to_deg(Type radians);
+FloatType rad_to_deg(FloatType radians);
 
 // Misc helpers
 template<typename UintType>
 UintType uint_difference(UintType a, UintType b);
+
+template<typename FloatType>
+std::vector<FloatType> linspace(FloatType min, FloatType max, size_t N);
+
+template<typename SizedContainer>
+int ssize(const SizedContainer& container);
 		
 // Branchless ternary
 template<typename Type>
@@ -98,8 +102,8 @@ Returns $|x|$, $\mathrm{sign} (x)$, $x^2$ or $x^3$ of an appropriate type.
 Returns $\dfrac{a + b}{2}$ of an appropriate type. Can be used with vectors or other custom types that have defined `operator+()` and scalar `operator*()`.
 
 > ```cpp
-> Type math::deg_to_rad(Type degrees);
-> Type math::rad_to_deg(Type radians);
+> FloatType math::deg_to_rad(FloatType degrees);
+> FloatType math::rad_to_deg(FloatType radians);
 > ```
 
 Converts degrees to radians and back.
@@ -111,10 +115,24 @@ Converts degrees to radians and back.
 Returns $|a - b|$ for unsigned types accounting for possible integer overflow. Useful when working with small types in image processing.
 
 > ```cpp
+> std::vector<FloatType> math::linspace(FloatType min, FloatType max, size_t N);
+> ```
+
+Returns $N$ evenly spaced number in $[min, max]$ range.
+
+> ```cpp
+> int math::ssize(const SizedContainer& container);
+> ```
+
+Returns `.size()` value of given container casted to `int`.
+
+Useful to reduce verbosity of `static_cast<int>(container.size())` when working with `int` indexation that gets compared against container size.
+
+> ```cpp
 > Type math::ternary_branchless(bool condition, Type return_if_true, Type return_if_false);
 > ```
 
-Return `condition ? return_if_true : return_if_false` rewritten in a branchless way. Useful when working with GPU's.
+Returns `condition ? return_if_true : return_if_false` rewritten in a branchless way. Useful when working with GPU's.
 
 > ```cpp
 > IntType math::ternary_bitselect(bool condition, IntType return_if_true, IntType return_if_false);
