@@ -42,7 +42,7 @@ Timing methods.
 
 ## Design goals
 
-Implementation of this library set following design goals:
+Implementation of this library sets following design goals:
 
 * **Header only**. Adding library to the project should be as simple as adding a header.
 * **Minimal boilerplate code**. Methods must be concise and require minimal prerequisites.
@@ -68,4 +68,4 @@ Secondary design goals also include:
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE.md file for details
+This project is licensed under the MIT License - see the [LICENSE.md](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/LICENSE.md) for details

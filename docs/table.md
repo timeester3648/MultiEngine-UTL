@@ -15,11 +15,13 @@ void create(std::initializer_list<_uint> &&widths);
 void set_formats(std::initializer_list<ColumnFormat> &&formats);
 void set_ostream(std::ostream &new_ostream);
 
+// Drawing
 template<typename T, typename... Types>
 void cell(T value, const Types... other_values); // draw cells with values
 
 void hline(); // draw horizontal line
 
+// Format flags
 ColumnFormat NONE;                          // default
 ColumnFormat FIXED(uint decimals = 3);      // fixed      floats with given precision
 ColumnFormat DEFAULT(uint decimals = 6);    // default    floats with given precision
