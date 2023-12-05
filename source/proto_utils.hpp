@@ -4,7 +4,6 @@
 
 // Enabled modules
 #define UTL_VOIDSTREAM
-#define UTL_ARGCV
 #define UTL_TABLE
 #define UTL_TIMER
 #define UTL_SLEEP
@@ -18,12 +17,6 @@
 // Module dependencies
 #ifdef UTL_VOIDSTREAM
 #include <ostream>
-#endif
-
-#ifdef UTL_ARGCV
-#include <string>
-#include <string_view>
-#include <vector>
 #endif
 
 #ifdef UTL_TABLE
@@ -65,7 +58,9 @@
 #include <ostream>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <unordered_set>
+#include <vector>
 #endif
 
 #ifdef UTL_STRE
@@ -121,46 +116,6 @@ namespace utl {
 
 
 
-	// ### utl::argcv:: ###
-	// Parsers that convert argc, argv[] to std::string.
-	//
-	// # ::exe_path(), ::exe_path_view() #
-	// Parses executable path from argcv as std::string or std::string_view.
-	// Views have lower overhead, but keep pointers to original data.
-	//
-	// # ::command_line_args(), ::command_line_args_view() #
-	// Parses command line arguments from argcv as std::string or std::string_view.
-	// Views have lower overhead, but keep pointers to original data.
-	//
-	#ifdef UTL_ARGCV
-	namespace argcv {
-		inline std::string exe_path(char** argv) {
-			// argc == 1 is a reasonable assumption since the only way to achieve such launch
-			// is to run executable through a null-execv, most command-line programms assume
-			// such scenario to be either impossible or an error on user side
-			return std::string(argv[0]);
-		}
-
-		inline std::string_view exe_path_view(char** argv) {
-			return std::string_view(argv[0]);
-		}
-
-		inline std::vector<std::string> command_line_args(int argc, char** argv) {
-			std::vector<std::string> arguments(argc - 1);
-			for (size_t i = 0; i < arguments.size(); ++i) arguments.emplace_back(argv[i]);
-			return arguments;
-		}
-
-		inline std::vector<std::string_view> command_line_args_view(int argc, char** argv) {
-			std::vector<std::string_view> arguments(argc - 1);
-			for (size_t i = 0; i < arguments.size(); ++i) arguments.emplace_back(argv[i]);
-			return arguments;
-		}
-	}
-	#endif
-
-
-
 	// ### utl::table:: ###
 	// Functions used to display results in a tabular fashion.
 	//
@@ -185,27 +140,27 @@ namespace utl {
 	#ifdef UTL_TABLE
 	namespace table {
 		// Types
-		using _uint = std::streamsize;
+		using uint = std::streamsize;
 		using _ios_flags = std::ios_base::fmtflags;
 
-		struct _Column_format {
+		struct ColumnFormat {
 			_ios_flags flags;
-			_uint precision;
+			uint precision;
 		};
 		
 		struct _Column {
-			_uint width;
-			_Column_format col_format;
+			uint width;
+			ColumnFormat col_format;
 		};
 
 		// Predefined formats
-		constexpr _Column_format NONE = { std::ios::showpoint, 6 };
+		constexpr ColumnFormat NONE = { std::ios::showpoint, 6 };
 		
-		constexpr _Column_format FIXED(_uint decimals = 3) { return { std::ios::fixed, decimals }; }
-		constexpr _Column_format DEFAULT(_uint decimals = 6) { return { std::ios::showpoint, decimals }; }
-		constexpr _Column_format SCIENTIFIC(_uint decimals = 3) { return { std::ios::scientific, decimals }; }
+		constexpr ColumnFormat FIXED(uint decimals = 3) { return { std::ios::fixed, decimals }; }
+		constexpr ColumnFormat DEFAULT(uint decimals = 6) { return { std::ios::showpoint, decimals }; }
+		constexpr ColumnFormat SCIENTIFIC(uint decimals = 3) { return { std::ios::scientific, decimals }; }
 
-		constexpr _Column_format BOOL = { std::ios::boolalpha, 3 };
+		constexpr ColumnFormat BOOL = { std::ios::boolalpha, 3 };
 
 		// Internal state
 		inline std::vector<_Column> _columns;
@@ -213,7 +168,7 @@ namespace utl {
 		inline std::reference_wrapper<std::ostream> _output_stream = std::cout;
 
 		// Table setup
-		inline void create(std::initializer_list<_uint> &&widths) {
+		inline void create(std::initializer_list<uint> &&widths) {
 			_columns.resize(widths.size());
 			for (size_t i = 0; i < _columns.size(); ++i) {
 				_columns[i].width = widths.begin()[i];
@@ -221,7 +176,7 @@ namespace utl {
 			}
 		}
 
-		inline void set_formats(std::initializer_list<_Column_format> &&formats) {
+		inline void set_formats(std::initializer_list<ColumnFormat> &&formats) {
 			for (size_t i = 0; i < _columns.size(); ++i)
 				_columns[i].col_format = formats.begin()[i];
 		}
@@ -237,7 +192,7 @@ namespace utl {
 			const std::string left_cline = (_current_column == 0) ? "|" : "";
 			const std::string right_cline = (_current_column == _columns.size() - 1) ? "|\n" : "|";
 			const _ios_flags format = _columns[_current_column].col_format.flags;
-			const _uint float_precision = _columns[_current_column].col_format.precision;
+			const uint float_precision = _columns[_current_column].col_format.precision;
 
 			// Save old stream state
 			std::ios old_state(nullptr);
@@ -321,19 +276,19 @@ namespace utl {
 		}
 
 		// Elapsed time
-		double elapsed_ms() { return _elapsed_time_as_ms(); }
-		double elapsed_sec() { return _elapsed_time_as_ms() / static_cast<double>(MS_IN_SEC); }
-		double elapsed_min() { return _elapsed_time_as_ms() / static_cast<double>(MS_IN_MIN); }
-		double elapsed_hours() { return _elapsed_time_as_ms() / static_cast<double>(MS_IN_HOUR); }
+		inline double elapsed_ms() { return _elapsed_time_as_ms(); }
+		inline double elapsed_sec() { return _elapsed_time_as_ms() / static_cast<double>(MS_IN_SEC); }
+		inline double elapsed_min() { return _elapsed_time_as_ms() / static_cast<double>(MS_IN_MIN); }
+		inline double elapsed_hours() { return _elapsed_time_as_ms() / static_cast<double>(MS_IN_HOUR); }
 
 		// Elapsed string
-		std::string elapsed_string_ms() { return std::to_string(elapsed_ms()) + " ms"; }
-		std::string elapsed_string_sec() { return std::to_string(elapsed_sec()) + " sec"; }
-		std::string elapsed_string_min() { return std::to_string(elapsed_min()) + " min"; }
-		std::string elapsed_string_hours() { return std::to_string(elapsed_hours()) + " hours"; }
+		inline std::string elapsed_string_ms() { return std::to_string(elapsed_ms()) + " ms"; }
+		inline std::string elapsed_string_sec() { return std::to_string(elapsed_sec()) + " sec"; }
+		inline std::string elapsed_string_min() { return std::to_string(elapsed_min()) + " min"; }
+		inline std::string elapsed_string_hours() { return std::to_string(elapsed_hours()) + " hours"; }
 
 		// Full form
-		std::string elapsed_string_fullform() {
+		inline std::string elapsed_string_fullform() {
 			long long unaccounted_ms = static_cast<long long>(_elapsed_time_as_ms());
 
 			long long ms = 0;
@@ -362,14 +317,14 @@ namespace utl {
 		}
 
 		// Date string
-		std::string datetime_string() {
+		inline std::string datetime_string() {
 			std::time_t t = std::time(nullptr);
 			char mbstr[100];
 			std::strftime(mbstr, sizeof(mbstr), "%Y-%m-%d %H:%M:%S", std::localtime(&t));
 			return std::string(mbstr);
 		}
 
-		std::string datetime_string_id() {
+		inline std::string datetime_string_id() {
 			std::time_t t = std::time(nullptr);
 			char mbstr[100];
 			std::strftime(mbstr, sizeof(mbstr), "%Y-%m-%d-%H-%M-%S", std::localtime(&t));
@@ -524,7 +479,44 @@ namespace utl {
 		constexpr double E = 2.71828182845904523536;
 		constexpr double GOLDEN_RATIO = 1.6180339887498948482;
 
-		// Convenience functions
+		// Unary type traits
+		template<typename Type, typename = void>
+		struct is_addable_with_itself
+			: std::false_type {};
+
+		template<typename Type>
+		struct is_addable_with_itself<
+			Type,
+			std::void_t<decltype(std::declval<Type>() + std::declval<Type>())>
+			// perhaps check that resulting type is same as 'Type', but that can cause issues
+			// with classes like Eigen::MatrixXd that return "foldables" that convert back to
+			// objects in the end
+		>
+			: std::true_type {};
+
+		template<typename Type, typename = void>
+		struct is_multipliable_by_scalar
+			: std::false_type {};
+
+		template<typename Type>
+		struct is_multipliable_by_scalar<
+			Type,
+			std::void_t<decltype(std::declval<Type>() * std::declval<double>())>
+		>
+			: std::true_type {};
+
+		template<typename Type, typename = void>
+		struct is_sized
+			: std::false_type {};
+
+		template<typename Type>
+		struct is_sized<
+			Type,
+			std::void_t<decltype(std::declval<Type>().size())>
+		>
+			: std::true_type {};
+
+		// Standard math functions
 		template<typename Type, std::enable_if_t<std::is_scalar<Type>::value, bool> = true>
 		constexpr Type abs(Type x) { return (x > Type(0)) ? x : -x; }
 
@@ -537,27 +529,47 @@ namespace utl {
 		template<typename Type, std::enable_if_t<std::is_arithmetic<Type>::value, bool> = true>
 		constexpr Type cube(Type x) { return x * x * x; }
 
-		template<typename Type, std::enable_if_t<std::is_floating_point<Type>::value, bool> = true>
-		constexpr Type midpoint(Type a, Type b) { return (a + b) * Type(0.5); }
+		template<typename Type,
+			std::enable_if_t<utl::math::is_addable_with_itself<Type>::value, bool> = true,
+			std::enable_if_t<utl::math::is_multipliable_by_scalar<Type>::value, bool> = true
+		>
+		constexpr Type midpoint(Type a, Type b) { return (a + b) * 0.5; }
 
-		template<typename Type, std::enable_if_t<std::is_floating_point<Type>::value, bool> = true>
-		constexpr Type deg_to_rad(Type degrees) {
-			constexpr Type FACTOR = Type(PI / 180.);
+		// Degrees and radians
+		template<typename FloatType, std::enable_if_t<std::is_floating_point<FloatType>::value, bool> = true>
+		constexpr FloatType deg_to_rad(FloatType degrees) {
+			constexpr FloatType FACTOR = FloatType(PI / 180.);
 			return degrees * FACTOR;
 		}
 
-		template<typename Type, std::enable_if_t<std::is_floating_point<Type>::value, bool> = true>
-		constexpr Type rad_to_deg(Type radians) {
-			constexpr Type FACTOR = Type(180. / PI);
+		template<typename FloatType, std::enable_if_t<std::is_floating_point<FloatType>::value, bool> = true>
+		constexpr FloatType rad_to_deg(FloatType radians) {
+			constexpr FloatType FACTOR = FloatType(180. / PI);
 			return radians * FACTOR;
 		}
 
+		// Misc helpers
 		template<typename UintType, std::enable_if_t<std::is_integral<UintType>::value, bool> = true>
 		constexpr UintType uint_difference(UintType a, UintType b) {
 			// Cast to widest type if there is a change values don't fit into a regular 'int'
 			using WiderIntType = std::conditional_t<(sizeof(UintType) >= sizeof(int)), int64_t, int>;
 
 			return static_cast<UintType>(utl::math::abs(static_cast<WiderIntType>(a) - static_cast<WiderIntType>(b)));
+		}
+
+		template<typename FloatType, std::enable_if_t<std::is_floating_point<FloatType>::value, bool> = true>
+		std::vector<FloatType> linspace(FloatType min, FloatType max, size_t N) {
+			const FloatType h = (max - min) / N;
+
+			std::vector<FloatType> points(N);
+			for (size_t i = 0; i < N; ++i) points[i] = min + h * i;
+
+			return points;
+		}
+
+		template<typename SizedContainer, std::enable_if_t<utl::math::is_sized<SizedContainer>::value, bool> = true>
+		int ssize(const SizedContainer& container) {
+			return static_cast<int>(container.size());
 		}
 
 		// Branchless ternary
@@ -603,6 +615,14 @@ namespace utl {
 	// # ::run_command() #
 	// Runs a command using the default system shell.
 	// Returns piped status (error code), stdout and stderr.
+	//
+	// # ::exe_path(), ::exe_path_view() #
+	// Parses executable path from argcv as std::string or std::string_view.
+	// Views have lower overhead, but keep pointers to original data.
+	//
+	// # ::command_line_args(), ::command_line_args_view() #
+	// Parses command line arguments from argcv as std::string or std::string_view.
+	// Views have lower overhead, but keep pointers to original data.
 	//
 	#ifdef UTL_SHELL
 	namespace shell {
@@ -687,6 +707,30 @@ namespace utl {
 
 			return result;
 		}
+
+		// Argc/Argv parsing
+		inline std::string get_exe_path(char** argv) {
+			// argc == 1 is a reasonable assumption since the only way to achieve such launch
+			// is to run executable through a null-execv, most command-line programs assume
+			// such scenario to be either impossible or an error on user side
+			return std::string(argv[0]);
+		}
+
+		inline std::string_view get_exe_path_view(char** argv) {
+			return std::string_view(argv[0]);
+		}
+
+		inline std::vector<std::string> get_command_line_args(int argc, char** argv) {
+			std::vector<std::string> arguments(argc - 1);
+			for (size_t i = 0; i < arguments.size(); ++i) arguments.emplace_back(argv[i]);
+			return arguments;
+		}
+
+		inline std::vector<std::string_view> get_command_line_args_view(int argc, char** argv) {
+			std::vector<std::string_view> arguments(argc - 1);
+			for (size_t i = 0; i < arguments.size(); ++i) arguments.emplace_back(argv[i]);
+			return arguments;
+		}
 	}
 	#endif
 
@@ -730,6 +774,7 @@ namespace utl {
 	//
 	#ifdef UTL_STRE
 	namespace stre {
+		// Unary type traits
 		// Is printable
 		template<typename Type, typename = void>
 		struct is_printable
@@ -738,7 +783,7 @@ namespace utl {
 		template<typename Type>
 		struct is_printable<
 			Type,
-			std::void_t<decltype(std::cout << std::declval<Type>())>
+			std::void_t<decltype(std::declval<std::ostream&>() << std::declval<Type>())>
 		>
 			: std::true_type {};
 
@@ -782,48 +827,63 @@ namespace utl {
 			: std::true_type {};
 
 		// Is string
-		template<typename T>
+		template<typename Type>
 		struct is_string
 			:  std::disjunction<
-				std::is_same<char*, std::decay_t<T>>,
-				std::is_same<const char*, std::decay_t<T>>,
-				std::is_same<std::string, std::decay_t<T>>
+				std::is_same<char*, std::decay_t<Type>>,
+				std::is_same<const char*, std::decay_t<Type>>,
+				std::is_same<std::string, std::decay_t<Type>>
 			> {};
 
 		// --- to_str() ---
 		// - delimers -
-		constexpr auto _CONTAINER_DELIMER_L = "{ ";
+		constexpr auto _CONTAINER_DELIMER_L = "[ ";
 		constexpr auto _CONTAINER_DELIMER_M = ", ";
-		constexpr auto _CONTAINER_DELIMER_R = " }";
+		constexpr auto _CONTAINER_DELIMER_R = " ]";
 		constexpr auto _TUPLE_DELIMER_L = "< ";
 		constexpr auto _TUPLE_DELIMER_M = ", ";
 		constexpr auto _TUPLE_DELIMER_R = " >";
 
-		// - predeclarations -
+		// - predeclarations (is_to_str_convertible) -
 		template<typename Type, typename = void>
 		struct is_to_str_convertible
 			: std::false_type {};
 			// false_type half should be declared before to_str() to resolve circular dependency
 
+		// - predeclarations (to_str(tuple)) -
 		template<
 			template<typename... Params> class TupleLikeType,
 			typename... Args
 		>
 		inline std::enable_if_t<
+			!utl::stre::is_printable<TupleLikeType<Args...>>::value &&
 			!utl::stre::is_const_iterable_through<TupleLikeType<Args...>>::value &&
 			utl::stre::is_tuple_like<TupleLikeType<Args...>>::value
 		, std::string> to_str(const typename TupleLikeType<Args...> &tuple);
-			// prefeclare to resolve circular dependency between to_str(container) and to_str(tuple)
+			// predeclare to resolve circular dependency between to_str(container) and to_str(tuple)
+
+		// - to_str(printable) -
+		template<
+			typename Type
+		>
+		inline std::enable_if_t<
+			utl::stre::is_printable<Type>::value
+		, std::string> to_str(const Type &value) {
+			std::stringstream ss;
+
+			ss << value;
+
+			return ss.str();
+		}
 
 		// - to_str(container) -
 		template<
 			typename ContainerType
 		>
 		inline std::enable_if_t<
+			!utl::stre::is_printable<ContainerType>::value &&
 			utl::stre::is_const_iterable_through<ContainerType>::value &&
-			!utl::stre::is_string<ContainerType>::value &&
-			(utl::stre::is_printable<typename ContainerType::value_type>::value ||
-			utl::stre::is_to_str_convertible<typename ContainerType::value_type>::value)
+			utl::stre::is_to_str_convertible<typename ContainerType::value_type>::value
 		, std::string> to_str(const ContainerType &container) {
 
 			std::stringstream ss;
@@ -841,20 +901,14 @@ namespace utl {
 
 			auto it_next = container.cbegin(), it = it_next++;
 			for (; it_next != container.cend(); ++it_next, ++it)
-				if constexpr (utl::stre::is_to_str_convertible<ContainerType::value_type>::value)
-					ss << utl::stre::to_str(*it) << _CONTAINER_DELIMER_M;
-				else
-					ss << (*it) << _CONTAINER_DELIMER_M;
+				ss << utl::stre::to_str(*it) << _CONTAINER_DELIMER_M;
 
-			if constexpr (utl::stre::is_to_str_convertible<ContainerType::value_type>::value)
-				ss << utl::stre::to_str(*it) << _CONTAINER_DELIMER_R;
-			else
-				ss << (*it) << _CONTAINER_DELIMER_R;
+			ss << utl::stre::to_str(*it) << _CONTAINER_DELIMER_R;
 
 			return ss.str();
 		}
 
-		// - to_str(tuple) -
+		// - to_str(tuple) helpers -
 		template<typename TupleElemType>
 		std::string _deduce_and_perform_string_conversion(const TupleElemType &elem) {
 			std::stringstream temp_ss;
@@ -872,11 +926,13 @@ namespace utl {
 				((ss << (Is == 0 ? "" : _TUPLE_DELIMER_M) << _deduce_and_perform_string_conversion(std::get<Is>(tuple))), ...);
 		} // prints tuple to stream
 	
+		// - to_str(tuple) -
 		template<
-			template<typename... Params> class TupleLikeType,
+			template<typename...> class TupleLikeType,
 			typename... Args
 		>
 		inline std::enable_if_t<
+			!utl::stre::is_printable<TupleLikeType<Args...>>::value &&
 			!utl::stre::is_const_iterable_through<TupleLikeType<Args...>>::value &&
 			utl::stre::is_tuple_like<TupleLikeType<Args...>>::value
 		, std::string> to_str(const typename TupleLikeType<Args...> &tuple) {
@@ -898,6 +954,49 @@ namespace utl {
 			std::void_t<decltype(utl::stre::to_str(std::declval<Type>()))>
 		>
 			: std::true_type {};
+
+		// Inline stringstream
+		class InlineStream {
+		public:
+			template<typename Type>
+			InlineStream& operator<<(const Type &arg) {
+				this->ss << arg;
+				return *this;
+			}
+
+			inline operator std::string() const {
+				return this->ss.str();
+			}
+		private:
+			std::stringstream ss;
+		};
 	}
 	#endif
 }
+
+// ~~~ Dear diary here is my journey ~~~
+// - Read through all <type_traits> docs
+// - Figure out modern (implicit) and old-style SFINAE
+// - Create is_printable<> metafunction using implicit SFINAE trick
+// - Create is_const_iterable<> metafunction
+// - Figure complex std::enable_if_t<> structures, most people on the internet
+//   don't really know how to use them by the looks of it
+// - Create to_str(container)
+// - Account for internal container types being either printable OR convertible by recursion
+// - Account for last delimer being different without assuming iterator is bidirectional
+//   (have to look a step ahead when iterating)
+// - Account for empty containers
+// - Create is_to_str_convertible<> metafunction
+// - Resolve is_to_str_convertible<> circular dependency with std::enable_if<> inside to_str()
+// - Create is_tuple_like<> metafunction
+// - Figure out constexpr if's for compile-time branching
+// - Figure out variadic index templates (works completely differently from regular ones, nice)
+// - Figure out how to combine variadic templates with std::enable_if_t<> since
+//   regular variadic sintax blocks enabling parameters
+// - Figure out how to print tuples using variadic folding with index sequence
+// - Add branching to_str() recursion inside variadic folding
+// - Learn about type decay
+// - Create is_string<> metafunction using newfound knowledge, using is_same<Type, std::string> is
+//   not an options since stings can be char*, const char*, u8string and etc
+// - Fix std::string being parsed at container of arrays (which is correct but not what we want)
+//   by expanding std::enable_if<>'s
