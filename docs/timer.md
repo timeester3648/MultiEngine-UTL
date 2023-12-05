@@ -36,32 +36,32 @@ std::string datetime_string_id(); // format "%y-%m-%d-%H-%M-%S", works in filena
 Sets internal start timepoint for elapsed measurements.
 
 > ```cpp
-> double elapsed_ms();
-> double elapsed_sec();
-> double elapsed_min();
-> double elapsed_hours();
+> double timer::elapsed_ms()
+> double timer::elapsed_sec()
+> double timer::elapsed_min()
+> double timer::elapsed_hours()
 > ```
 
 Returns elapsed time as `double`. Internally time is measured in nanoseconds.
 
 > ```cpp
-> std::string elapsed_string_ms();
-> std::string elapsed_string_sec();
-> std::string elapsed_string_min();
-> std::string elapsed_string_hours();
+> std::string timer::elapsed_string_ms()
+> std::string timer::elapsed_string_sec()
+> std::string timer::elapsed_string_min()
+> std::string timer::elapsed_string_hours()
 > ```
 
 Returns elapsed time as `std::string` with units.
 
 > ```cpp
-> std::string elapsed_string_fullform();
+> std::string timer::elapsed_string_fullform()
 > ```
 
 Returns elapsed time in format `%H hours %M min %S sec %MS ms`.
 
 > ```cpp
-> std::string datetime_string();
-> std::string datetime_string_id();
+> std::string timer::datetime_string()
+> std::string timer::datetime_string_id()
 > ```
 
 Returns current local date and time in format `%y-%m-%d %H:%M:%S` or `%y-%m-%d-%H-%M-%S`. Since first format is contains characters illegal in filenames, second format can be used instead.
