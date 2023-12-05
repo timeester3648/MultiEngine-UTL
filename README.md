@@ -68,4 +68,4 @@ Secondary design goals also include:
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE.md](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/LICENSE.md) for details
+This project is licensed under the MIT License - see the [LICENSE.md](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/LICENSE.md) for details
