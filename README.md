@@ -56,9 +56,12 @@ Secondary design goals also include:
 
 ## Work in progress
 
-* Coordinate transformation function in "utl::math";
-* Improve stre::to_str() expansion for custon types;
-* Proper documentation with method parameters and built-in examples.
+* Coordinate transformations in **utl::math**;
+* More type traits in **utl::math**;
+* Improved stre::to_str() expansion for custom types;
+* `stre::to_str()` implementation for `std::stack` and `std::queue`;
+* `stre::build_string()` method;
+* **utl::stre** documentation.
 
 ## Requirements
 
