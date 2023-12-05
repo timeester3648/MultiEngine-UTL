@@ -13,13 +13,13 @@ VoidStream    vout;       // ostream that discards input
 
 ## Methods
 > ```cpp
-> voidstream::vstreambuf
+> voidstream::vstreambuf;
 > ```
 
 Regular stream buffers use `.overflow()`  to output buffered characters. This buffer simply discards them. 
 
 > ```cpp
-> voidstream::vout
+> voidstream::vout;
 > ```
 
 Pass this object to API's that use `std::ostream` to discard their corresponding output.

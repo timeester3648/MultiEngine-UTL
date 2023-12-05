@@ -35,35 +35,35 @@ ColumnFormat BOOL;                          // bools as text
 Sets up table with given column widths. Similar to LaTeX `|c{1cm}|c{1cm}|c{1cm}|` syntax.
 
 > ```cpp
-> table::set_formats(std::initializer_list<ColumnFormat> &&formats)
+> table::set_formats(std::initializer_list<ColumnFormat> &&formats);
 > ```
 
 Sets up column [std::ios](https://en.cppreference.com/w/cpp/io/ios_base/flags) flags. Mainly used with build-in `table::` flags to change float formatting.
 
 > ```cpp
-> table::set_ostream(std::ostream &new_ostream)
+> table::set_ostream(std::ostream &new_ostream);
 > ```
 
 Redirects output to given `std::ostream`. By default `std::cout` is used.
 
 > ```cpp
-> table::cell(T value, const Types... other_values)
+> table::cell(T value, const Types... other_values);
 > ```
 
 Draws cells with given values, accepts any number of arguments and can be used to draw entire rows in a single line (see examples). Similar to LaTeX `val1 & val2 & val3 \\` except line breaks are placed automatically.
 
 > ```cpp
-> table::hline()
+> table::hline();
 > ```
 
 Draws a horizontal line. Similar to LaTeX `\hline`.
 
 > ```cpp
-> table::NONE
-> table::FIXED(uint decimals = 3)
-> table::DEFAULT(uint decimals = 6)
-> table::SCIENTIFIC(uint decimals = 3)
-> table::BOOL
+> table::NONE;
+> table::FIXED(uint decimals = 3);
+> table::DEFAULT(uint decimals = 6);
+> table::SCIENTIFIC(uint decimals = 3);
+> table::BOOL;
 > ```
 
 Predefined format flags. `NONE` sets no flags. `FIXED(n)`, `DEFAULT(n)` and `SCIENTIFIC(n)` set corresponding float representations and precision `n`. `BOOL` makes bools render as `true`, `false`.

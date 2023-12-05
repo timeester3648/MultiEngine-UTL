@@ -14,19 +14,19 @@ system(double ms);   // imprecise, uses CPU   0% of time, expected error ~1-5 ms
 
 ## Methods
 > ```cpp
-> sleep::system(double ms)
+> sleep::system(double ms);
 > ```
 
 System sleep is an alias of [std::this_thread::sleep_for()](https://en.cppreference.com/w/cpp/thread/sleep_for), as such it's subjected to OS scheduler which wakes up approximately every ~3ms, with delays even more inconsistent for larger sleep times, which deems it unfit for applications like real-time rendering.
 
 > ```cpp
-> sleep::spinlock(double ms)
+> sleep::spinlock(double ms);
 > ```
 
 Spinlock sleep is a common way of implementing thread locks, it is based in a looped time check, which ends the loop once timer tuns out. While such approach allows for a much greater precision it has a downside of constantly using corresponding CPU thread.
 
 > ```cpp
-> sleep::hybrid(double ms)
+> sleep::hybrid(double ms);
 > ```
 
 Hybrid version loops a short system sleep, estimating it's error mean and variance on the fly (Welford's algorithm), and once remaining time gets below the mean plus a standard deviation switches to spinlock. This results in a precision almost as good as pure spinlock, while mostly freeing CPU thread.
