@@ -32,11 +32,11 @@ String conversion extensions.
 
 Table rendering tools.
 
-- [utl::timer](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/timer.md)
+> [utl::timer](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/timer.md)
 
 Timing methods.
 
-- [utl::voidstream](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/voidstream.md)
+> [utl::voidstream](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/voidstream.md)
 
 `std::ostream` API silencing method.
 
@@ -56,7 +56,7 @@ Secondary design goals also include:
 
 ## Work in progress
 
-* Coordinate transformation function in "utl::math::";
+* Coordinate transformation function in "utl::math";
 * Improve stre::to_str() expansion for custon types;
 * Proper documentation with method parameters and built-in examples.
 
