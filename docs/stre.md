@@ -52,13 +52,6 @@ In reality `to_str()` is a number of conditionally enabled templates that expand
 
 (see and [<type_traits>](https://en.cppreference.com/w/cpp/header/type_traits) and [UnaryTypeTrait](https://en.cppreference.com/w/cpp/named_req/UnaryTypeTrait))
 
-
-> ```cpp
-> stre::is_printable;
-> ```
-
-`is_printable<Type>::value` returns at compile time whether `Type` objects can be printed to `std::ostream` with `operator<<()`.
-
 > ```cpp
 > stre::is_iterable_through;
 > ```
