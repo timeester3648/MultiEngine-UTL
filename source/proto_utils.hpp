@@ -137,6 +137,9 @@ namespace utl {
 	// Draws a single table cell, if multiple arguments are passed, draws each one in a new cell.
 	// Accepts any type with a defined "<<" ostream operator.
 	//
+	/// Add
+	/// template<class Type...>
+	/// build_from_data(std::initialize_list<std::string>{ labels }, std::vector<Type> data...)
 	#ifdef UTL_TABLE
 	namespace table {
 		// Types
@@ -202,8 +205,6 @@ namespace utl {
 			_output_stream.get() << std::resetiosflags(_output_stream.get().flags());
 			_output_stream.get().flags(format);
 			_output_stream.get().precision(float_precision);
-
-			auto t = std::ios::fixed;
 
 			// Print
 			_output_stream.get()
@@ -859,7 +860,7 @@ namespace utl {
 			!utl::stre::is_printable<TupleLikeType<Args...>>::value &&
 			!utl::stre::is_const_iterable_through<TupleLikeType<Args...>>::value &&
 			utl::stre::is_tuple_like<TupleLikeType<Args...>>::value
-		, std::string> to_str(const typename TupleLikeType<Args...> &tuple);
+		, std::string> to_str(const TupleLikeType<Args...> &tuple);
 			// predeclare to resolve circular dependency between to_str(container) and to_str(tuple)
 
 		// - to_str(printable) -
@@ -935,7 +936,7 @@ namespace utl {
 			!utl::stre::is_printable<TupleLikeType<Args...>>::value &&
 			!utl::stre::is_const_iterable_through<TupleLikeType<Args...>>::value &&
 			utl::stre::is_tuple_like<TupleLikeType<Args...>>::value
-		, std::string> to_str(const typename TupleLikeType<Args...> &tuple) {
+		, std::string> to_str(const TupleLikeType<Args...> &tuple) {
 
 			std::stringstream ss;
 
