@@ -3,24 +3,25 @@
 
 
 // Enabled modules
-#define UTL_VOIDSTREAM
-#define UTL_TABLE
-#define UTL_TIMER
-#define UTL_SLEEP
-#define UTL_RANDOM
-#define UTL_MATH
-#define UTL_SHELL
-#define UTL_STRE
+#define _UTL_VOIDSTREAM
+#define _UTL_TABLE
+#define _UTL_TIMER
+#define _UTL_SLEEP
+#define _UTL_RANDOM
+#define _UTL_MATH
+#define _UTL_SHELL
+#define _UTL_STRE
+
+#define _UTL_MACROS
 
 
 
 // Module dependencies
-#ifdef UTL_VOIDSTREAM
+#ifdef _UTL_VOIDSTREAM
 #include <ostream>
 #endif
 
-#ifdef UTL_TABLE
-#include <functional>
+#ifdef _UTL_TABLE
 #include <initializer_list>
 #include <iomanip>
 #include <ios>
@@ -29,29 +30,29 @@
 #include <vector>
 #endif
 
-#ifdef UTL_TIMER
+#ifdef _UTL_TIMER
 #include <chrono>
 #include <ctime>
 #include <iostream>
 #include <string>
 #endif
 
-#ifdef UTL_SLEEP
+#ifdef _UTL_SLEEP
 #include <chrono>
 #include <cmath>
 #include <thread>
 #endif
 
-#ifdef UTL_RANDOM
+#ifdef _UTL_RANDOM
 #include <cstdlib>
 #include <initializer_list>
 #endif
 
-#ifdef UTL_MATH
+#ifdef _UTL_MATH
 #include <type_traits>
 #endif
 
-#ifdef UTL_SHELL
+#ifdef _UTL_SHELL
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -63,7 +64,7 @@
 #include <vector>
 #endif
 
-#ifdef UTL_STRE
+#ifdef _UTL_STRE
 #include <sstream>
 #include <string>
 #include <type_traits>
@@ -94,7 +95,7 @@ namespace utl {
 	// Output stream that produces no output, usage example:
 	//   > vout << VALUE; // produces nothing
 	//
-	#ifdef UTL_VOIDSTREAM
+	#ifdef _UTL_VOIDSTREAM
 	namespace voidstream {
 
 		class VoidStreamBuf : public std::streambuf {
@@ -140,7 +141,7 @@ namespace utl {
 	/// Add
 	/// template<class Type...>
 	/// build_from_data(std::initialize_list<std::string>{ labels }, std::vector<Type> data...)
-	#ifdef UTL_TABLE
+	#ifdef _UTL_TABLE
 	namespace table {
 		// Types
 		using uint = std::streamsize;
@@ -168,7 +169,7 @@ namespace utl {
 		// Internal state
 		inline std::vector<_Column> _columns;
 		inline int _current_column = 0;
-		inline std::reference_wrapper<std::ostream> _output_stream = std::cout;
+		inline std::ostream *_output_stream = &std::cout;
 
 		// Table setup
 		inline void create(std::initializer_list<uint> &&widths) {
@@ -185,7 +186,7 @@ namespace utl {
 		}
 
 		inline void set_ostream(std::ostream &new_ostream) {
-			_output_stream = new_ostream;
+			_output_stream = &new_ostream;
 		}
 
 		inline void cell() {};
@@ -199,21 +200,21 @@ namespace utl {
 
 			// Save old stream state
 			std::ios old_state(nullptr);
-			old_state.copyfmt(_output_stream.get());
+			old_state.copyfmt(*_output_stream);
 
 			// Set table formatting
-			_output_stream.get() << std::resetiosflags(_output_stream.get().flags());
-			_output_stream.get().flags(format);
-			_output_stream.get().precision(float_precision);
+			(*_output_stream) << std::resetiosflags(_output_stream.get().flags());
+			(*_output_stream).flags(format);
+			(*_output_stream).precision(float_precision);
 
 			// Print
-			_output_stream.get()
+			(*_output_stream)
 				<< left_cline
 				<< std::setw(_columns[_current_column].width) << value
 				<< right_cline;
 
 			// Return old stream state
-			_output_stream.get().copyfmt(old_state);
+			(*_output_stream).copyfmt(old_state);
 
 			// Advance column counter
 			_current_column = (_current_column == _columns.size() - 1) ? 0 : _current_column + 1;
@@ -222,9 +223,9 @@ namespace utl {
 		}
 
 		inline void hline() {
-			_output_stream.get() << "|";
-			for (const auto &col : _columns) _output_stream.get() << std::string(static_cast<size_t>(col.width), '-') << "|";
-			_output_stream.get() << "\n";
+			(*_output_stream) << "|";
+			for (const auto &col : _columns) (*_output_stream) << std::string(static_cast<size_t>(col.width), '-') << "|";
+			(*_output_stream) << "\n";
 		}
 	}
 	#endif
@@ -254,7 +255,7 @@ namespace utl {
 	// Current local date and time in format "%y-%m-%d-%H-%M-%S".
 	// Less readable that usual format, but can be used in filenames which prohibit ":" usage.
 	//
-	#ifdef UTL_TIMER
+	#ifdef _UTL_TIMER
 	namespace timer {
 		using _clock = std::chrono::steady_clock;
 		using _chrono_ns = std::chrono::nanoseconds;
@@ -353,7 +354,7 @@ namespace utl {
 	// Worst precision, frees CPU.
 	// Expected error: ~10-20 ms
 	//
-	#ifdef UTL_SLEEP
+	#ifdef _UTL_SLEEP
 	namespace sleep {
 		using _clock = std::chrono::steady_clock;
 		using _chrono_ns = std::chrono::nanoseconds;
@@ -422,7 +423,7 @@ namespace utl {
 	// Produces "c A + (1-c) B" with random "0 < c < 1" assuming objects "A", "B" support arithmetic operations.
 	// Useful for vector and color operations.
 	//
-	#ifdef UTL_RANDOM
+	#ifdef _UTL_RANDOM
 	namespace random {
 
 		inline void seed(unsigned int random_seed) { srand(random_seed); }
@@ -471,7 +472,7 @@ namespace utl {
 	// Faster branchless ternary for integer types.
 	// If 2nd return is ommited, 0 is assumed, which allows for significant optimization.
 	//
-	#ifdef UTL_MATH
+	#ifdef _UTL_MATH
 	namespace math {
 		// Constants
 		constexpr double PI = 3.14159265358979323846;
@@ -625,7 +626,7 @@ namespace utl {
 	// Parses command line arguments from argcv as std::string or std::string_view.
 	// Views have lower overhead, but keep pointers to original data.
 	//
-	#ifdef UTL_SHELL
+	#ifdef _UTL_SHELL
 	namespace shell {
 		// Types
 		struct CommandResult {
@@ -773,7 +774,7 @@ namespace utl {
 	// Works with nested containers/tuples through recursive template instantiation, which
 	// resolves as long as types at the end of recursion have a valid operator<<() for ostreams.
 	//
-	#ifdef UTL_STRE
+	#ifdef _UTL_STRE
 	namespace stre {
 		// Unary type traits
 		// Is printable
@@ -975,29 +976,34 @@ namespace utl {
 	#endif
 }
 
-// ~~~ Dear diary here is my journey ~~~
-// - Read through all <type_traits> docs
-// - Figure out modern (implicit) and old-style SFINAE
-// - Create is_printable<> metafunction using implicit SFINAE trick
-// - Create is_const_iterable<> metafunction
-// - Figure complex std::enable_if_t<> structures, most people on the internet
-//   don't really know how to use them by the looks of it
-// - Create to_str(container)
-// - Account for internal container types being either printable OR convertible by recursion
-// - Account for last delimer being different without assuming iterator is bidirectional
-//   (have to look a step ahead when iterating)
-// - Account for empty containers
-// - Create is_to_str_convertible<> metafunction
-// - Resolve is_to_str_convertible<> circular dependency with std::enable_if<> inside to_str()
-// - Create is_tuple_like<> metafunction
-// - Figure out constexpr if's for compile-time branching
-// - Figure out variadic index templates (works completely differently from regular ones, nice)
-// - Figure out how to combine variadic templates with std::enable_if_t<> since
-//   regular variadic sintax blocks enabling parameters
-// - Figure out how to print tuples using variadic folding with index sequence
-// - Add branching to_str() recursion inside variadic folding
-// - Learn about type decay
-// - Create is_string<> metafunction using newfound knowledge, using is_same<Type, std::string> is
-//   not an options since stings can be char*, const char*, u8string and etc
-// - Fix std::string being parsed at container of arrays (which is correct but not what we want)
-//   by expanding std::enable_if<>'s
+
+
+// ### utl::macros ###
+// All macros are prefixed with "UTL_" since namespaces are not available for
+// preprocessor directives
+//
+#ifdef _UTL_MACROS
+
+#define UTL_SET_LOG_OUTPUT()
+
+inline std::ostream *_utl_log_ostream = &std::cout;
+
+template<typename... Args>
+void _utl_log_print(const std::string &file, int line, const std::string &func, const Args&... args) {
+	std::string filename = file.substr(file.find_last_of("/\\") + 1);
+	(*_utl_log_ostream) << "\033[31;1m";
+	(*_utl_log_ostream) << "[" << filename << ":" << line << ", " << func << "()]";
+	(*_utl_log_ostream) << "\033[0m" << " ";
+	(((*_utl_log_ostream) << args), ...);
+	(*_utl_log_ostream) << '\n';
+}
+
+#define UTL_LOG(...) _utl_log_print(__FILE__, __LINE__, __func__, __VA_ARGS__)
+
+#ifdef _DEBUG
+#define UTL_DLOG(...) _utl_log_print(__FILE__, __LINE__, __func__, __VA_ARGS__)
+#else
+#define UTL_DLOG(...) 
+#endif
+
+#endif

@@ -8,10 +8,12 @@
 
 
 
+
+
 int main(int argc, char* argv[]) {
 	using namespace utl;
 
-
+	
 
 	// ### utl::voidstream:: ##
 	std::cout << "\n\n### utl::voidstream:: ###\n\n";
@@ -201,14 +203,26 @@ int main(int argc, char* argv[]) {
 	std::cout << "Current time is: " << timer::datetime_string() << "\n\n";
 
 	timer::start();
-	std::this_thread::sleep_for(std::chrono::milliseconds(3700));
+	std::this_thread::sleep_for(std::chrono::milliseconds(100));
 	std::cout
-		<< "Time elapsed during sleep_for(3700 ms):\n"
+		<< "Time elapsed during sleep_for(100 ms):\n"
 		<< timer::elapsed_string_ms() << "\n"
 		<< timer::elapsed_string_sec() << "\n"
 		<< timer::elapsed_string_min() << "\n"
 		<< timer::elapsed_string_hours() << "\n"
 		<< timer::elapsed_string_fullform() << "\n";
+
+
+	// ### utl macros ###
+	std::cout << "\n\n### utl macros ###\n\n";
+
+	// LOG compiles always
+	UTL_LOG("Block ", 17, ": responce in order. Proceeding with code ", 0, ".");
+
+	// DLOG compiles only in Debug
+	UTL_DLOG("Texture with ID ", 15037, " seems to be corrupted.");
+
+	// NOTE: stre::to_str() can be used to pass complex objects to logger
 
 	return 0;
 }
