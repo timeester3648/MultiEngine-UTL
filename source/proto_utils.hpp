@@ -1084,7 +1084,7 @@ namespace utl {
 // # UTL_VA_ARGS_COUNT(args...) #
 // Counts how many comma-separated arguments are passed.
 // NOTE: Since macro evaluates arbitrary preprocessor text, language construct with additional comma should
-// to be surrounded by parentheses aka '(std::pair<int, int>{4, 5})', since 'std::pair<int, int>{4, 5}' gets
+// be surrounded by parentheses aka '(std::pair<int, int>{4, 5})', since 'std::pair<int, int>{4, 5}' gets
 // interpreted as 3 separate args 'std::pair<int', ' int>{4', ' 5}' by any variadic macro.
 //
 // # UTL_DECLARE_ENUM_WITH_STRING_CONVERSION(enum_name, enum_values...) #

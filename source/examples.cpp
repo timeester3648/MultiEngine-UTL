@@ -246,8 +246,9 @@ int main(int argc, char* argv[]) {
 	std::cout
 		<< "(enum -> string) conversion:\n"
 		<< Sides::BOTTOM << " -> " << Sides::to_string(Sides::BOTTOM) << "\n"
-		<< "(enum -> string) conversion:\n"
+		<< "(string -> enum) conversion:\n"
 		<< "BOTTOM" << " -> " << Sides::from_string("BOTTOM") << "\n";
+
 
 	return 0;
 }
