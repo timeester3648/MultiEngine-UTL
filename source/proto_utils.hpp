@@ -350,11 +350,19 @@ namespace utl {
 		// - Localtime string -
 		// --------------------
 		inline std::string _datetime_string_with_format(const char* format) {
-			std::time_t t = std::time(nullptr);
-
-			// Get localtime safely
+			std::time_t timer = std::time(nullptr);
 			std::tm time_moment{};
-			localtime_s(&time_moment, &t);
+
+			// Get localtime safely (if possible)
+			#if defined(__unix__)
+			localtime_r(&timer, &time_moment);
+			#elif defined(_MSC_VER)
+			localtime_s(&time_moment, &timer);
+			#else
+			// static std::mutex mtx; // mutex can be used to make thread-safe version but add another dependency
+			// std::lock_guard<std::mutex> lock(mtx);
+			time_moment = *std::localtime(&timer);
+			#endif
 
 			// Convert time to C-string
 			char mbstr[100];
