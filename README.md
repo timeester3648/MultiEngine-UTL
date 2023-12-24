@@ -1,4 +1,5 @@
 
+
 [![Language](https://img.shields.io/badge/C++-std=17-blue.svg?style=flat&logo=cplusplus)](https://en.wikipedia.org/wiki/C%2B%2B#Standardization)
 [![GitHub license](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/LICENSE.md)
 
@@ -8,37 +9,41 @@ This is a collection of various utilities that aim to provide a set of concise "
 
 ## Modules
 
-> [utl::math](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/math.md)
+> [**utl::math**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/math.md)
 
 Math-related utilities.
 
-> [utl::random](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/random.md)
+> [**utl::random**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/random.md)
 
 Convenient random functions.
 
-> [utl::shell](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/shell.md)
+> [**utl::shell**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/shell.md)
 
 Command-line related utilities.
 
-> [utl::sleep](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/sleep.md)
+> [**utl::sleep**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/sleep.md)
 
 Precise sleep implementations.
 
-> [utl::stre](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/stre.md)
+> [**utl::stre**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/stre.md)
 
 String conversion extensions.
 
-> [utl::table](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/table.md)
+> [**utl::table**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/table.md)
 
 Table rendering tools.
 
-> [utl::timer](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/timer.md)
+> [**utl::timer**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/timer.md)
 
 Timing methods.
 
-> [utl::voidstream](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/voidstream.md)
+> [**utl::voidstream**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/voidstream.md)
 
 `std::ostream` API silencing method.
+
+> [**UTL_MACROS**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/MACROS.md)
+
+Macros for automatic code generation, logging and general convenience
 
 ## Design goals
 

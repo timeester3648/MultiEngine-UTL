@@ -31,7 +31,7 @@ All macros in this module are prefixed with `UTL_` since namespaces do not affec
 > UTL_LOG_SET_OUTPUT(ostream)
 > ```
 
-Sets [std::ostream](https://en.cppreference.com/w/cpp/io/basic_ostream) used by other logging macros.
+Sets [std::ostream](https://en.cppreference.com/w/cpp/io/basic_ostream) used by other logging macros. `std::cout` is set by default.
 
 > ```cpp
 > UTL_LOG(...)
