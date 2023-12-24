@@ -2,7 +2,7 @@
 
 
 
-// Enabled modules
+// Enabled modules (comment out to disable)
 #define _UTL_VOIDSTREAM
 #define _UTL_TABLE
 #define _UTL_TIMER
@@ -71,8 +71,12 @@
 #include <utility>
 #endif
 
+#ifdef _UTL_MACROS
+#include <cctype>
+#endif
+
 #ifdef _MSC_VER
-#pragma warning(disable : 4996) //_CRT_SECURE_NO_WARNINGS
+#pragma warning(disable : 4996) // _CRT_SECURE_NO_WARNINGS
 	// Disables MSVC requiring "safe" versions of localtime() instead of standard ones
 #endif
 
@@ -82,7 +86,10 @@ namespace utl {
 
 
 
-	// ### utl::voidstream:: ###
+	// #######################
+	// ### utl::voidstream ###
+	// #######################
+	//
 	// "voidstream" that functions like std::ostream with no output.
 	// Can be passed to interfaces that use streams to silence their output.
 	//
@@ -117,8 +124,11 @@ namespace utl {
 
 
 
-	// ### utl::table:: ###
-	// Functions used to display results in a tabular fashion.
+	// ##################
+	// ### utl::table ###
+	// ##################
+	//
+	// Functions used to display data in a tabular fashion.
 	//
 	// # ::create() #
 	// Sets up table with given number of columns and their widths.
@@ -138,12 +148,12 @@ namespace utl {
 	// Draws a single table cell, if multiple arguments are passed, draws each one in a new cell.
 	// Accepts any type with a defined "<<" ostream operator.
 	//
-	/// Add
-	/// template<class Type...>
-	/// build_from_data(std::initialize_list<std::string>{ labels }, std::vector<Type> data...)
 	#ifdef _UTL_TABLE
 	namespace table {
-		// Types
+
+
+		// - Types -
+		// ---------
 		using uint = std::streamsize;
 		using _ios_flags = std::ios_base::fmtflags;
 
@@ -157,7 +167,9 @@ namespace utl {
 			ColumnFormat col_format;
 		};
 
-		// Predefined formats
+
+		// - Predefined formats -
+		// ----------------------
 		constexpr ColumnFormat NONE = { std::ios::showpoint, 6 };
 		
 		constexpr ColumnFormat FIXED(uint decimals = 3) { return { std::ios::fixed, decimals }; }
@@ -166,12 +178,16 @@ namespace utl {
 
 		constexpr ColumnFormat BOOL = { std::ios::boolalpha, 3 };
 
-		// Internal state
+
+		// - Internal state -
+		// ------------------
 		inline std::vector<_Column> _columns;
 		inline int _current_column = 0;
 		inline std::ostream *_output_stream = &std::cout;
 
-		// Table setup
+
+		// - Table setup -
+		// ---------------
 		inline void create(std::initializer_list<uint> &&widths) {
 			_columns.resize(widths.size());
 			for (size_t i = 0; i < _columns.size(); ++i) {
@@ -203,7 +219,7 @@ namespace utl {
 			old_state.copyfmt(*_output_stream);
 
 			// Set table formatting
-			(*_output_stream) << std::resetiosflags(_output_stream.get().flags());
+			(*_output_stream) << std::resetiosflags((*_output_stream).flags());
 			(*_output_stream).flags(format);
 			(*_output_stream).precision(float_precision);
 
@@ -227,12 +243,19 @@ namespace utl {
 			for (const auto &col : _columns) (*_output_stream) << std::string(static_cast<size_t>(col.width), '-') << "|";
 			(*_output_stream) << "\n";
 		}
+
+		/// Perhaps add
+		/// template<class Type...>
+		/// build_from_data(std::initialize_list<std::string>{ labels }, std::vector<Type> data...)
 	}
 	#endif
 
 
 
-	// ### utl::timer:: ###
+	// ##################
+	// ### utl::timer ###
+	// ##################
+	//
 	// Global-state timer with built-in formatting. Functions for local date and time.
 	//
 	// # ::start() #
@@ -257,6 +280,10 @@ namespace utl {
 	//
 	#ifdef _UTL_TIMER
 	namespace timer {
+
+
+		// - Internals -
+		// -------------
 		using _clock = std::chrono::steady_clock;
 		using _chrono_ns = std::chrono::nanoseconds;
 
@@ -268,28 +295,34 @@ namespace utl {
 
 		inline _clock::time_point _start_timepoint;
 
-		inline void start() {
-			_start_timepoint = _clock::now();
-		}
-
 		inline double _elapsed_time_as_ms() {
 			const auto elapsed = std::chrono::duration_cast<_chrono_ns>(_clock::now() - _start_timepoint).count();
 			return static_cast<double>(elapsed) / NS_IN_MS;
 		}
 
-		// Elapsed time
+		inline void start() {
+			_start_timepoint = _clock::now();
+		}
+
+
+		// - Elapsed time -
+		// ----------------
 		inline double elapsed_ms() { return _elapsed_time_as_ms(); }
 		inline double elapsed_sec() { return _elapsed_time_as_ms() / static_cast<double>(MS_IN_SEC); }
 		inline double elapsed_min() { return _elapsed_time_as_ms() / static_cast<double>(MS_IN_MIN); }
 		inline double elapsed_hours() { return _elapsed_time_as_ms() / static_cast<double>(MS_IN_HOUR); }
 
-		// Elapsed string
+
+		// - Elapsed string -
+		// ------------------
 		inline std::string elapsed_string_ms() { return std::to_string(elapsed_ms()) + " ms"; }
 		inline std::string elapsed_string_sec() { return std::to_string(elapsed_sec()) + " sec"; }
 		inline std::string elapsed_string_min() { return std::to_string(elapsed_min()) + " min"; }
 		inline std::string elapsed_string_hours() { return std::to_string(elapsed_hours()) + " hours"; }
 
-		// Full form
+
+		// - Elapsed string (full form) -
+		// ------------------------------
 		inline std::string elapsed_string_fullform() {
 			long long unaccounted_ms = static_cast<long long>(_elapsed_time_as_ms());
 
@@ -318,41 +351,52 @@ namespace utl {
 			return std::to_string(hours) + " hours " + std::to_string(min) + " min " + std::to_string(sec) + " sec " + std::to_string(ms) + " ms ";
 		}
 
-		// Date string
-		inline std::string datetime_string() {
+
+		// - Localtime string -
+		// --------------------
+		inline std::string _datetime_string_with_format(const char* format) {
 			std::time_t t = std::time(nullptr);
+
+			// Get localtime safely
+			std::tm time_moment{};
+			localtime_s(&time_moment, &t);
+
+			// Convert time to C-string
 			char mbstr[100];
-			std::strftime(mbstr, sizeof(mbstr), "%Y-%m-%d %H:%M:%S", std::localtime(&t));
+			std::strftime(mbstr, sizeof(mbstr), format, &time_moment);
+			// std::strftime(mbstr, sizeof(mbstr), format, std::localtime(&t)); // Unsafe version
+
 			return std::string(mbstr);
 		}
 
+		inline std::string datetime_string() {
+			return _datetime_string_with_format("%Y-%m-%d %H:%M:%S");
+		}
+
 		inline std::string datetime_string_id() {
-			std::time_t t = std::time(nullptr);
-			char mbstr[100];
-			std::strftime(mbstr, sizeof(mbstr), "%Y-%m-%d-%H-%M-%S", std::localtime(&t));
-			return std::string(mbstr);
+			return _datetime_string_with_format("%Y-%m-%d-%H-%M-%S");
 		}
 	}
 	#endif
 
 
 
-	// ### utl::sleep:: ###
+	// ##################
+	// ### utl::sleep ###
+	// ##################
+	//
 	// Various implementation of sleep(), used for precise delays.
 	//
 	// # ::spinlock() #
 	// Best precision, uses CPU.
-	// Expected error: ~1 ms
 	//
 	// # ::hybrid() #
 	// Recommended option, similar precision to spinlock with minimal CPU usage.
 	// Uses system sleep with statistically estimated error with spinlock sleep at the end.
 	// Adjusts system sleep error estimate with every call.
-	// Expected error: ~1-2 ms
 	//
 	// # ::system() #
 	// Worst precision, frees CPU.
-	// Expected error: ~10-20 ms
 	//
 	#ifdef _UTL_SLEEP
 	namespace sleep {
@@ -405,7 +449,10 @@ namespace utl {
 	
 
 
-	// ### utl::random:: ###
+	// ###################
+	// ### utl::random ###
+	// ###################
+	//
 	// Various convenient random functions, utilizes rand() internally.
 	// If good quality random is necessary use std::random generators instead.
 	//
@@ -455,8 +502,11 @@ namespace utl {
 
 
 
-	// ### utl::math:: ###
-	// Coordinate transformations, mathematical constans and helper functions.
+	// #################
+	// ### utl::math ###
+	// #################
+	//
+	// Coordinate transformations, mathematical constants and helper functions.
 	// 
 	// # ::abs(), ::sign(), ::sqr(), ::cube(), ::midpoint(), deg_to_rad(), rad_to_deg() #
 	// Constexpr templated math functions, useful when writing expressions with a "textbook form" math.
@@ -474,14 +524,20 @@ namespace utl {
 	//
 	#ifdef _UTL_MATH
 	namespace math {
-		// Constants
+
+
+		// - Constants -
+		// -------------
 		constexpr double PI = 3.14159265358979323846;
 		constexpr double PI_TWO = 2. * PI;
 		constexpr double PI_HALF = 0.5 * PI;
 		constexpr double E = 2.71828182845904523536;
 		constexpr double GOLDEN_RATIO = 1.6180339887498948482;
 
-		// Unary type traits
+		// - Unary type traits -
+		// ---------------------
+
+		// - is_addable_with_itself -
 		template<typename Type, typename = void>
 		struct is_addable_with_itself
 			: std::false_type {};
@@ -496,6 +552,7 @@ namespace utl {
 		>
 			: std::true_type {};
 
+		// - is_multipliable_by_scalar -
 		template<typename Type, typename = void>
 		struct is_multipliable_by_scalar
 			: std::false_type {};
@@ -507,6 +564,7 @@ namespace utl {
 		>
 			: std::true_type {};
 
+		// - is_sized -
 		template<typename Type, typename = void>
 		struct is_sized
 			: std::false_type {};
@@ -518,7 +576,9 @@ namespace utl {
 		>
 			: std::true_type {};
 
-		// Standard math functions
+
+		// - Standard math functions -
+		// ---------------------------
 		template<typename Type, std::enable_if_t<std::is_scalar<Type>::value, bool> = true>
 		constexpr Type abs(Type x) { return (x > Type(0)) ? x : -x; }
 
@@ -537,7 +597,9 @@ namespace utl {
 		>
 		constexpr Type midpoint(Type a, Type b) { return (a + b) * 0.5; }
 
-		// Degrees and radians
+
+		// - deg/rad conversion -
+		// ----------------------
 		template<typename FloatType, std::enable_if_t<std::is_floating_point<FloatType>::value, bool> = true>
 		constexpr FloatType deg_to_rad(FloatType degrees) {
 			constexpr FloatType FACTOR = FloatType(PI / 180.);
@@ -550,7 +612,9 @@ namespace utl {
 			return radians * FACTOR;
 		}
 
-		// Misc helpers
+
+		// - Misc helpers -
+		// ----------------
 		template<typename UintType, std::enable_if_t<std::is_integral<UintType>::value, bool> = true>
 		constexpr UintType uint_difference(UintType a, UintType b) {
 			// Cast to widest type if there is a change values don't fit into a regular 'int'
@@ -595,7 +659,10 @@ namespace utl {
 
 
 
-	// ### utl::shell:: ###
+	// ##################
+	// ### utl::shell ###
+	// ##################
+	//
 	// Command line utils that allow simple creation of temporary files and command line
 	// calls with stdout and stderr piping (a task surprisingly untrivial in standard C++).
 	//
@@ -628,17 +695,10 @@ namespace utl {
 	//
 	#ifdef _UTL_SHELL
 	namespace shell {
-		// Types
-		struct CommandResult {
-			int status; // error code
-			std::string stdout_output;
-			std::string stderr_output;
-		};
+		
 
-		// Internal state
-		inline std::unordered_set<std::string> _temp_files; // currently existing temp files
-
-		// File operations
+		// - Random ASCII strings -
+		// ------------------------
 		inline std::string random_ascii_string(size_t length) {
 			constexpr char min_char = 'a';
 			constexpr char max_char = 'z';
@@ -647,6 +707,11 @@ namespace utl {
 			for (size_t i = 0; i < length; ++i) result[i] = static_cast<char>(min_char + rand() % (max_char - min_char + 1));
 			return result;
 		}
+
+
+		// - Temp files -
+		// --------------
+		inline std::unordered_set<std::string> _temp_files; // currently existing temp files
 
 		inline std::string generate_temp_file() {
 			constexpr size_t MAX_ATTEMPTS = 500; // shouldn't realistically be encountered but still
@@ -683,7 +748,15 @@ namespace utl {
 			_temp_files.erase(file);
 		}
 
-		// Command line operations
+
+		// - Command line operations -
+		// ---------------------------
+		struct CommandResult {
+			int status; // error code
+			std::string stdout_output;
+			std::string stderr_output;
+		};
+
 		inline CommandResult run_command(const std::string &command) {
 			const auto stdout_file = utl::shell::generate_temp_file();
 			const auto stderr_file = utl::shell::generate_temp_file();
@@ -710,7 +783,9 @@ namespace utl {
 			return result;
 		}
 
-		// Argc/Argv parsing
+
+		// - Argc/Argv parsing -
+		// ---------------------
 		inline std::string get_exe_path(char** argv) {
 			// argc == 1 is a reasonable assumption since the only way to achieve such launch
 			// is to run executable through a null-execv, most command-line programs assume
@@ -738,7 +813,10 @@ namespace utl {
 
 
 
-	// ### utl::stre:: ###
+	// #################
+	// ### utl::stre ###
+	// #################
+	//
 	// String extensions, mainly a template ::to_str() method which works with all STL containers,
 	// including maps, sets and tuples with any level of mutual nesting. Also includes some
 	// expansions of <type_traits> header that allow categorizing types at compile-time.
@@ -776,8 +854,12 @@ namespace utl {
 	//
 	#ifdef _UTL_STRE
 	namespace stre {
-		// Unary type traits
-		// Is printable
+
+
+		// - Unary type traits -
+		// ---------------------
+
+		// - is_printable -
 		template<typename Type, typename = void>
 		struct is_printable
 			: std::false_type {};
@@ -789,7 +871,7 @@ namespace utl {
 		>
 			: std::true_type {};
 
-		// Is iterable through
+		// - is_iterable_through -
 		template<typename Type, typename = void, typename = void>
 		struct is_iterable_through
 			: std::false_type {};
@@ -802,7 +884,7 @@ namespace utl {
 		>
 			: std::true_type {};
 
-		// Is const iterable through
+		// - is_const_iterable_through -
 		template<typename Type, typename = void, typename = void>
 		struct is_const_iterable_through
 			: std::false_type {};
@@ -815,7 +897,7 @@ namespace utl {
 		>
 			: std::true_type {};
 
-		// Is tuple-like
+		// - is_tuple_like -
 		template<typename Type, typename = void, typename = void>
 		struct is_tuple_like
 			: std::false_type {};
@@ -828,7 +910,7 @@ namespace utl {
 		>
 			: std::true_type {};
 
-		// Is string
+		// - is_string -
 		template<typename Type>
 		struct is_string
 			:  std::disjunction<
@@ -836,8 +918,11 @@ namespace utl {
 				std::is_same<const char*, std::decay_t<Type>>,
 				std::is_same<std::string, std::decay_t<Type>>
 			> {};
+		
 
-		// --- to_str() ---
+		// - to_str() -
+		// ------------
+
 		// - delimers -
 		constexpr auto _CONTAINER_DELIMER_L = "[ ";
 		constexpr auto _CONTAINER_DELIMER_M = ", ";
@@ -957,7 +1042,9 @@ namespace utl {
 		>
 			: std::true_type {};
 
-		// Inline stringstream
+
+		// - Inline stringstream -
+		// -----------------------
 		class InlineStream {
 		public:
 			template<typename Type>
@@ -977,33 +1064,162 @@ namespace utl {
 }
 
 
-
-// ### utl::macros ###
+// ##################
+// ### UTL_MACROS ###
+// ##################
+//
 // All macros are prefixed with "UTL_" since namespaces are not available for
 // preprocessor directives
 //
+// # UTL_LOG_SET_OUTPUT() #
+// Select ostream used by LOG macros.
+//
+// # UTL_LOG(), UTL_LOG_DEBUG() #
+// Print message to selected ostream prefixed with [<filename>:<line> (<function>)].
+// Accepts multiple args (with defined operator <<) that get concatenated into a single message.
+// DEBUG version compiles to nothing in release.
+// 
+// # UTL_CURRENT_OS #
+// Evaluates to current platform detected through compiler macros. Can evaluate to:
+// "Windows64", "Windows32", "Windows (CYGWIN)", "Android", "Linux", "Unix-like OS", "MacOS", ""
+//
+// # UTL_REPEAT(N) #
+// Equivalent to 'for(int i=0; i<N; ++i)'
+//
+// # UTL_VA_ARGS_COUNT(args...) #
+// Counts how many comma-separated arguments are passed.
+// NOTE: Since macro evaluates arbitrary preprocessor text, language construct with additional comma should
+// to be surrounded by parentheses aka '(std::pair<int, int>{4, 5})', since 'std::pair<int, int>{4, 5}' gets
+// interpreted as 3 separate args 'std::pair<int', ' int>{4', ' 5}' by any variadic macro.
+//
+// # UTL_DECLARE_ENUM_WITH_STRING_CONVERSION(enum_name, enum_values...) #
+// Create enum 'enum_name' with enum_values and methods 'to_string()', 'from_string()' inside
+// 'enum_name' namespace.
+// NOTE: Enums can't be declared inside functions.
+//
 #ifdef _UTL_MACROS
 
-#define UTL_SET_LOG_OUTPUT()
 
+// - Macro Logger -
+// ----------------
 inline std::ostream *_utl_log_ostream = &std::cout;
+
+#define UTL_LOG_SET_OUTPUT(new_stream_) _utl_log_ostream = &new_stream_;
 
 template<typename... Args>
 void _utl_log_print(const std::string &file, int line, const std::string &func, const Args&... args) {
 	std::string filename = file.substr(file.find_last_of("/\\") + 1);
-	(*_utl_log_ostream) << "\033[31;1m";
+
+	///(*_utl_log_ostream) << "\033[31;1m"; // Supported by Linux and Windows10+, but prints to files, figure out a fix
 	(*_utl_log_ostream) << "[" << filename << ":" << line << ", " << func << "()]";
-	(*_utl_log_ostream) << "\033[0m" << " ";
-	(((*_utl_log_ostream) << args), ...);
+	///(*_utl_log_ostream) << "\033[0m";
+	
+	(*_utl_log_ostream) << " ";
+	((*_utl_log_ostream) << ... << args);
 	(*_utl_log_ostream) << '\n';
 }
 
 #define UTL_LOG(...) _utl_log_print(__FILE__, __LINE__, __func__, __VA_ARGS__)
 
 #ifdef _DEBUG
-#define UTL_DLOG(...) _utl_log_print(__FILE__, __LINE__, __func__, __VA_ARGS__)
+	#define UTL_LOG_DEBUG(...) _utl_log_print(__FILE__, __LINE__, __func__, __VA_ARGS__)
 #else
-#define UTL_DLOG(...) 
+	#define UTL_LOG_DEBUG(...) 
 #endif
+
+
+// - Detect OS -
+// -------------
+#if defined(_WIN64) // _WIN64 implies _WIN32 so it should be first
+	#define UTL_CURRENT_OS "Windows64"
+#elif defined(_WIN32)
+	#define UTL_CURRENT_OS "Windows32"
+#elif defined(__CYGWIN__) && !defined(_WIN32)
+	#define UTL_CURRENT_OS "Windows (CYGWIN)"  // Cygwin POSIX under Microsoft Window
+#elif defined(__ANDROID__) // __ANDROID__ implies __linux__ so it should be first
+	#define UTL_CURRENT_OS "Android"
+#elif defined(__linux__)
+	#define UTL_CURRENT_OS "Linux"
+#elif defined(unix) || defined(__unix__) || defined(__unix)
+	#define UTL_CURRENT_OS "Unix-like OS"
+#elif defined(__APPLE__) && defined(__MACH__)
+	#define UTL_CURRENT_OS "MacOS" // Apple OSX and iOS (Darwin)
+#else
+	#define UTL_CURRENT_OS ""
+#endif
+
+
+// - Repeat loop -
+// ---------------
+#define UTL_REPEAT(repeats_) for (int count_ = 0; count_ < repeats_; ++count_)
+
+
+// - Size of __VA_ARGS__ in variadic macros -
+// ------------------------------------------
+#define _UTL_EXPAND_VA_ARGS( x_ ) x_ // a fix for MSVC bug not expanding __VA_ARGS__ properly
+
+#define _UTL_VA_ARGS_COUNT_IMPL(                                \
+	      x01_, x02_, x03_, x04_, x05_, x06_, x07_, x08_, x09_, \
+	x10_, x11_, x12_, x13_, x14_, x15_, x16_, x17_, x18_, x19_, \
+	x20_, x21_, x22_, x23_, x24_, x25_, x26_, x27_, x28_, x29_, \
+	x30_, x31_, x32_, x33_, x34_, x35_, x36_, x37_, x38_, x39_, \
+	x40_, x41_, x42_, x43_, x44_, x45_, x46_, x47_, x48_, x49_, \
+	N_,...                                                      \
+) N_
+
+#define UTL_VA_ARGS_COUNT(...)                   \
+	_UTL_EXPAND_VA_ARGS(_UTL_VA_ARGS_COUNT_IMPL( \
+		__VA_ARGS__,                             \
+		49, 48, 47, 46, 45, 44, 43, 42, 41, 40,  \
+		39, 38, 37, 36, 35, 34, 33, 32, 31, 30,  \
+		29, 28, 27, 26, 25, 24, 23, 22, 21, 20,  \
+		19, 18, 17, 16, 15, 14, 13, 12, 11, 10,  \
+		 9,  8,  7,  6,  5,  4,  3,  2,  1,  0   \
+	))
+
+
+// - Enum with string conversion -
+// -------------------------------
+inline std::string _utl_trim_enum_string(const std::string &str) {
+	std::string::const_iterator left_it = str.begin();
+	while (left_it != str.end() && std::isspace(*left_it)) ++left_it;
+
+	std::string::const_reverse_iterator right_it = str.rbegin();
+	while (right_it.base() != left_it && std::isspace(*right_it)) ++right_it;
+
+	return std::string(left_it, right_it.base()); // return string with whitespaces trimmed at both sides
+}
+
+inline void _utl_split_enum_args(const char* va_args, std::string *strings, int count) {
+	std::stringstream ss(va_args);
+	std::string buffer;
+
+	for (int i = 0; ss.good() && (i < count); ++i) {
+		std::getline(ss, buffer, ',');
+		strings[i] = _utl_trim_enum_string(buffer);
+	}
+};
+
+#define UTL_DECLARE_ENUM_WITH_STRING_CONVERSION(enum_name_, ...)                                                     \
+	namespace enum_name_ {                                                                                           \
+		enum enum_name_ { __VA_ARGS__, _count };                                                                     \
+		                                                                                                             \
+		inline std::string _strings[_count];                                                                         \
+		                                                                                                             \
+		inline std::string to_string(enum_name_ enum_val) {                                                          \
+			if (_strings[0].empty()) { _utl_split_enum_args(#__VA_ARGS__, _strings, _count); }                       \
+			return _strings[enum_val];                                                                               \
+		}                                                                                                            \
+		                                                                                                             \
+		inline enum_name_ from_string(const std::string &enum_str) {	                                             \
+			if (_strings[0].empty()) { _utl_split_enum_args(#__VA_ARGS__, _strings, _count); }                       \
+			for (int i = 0; i < _count; ++i) { if (_strings[i] == enum_str) { return static_cast<enum_name_>(i); } } \
+			return _count;                                                                                           \
+		}                                                                                                            \
+	}
+		// - We count enum elements by adding fake '_count' value at the end
+		// - On first to_string() or from_string() we fill _string[_count] with values from __VA_ARGS__
+		// (lazy evaluation) that get passed as a single string that gets split into inididual names
+		// - On next calls we use _string[_count] to do a relatively fast converison
 
 #endif

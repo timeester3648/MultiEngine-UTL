@@ -59,7 +59,8 @@ Secondary design goals also include:
 * Coordinate transformations in **utl::math**;
 * More type traits in **utl::math**;
 * `shell::run_command_async()` method;
-* `stre::to_str()` implementation for `std::stack` and `std::queue`.
+* `stre::to_str()` implementation for `std::stack` and `std::queue`;
+* Colored text module or color support for log macros that does not involve including '<Windows.h>'.
 
 ## Requirements
 

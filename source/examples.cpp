@@ -5,9 +5,11 @@
 #include <unordered_map>
 #include <tuple>
 #include <set>
+#include <thread>
 
 
-
+UTL_DECLARE_ENUM_WITH_STRING_CONVERSION(Sides, LEFT, RIGHT, TOP, BOTTOM)
+	// like a regular enum must be declared outside of function
 
 
 int main(int argc, char* argv[]) {
@@ -216,13 +218,36 @@ int main(int argc, char* argv[]) {
 	// ### utl macros ###
 	std::cout << "\n\n### utl macros ###\n\n";
 
+	UTL_LOG_SET_OUTPUT(std::cerr);
+
 	// LOG compiles always
 	UTL_LOG("Block ", 17, ": responce in order. Proceeding with code ", 0, ".");
 
 	// DLOG compiles only in Debug
-	UTL_DLOG("Texture with ID ", 15037, " seems to be corrupted.");
+	UTL_LOG_DEBUG("Texture with ID ", 15037, " seems to be corrupted.");
 
 	// NOTE: stre::to_str() can be used to pass complex objects to logger
+
+	std::cout << "Current platform: " << UTL_CURRENT_OS << "\n";
+
+	// Loop than repeats N times
+	UTL_REPEAT(5) {
+		std::cout << "Ho\n";
+	}
+
+	// Variadic macro that outputs size of __VA_ARGS__
+	#define VARIADIC_MACRO(...) UTL_VA_ARGS_COUNT(__VA_ARGS__)
+
+	constexpr int args = VARIADIC_MACRO(1, 2., "3", A, B, (std::pair<int, int>{4, 5}), "12,3");
+
+	std::cout << "\nSize of __VA_ARGS__: " << args << "\n";
+
+	// Enum with string conversion
+	std::cout
+		<< "(enum -> string) conversion:\n"
+		<< Sides::BOTTOM << " -> " << Sides::to_string(Sides::BOTTOM) << "\n"
+		<< "(enum -> string) conversion:\n"
+		<< "BOTTOM" << " -> " << Sides::from_string("BOTTOM") << "\n";
 
 	return 0;
 }
