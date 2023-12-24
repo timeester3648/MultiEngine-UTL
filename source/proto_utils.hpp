@@ -75,11 +75,6 @@
 #include <cctype>
 #endif
 
-#ifdef _MSC_VER
-#pragma warning(disable : 4996) // _CRT_SECURE_NO_WARNINGS
-	// Disables MSVC requiring "safe" versions of localtime() instead of standard ones
-#endif
-
 
 
 namespace utl {
