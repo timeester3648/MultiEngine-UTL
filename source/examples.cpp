@@ -11,8 +11,8 @@
 UTL_DECLARE_ENUM_WITH_STRING_CONVERSION(Sides, LEFT, RIGHT, TOP, BOTTOM)
 	// like a regular enum must be declared outside of function
 
-UTL_DECLARE_IS_FUNCTION_PRESENT(localtime_s, errno_t, tm*, const time_t*)
-UTL_DECLARE_IS_FUNCTION_PRESENT(localtime_r, errno_t, const time_t*, tm*)
+UTL_DECLARE_IS_FUNCTION_PRESENT(localtime_s, int, tm*, const time_t*)
+UTL_DECLARE_IS_FUNCTION_PRESENT(localtime_r, tm*, const time_t*, tm*)
 
 
 int main(int argc, char* argv[]) {
