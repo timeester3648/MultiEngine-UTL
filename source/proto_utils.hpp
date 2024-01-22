@@ -349,21 +349,41 @@ namespace utl {
 
 		// - Localtime string -
 		// --------------------
+
+		// SFINAE to select localtime_s() or localtime_r()
+		template <typename Arg_tm, typename Arg_time_t>
+		auto _available_localtime_impl(Arg_tm time_moment, Arg_time_t timer)
+			-> decltype(localtime_s(std::forward<Arg_tm>(time_moment), std::forward<Arg_time_t>(timer)))
+		{
+			return localtime_s(std::forward<Arg_tm>(time_moment), std::forward<Arg_time_t>(timer));
+		}
+
+		template <typename Arg_tm, typename Arg_time_t>
+		auto _available_localtime_impl(Arg_tm time_moment, Arg_time_t timer)
+			-> decltype(localtime_r(std::forward<Arg_time_t>(timer), std::forward<Arg_tm>(time_moment)))
+		{
+			return localtime_r(std::forward<Arg_time_t>(timer), std::forward<Arg_tm>(time_moment));
+		}
+
 		inline std::string _datetime_string_with_format(const char* format) {
 			std::time_t timer = std::time(nullptr);
 			std::tm time_moment{};
 
-			// Get localtime safely (if possible)
-			#if defined(__unix__)
-			localtime_r(&timer, &time_moment);
-			#elif defined(_MSC_VER)
-			localtime_s(&time_moment, &timer);
-			#else
-			// static std::mutex mtx; // mutex can be used to make thread-safe version but add another dependency
-			// std::lock_guard<std::mutex> lock(mtx);
-			time_moment = *std::localtime(&timer);
-			#endif
+			// Call localtime_s() or localtime_r() depending on which one is present
+			_available_localtime_impl(&time_moment, &timer);
 
+			/// Macro version
+			//// Get localtime safely (if possible)
+			//#if defined(__unix__)
+			//localtime_r(&timer, &time_moment);
+			//#elif defined(_MSC_VER)
+			//localtime_s(&time_moment, &timer);
+			//#else
+			//// static std::mutex mtx; // mutex can be used to make thread-safe version but add another dependency
+			//// std::lock_guard<std::mutex> lock(mtx);
+			//time_moment = *std::localtime(&timer);
+			//#endif
+			
 			// Convert time to C-string
 			char mbstr[100];
 			std::strftime(mbstr, sizeof(mbstr), format, &time_moment);
@@ -433,9 +453,9 @@ namespace utl {
 
 				// Welford's algorithm for mean and unbiased variance estimation 
 				const double delta = observed - mean;
-				mean += delta / count;
+				mean += delta / static_cast<double>(count);
 				m2 += delta * (observed - mean); // intermediate values 'm2' reduce numerical instability
-				const double variance = std::sqrt(m2 / (count - 1));
+				const double variance = std::sqrt(m2 / static_cast<double>(count - 1));
 
 				estimate = mean + variance; // set estimate 1 standard deviation above the mean
 				// can be adjusted to make estimate more or less pessimistic
@@ -492,7 +512,8 @@ namespace utl {
 
 		template<class T>
 		const T& rand_choise(std::initializer_list<T> objects) {
-			return objects.begin()[rand_int(0, objects.size() - 1)];
+			const int random_index = rand_int(0, static_cast<int>(objects.size()) - 1);
+			return objects.begin()[random_index];
 		}
 
 		template<class T>
@@ -1220,9 +1241,73 @@ inline void _utl_split_enum_args(const char* va_args, std::string *strings, int 
 			return _count;                                                                                           \
 		}                                                                                                            \
 	}
-		// - We count enum elements by adding fake '_count' value at the end
-		// - On first to_string() or from_string() we fill _string[_count] with values from __VA_ARGS__
-		// (lazy evaluation) that get passed as a single string that gets split into inididual names
-		// - On next calls we use _string[_count] to do a relatively fast converison
+		// IMPLEMENTATION COMMENTS:
+		// We declare namespace with enum inside to simulate enum-class while having '_strings' array
+		// and 'to_string()', 'from_string()' methods bundled with it.
+		//
+		// To count number of enum elements we add fake '_count' value at the end, which ends up being enum size
+		//
+		// '_strings' is declared compile-time, but gets filled through lazy evaluation upon first
+		// 'to_string()' or 'from_string()' call. To fill it we interpret #__VA_ARGS__ as a single string
+		// with some comma-separated identifiers. Those identifiers get split by commas, trimmed from
+		// whitespaces and added to '_strings'
+		//
+		// Upon further calls (enum -> string) conversion is done though taking '_strings[enum_val]',
+		// while (string -> enum) conversion requires searching through '_strings' to find enum index
+
+
+// - Is-function-present deduction -
+// ---------------------------------
+#define UTL_DECLARE_IS_FUNCTION_PRESENT(function_name_, return_type_, ...)			                     \
+	template<typename ReturnType, typename... ArgTypes>                                                  \
+	class _utl_is_function_present_impl_##function_name_ {                                               \
+	private:                                                                                             \
+		typedef char no[sizeof(ReturnType) + 1];                                                         \
+		                                                                                                 \
+		template <typename... C>                                                                         \
+		static auto test(C... arg) -> decltype(function_name_(arg...));                                  \
+		                                                                                                 \
+		template <typename... C>                                                                         \
+		static no& test(...);                                                                            \
+	                                                                                                     \
+	public:                                                                                              \
+		enum { value = (sizeof(test<ArgTypes...>(std::declval<ArgTypes>()...)) == sizeof(ReturnType)) }; \
+	};                                                                                                   \
+	                                                                                                     \
+	using is_function_present_##function_name_ = _utl_is_function_present_impl_##function_name_<return_type_, __VA_ARGS__>;
+		// TASK:
+		// We need to detect at compile time if function FUNC(ARGS...) exists.
+		// FUNC identifier isn't guaranteed to be declared.
+		//
+		// Ideal method would look like UTL_FUNC_EXISTS(FUNC, RETURN_TYPE, ARG_TYPES...) -> true/false
+		// This does not seem to be possible, we have to declare integral constant insted, see explanation below.
+		//
+		// WHY IS IT SO HARD:
+		// (1) Can this be done through preprocessor macros?
+		// No, preprocessor has no way to tell whether C++ identifier is defined or not.
+		//
+		// (2) Is there a compiler-specific way to do it?
+		// Doesn't seem to be the case.
+		//
+		// (3) Why not use some sort of template with FUNC as a parameter?
+		// Essentially we have to evaluate undeclared identifier, while compiler exits with error upon
+		// encountering anything undeclared. The only way to detect whether undeclared identifier exists 
+		// or not seems to be through SFINAE.
+		//
+		// IMPLEMENTATION COMMENTS:
+		// We declate integral constant class with 2 functions 'test()', first one takes priority during overload
+		// resolution and compiles if FUNC(ARGS...) is defined, otherwise it's {Substitution Failure} which is
+		// {Is Not An Error} and second function compiles.
+		//
+		// To resolve which overload of 'test()' was selected we check the sizeof() return type, 2nd overload
+		// has a return type 'char[sizeof(ReturnType) + 1]' so it's always different from 1st overload.
+		// Resolution result (true/false) gets stored to '::value'.
+		//
+		// Note that we can't pass 'ReturnType' and 'ArgTypes' directly through '__VA_ARGS__' because
+		// to call function 'test(ARGS...)' in general case we have to 'std::declval<>()' all 'ARGS...'.
+		// To do so we can use variadic template syntax and then just forward '__VA_ARGS__' to the template
+		// through 'using is_function_present = is_function_present_impl<ReturnType, __VA_ARGS__>'.
+		//
+		// ALTERNATIVES: Perhaps some sort of inline SFINAE can be done through C++14 generic lambdas, look into it.
 
 #endif

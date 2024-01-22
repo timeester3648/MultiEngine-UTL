@@ -1,5 +1,6 @@
 
 
+
 # UTL_MACROS
 
 [<- back to README.md](https://github.com/DmitriBogdanov/prototyping_utils/tree/master)
@@ -17,6 +18,7 @@
 // Automatic code generation
 #define UTL_VA_ARGS_COUNT(...) // size of __VA_ARGS__ in variadic macros
 #define UTL_DECLARE_ENUM_WITH_STRING_CONVERSION(enum_name, ...)
+#define UTL_DECLARE_IS_FUNCTION_PRESENT(function_name, return_type, ...)
 
 // Convenience macros
 #define UTL_REPEAT(repeats) // repeat loop
@@ -56,7 +58,15 @@ Returns number of comma-separated arguments passed. Used mainly to deduce the si
 
 Declares namespace `enum_name` that contains enumeration `enum_name` with members `...` and methods `enum_name::to_string()`, `enum_name::from_string()` that convert enum values to corresponding `std::string` and back.
 
-**NOTE**: Like a regular namespace definition, this macro should be declared outside of functions.
+> ```cpp
+> UTL_DECLARE_IS_FUNCTION_PRESENT(function_name, return_type, ...)
+> ```
+
+Declares [integral constant](https://en.cppreference.com/w/cpp/types/integral_constant) named `is_function_present_##function_name`, which returns on compile-time whether function `function_name()` with return type `return_type` that accepts arguments with types `...` exists or not.
+
+Used mainly to detect presence of platform- or library-specific functions, which allows `constexpr if` logic based on existing methods without resorting to macros.
+
+**NOTE**: Like a regular template class, this macro should be declared outside of functions.
 
 > ```cpp
 > UTL_REPEAT(repeats)
@@ -131,7 +141,41 @@ Output:
 BOTTOM -> 3
 ```
 
-## Example 4 (getting compilation platform name)
+## Example 4 (detect existence of a function with SFINAE)
+
+[ [Run this code](https://godbolt.org/#g:!((g:!((g:!((h:codeEditor,i:(filename:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,selection:(endColumn:1,endLineNumber:5,positionColumn:1,positionLineNumber:5,selectionStartColumn:1,selectionStartLineNumber:5,startColumn:1,startLineNumber:5),source:'%23include+%3Chttps://raw.githubusercontent.com/DmitriBogdanov/prototyping_utils/master/source/proto_utils.hpp%3E%0A%0AUTL_DECLARE_IS_FUNCTION_PRESENT(localtime_s,+errno_t,+tm*,+const+time_t*)%0AUTL_DECLARE_IS_FUNCTION_PRESENT(localtime_r,+errno_t,+const+time_t*,+tm*)%0A%0Aint+main(int+argc,+char+**argv)+%7B%0A%0A++++//+Check+if+function+exists%0A++++constexpr+bool+exists_localtime_s+%3D+is_function_present_localtime_s::value%3B%0A++++constexpr+bool+exists_localtime_r+%3D+is_function_present_localtime_r::value%3B%0A%0A++++std::cout%0A++++++++%3C%3C+%22localtime_s()+present:+%22+%3C%3C+exists_localtime_s+%3C%3C+%22%5Cn%22%0A++++++++%3C%3C+%22localtime_r()+present:+%22+%3C%3C+exists_localtime_r+%3C%3C+%22%5Cn%22%3B%0A%0A++++//+Do+some+specific+logic+based+on+existing+function%0A%09if+constexpr+(exists_localtime_s)+%7B%0A%09%09std::cout+%3C%3C+%22%5Cn~+Some+localtime_s()-specific+logic+~%22%3B%0A%09%7D%0A%09if+constexpr+(exists_localtime_r)+%7B%0A%09%09std::cout+%3C%3C+%22%5Cn~+Some+localtime_r()-specific+logic+~%22%3B%0A%09%7D%0A%0A++++return+0%3B%0A%7D%0A'),l:'5',n:'0',o:'C%2B%2B+source+%231',t:'0')),k:71.71783148269105,l:'4',n:'0',o:'',s:0,t:'0'),(g:!((g:!((h:compiler,i:(compiler:clang1600,filters:(b:'0',binary:'1',binaryObject:'1',commentOnly:'0',debugCalls:'1',demangle:'0',directives:'0',execute:'0',intel:'0',libraryCode:'0',trim:'1'),flagsViewOpen:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,libs:!(),options:'-std%3Dc%2B%2B17+-O2',overrides:!(),selection:(endColumn:1,endLineNumber:1,positionColumn:1,positionLineNumber:1,selectionStartColumn:1,selectionStartLineNumber:1,startColumn:1,startLineNumber:1),source:1),l:'5',n:'0',o:'+x86-64+clang+16.0.0+(Editor+%231)',t:'0')),header:(),l:'4',m:50,n:'0',o:'',s:0,t:'0'),(g:!((h:output,i:(compilerName:'x86-64+clang+16.0.0',editorid:1,fontScale:14,fontUsePx:'0',j:1,wrap:'1'),l:'5',n:'0',o:'Output+of+x86-64+clang+16.0.0+(Compiler+%231)',t:'0')),k:46.69421860597116,l:'4',m:50,n:'0',o:'',s:0,t:'0')),k:28.282168517308946,l:'3',n:'0',o:'',t:'0')),l:'2',n:'0',o:'',t:'0')),version:4) ]
+```cpp
+// Outside of function
+UTL_DECLARE_IS_FUNCTION_PRESENT(localtime_s, errno_t, tm*, const time_t*)
+UTL_DECLARE_IS_FUNCTION_PRESENT(localtime_r, errno_t, const time_t*, tm*)
+
+// Inside function
+// Check if function exists
+constexpr bool exists_localtime_s = is_function_present_localtime_s::value;
+constexpr bool exists_localtime_r = is_function_present_localtime_r::value;
+
+std::cout
+	<< "Windows 'localtime_s()' present: " << exists_localtime_s << "\n"
+	<< "Linux   'localtime_r()' present: " << exists_localtime_r << "\n";
+
+// Do some specific logic based on existing function
+if constexpr (exists_localtime_s) {
+	std::cout << "\n~ Some localtime_s()-specific logic ~";
+}
+if constexpr (exists_localtime_r) {
+	std::cout << "\n~ Some localtime_r()-specific logic ~";
+}
+```
+
+Output:
+```
+Windows 'localtime_s()' present: true
+Linux   'localtime_r()' present: false
+
+~ Some localtime_s()-specific logic ~
+```
+
+## Example 5 (getting compilation platform name)
 
 [ [Run this code](https://godbolt.org/#g:!((g:!((g:!((h:codeEditor,i:(filename:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,selection:(endColumn:108,endLineNumber:1,positionColumn:108,positionLineNumber:1,selectionStartColumn:108,selectionStartLineNumber:1,startColumn:108,startLineNumber:1),source:'%23include+%3Chttps://raw.githubusercontent.com/DmitriBogdanov/prototyping_utils/master/source/proto_utils.hpp%3E%0A%0Aint+main(int+argc,+char+**argv)+%7B%0A%0A++++std::cout+%3C%3C+%22Current+platform:+%22+%3C%3C+UTL_CURRENT_OS+%3C%3C+%22%5Cn%22%3B%0A%0A++++return+0%3B%0A%7D%0A'),l:'5',n:'0',o:'C%2B%2B+source+%231',t:'0')),k:71.71783148269105,l:'4',n:'0',o:'',s:0,t:'0'),(g:!((g:!((h:compiler,i:(compiler:clang1600,filters:(b:'0',binary:'1',binaryObject:'1',commentOnly:'0',debugCalls:'1',demangle:'0',directives:'0',execute:'0',intel:'0',libraryCode:'0',trim:'1'),flagsViewOpen:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,libs:!(),options:'-std%3Dc%2B%2B17+-O2',overrides:!(),selection:(endColumn:1,endLineNumber:1,positionColumn:1,positionLineNumber:1,selectionStartColumn:1,selectionStartLineNumber:1,startColumn:1,startLineNumber:1),source:1),l:'5',n:'0',o:'+x86-64+clang+16.0.0+(Editor+%231)',t:'0')),header:(),l:'4',m:50,n:'0',o:'',s:0,t:'0'),(g:!((h:output,i:(compilerName:'x86-64+clang+16.0.0',editorid:1,fontScale:14,fontUsePx:'0',j:1,wrap:'1'),l:'5',n:'0',o:'Output+of+x86-64+clang+16.0.0+(Compiler+%231)',t:'0')),k:46.69421860597116,l:'4',m:50,n:'0',o:'',s:0,t:'0')),k:28.282168517308946,l:'3',n:'0',o:'',t:'0')),l:'2',n:'0',o:'',t:'0')),version:4) ]
 ```cpp

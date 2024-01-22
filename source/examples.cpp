@@ -11,6 +11,9 @@
 UTL_DECLARE_ENUM_WITH_STRING_CONVERSION(Sides, LEFT, RIGHT, TOP, BOTTOM)
 	// like a regular enum must be declared outside of function
 
+UTL_DECLARE_IS_FUNCTION_PRESENT(localtime_s, errno_t, tm*, const time_t*)
+UTL_DECLARE_IS_FUNCTION_PRESENT(localtime_r, errno_t, const time_t*, tm*)
+
 
 int main(int argc, char* argv[]) {
 	using namespace utl;
@@ -249,6 +252,26 @@ int main(int argc, char* argv[]) {
 		<< "(string -> enum) conversion:\n"
 		<< "BOTTOM" << " -> " << Sides::from_string("BOTTOM") << "\n";
 
+	// Check if function exists
+	constexpr bool exists_localtime_s = is_function_present_localtime_s::value;
+	constexpr bool exists_localtime_r = is_function_present_localtime_r::value;
+
+	std::cout
+		<< "Windows 'localtime_s()' present: " << exists_localtime_s << "\n"
+		<< "Linux   'localtime_r()' present: " << exists_localtime_r << "\n";
+
+	// Do some specific logic based on existing function
+	if constexpr (exists_localtime_s) {
+		std::cout << "\n~ Some localtime_s()-specific logic ~";
+	}
+	if constexpr (exists_localtime_r) {
+		std::cout << "\n~ Some localtime_r()-specific logic ~";
+	}
+
+	// localtime_s(tm*, time_t*) and localtime_r(time_t*, tm*) are platform-specific functions that do
+	// the same thing, using 'if constexpr (exists_localtime_...)' we can, for example, conditionally
+	// compile whichever method is present to make cross-platform code
+	/// FIGURE OUT HOW
 
 	return 0;
 }
