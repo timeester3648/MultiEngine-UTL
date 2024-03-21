@@ -127,10 +127,10 @@ UTL_DECLARE_ENUM_WITH_STRING_CONVERSION(Sides, LEFT, RIGHT, TOP, BOTTOM)
 
 // Inside function
 std::cout
-		<< "(enum -> string) conversion:\n"
-		<< Sides::BOTTOM << " -> " << Sides::to_string(Sides::BOTTOM) << "\n"
-		<< "(string -> enum) conversion:\n"
-		<< "BOTTOM" << " -> " << Sides::from_string("BOTTOM") << "\n";
+	<< "(enum -> string) conversion:\n"
+	<< Sides::BOTTOM << " -> " << Sides::to_string(Sides::BOTTOM) << "\n"
+	<< "(string -> enum) conversion:\n"
+	<< "BOTTOM" << " -> " << Sides::from_string("BOTTOM") << "\n";
 ```
 
 Output:

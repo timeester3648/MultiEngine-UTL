@@ -5,6 +5,7 @@
 #include <unordered_map>
 #include <tuple>
 #include <set>
+#include <list>
 #include <thread>
 
 
@@ -268,10 +269,41 @@ int main(int argc, char* argv[]) {
 		std::cout << "\n~ Some localtime_r()-specific logic ~";
 	}
 
-	// localtime_s(tm*, time_t*) and localtime_r(time_t*, tm*) are platform-specific functions that do
-	// the same thing, using 'if constexpr (exists_localtime_...)' we can, for example, conditionally
-	// compile whichever method is present to make cross-platform code
-	/// FIGURE OUT HOW
+	// ### utl::progressbar:: ###
+	std::cout << "\n\n### utl::progressbar:: ###\n\n";
+
+	using ms = std::chrono::milliseconds;
+
+	constexpr ms time(15'000);
+	constexpr ms tau(10);
+
+	// Create progress bar with style '[#####...] xx.xx%' and width 50 that updates every 0.05%
+	auto bar = progressbar::Percentage('#', '.', 50, 0.05 * 1e-2, true);
+
+	std::cout << "\n- progressbar::Percentage -";
+
+	bar.start();
+	for (ms t(0); t <= time; t += tau) {
+		std::this_thread::sleep_for(tau); // simulate some work
+		const double percentage = double(t.count()) / time.count();
+
+		bar.set_progress(percentage);
+	}
+	bar.finish();
+
+	std::cout << "\n- progressbar::Ruler -";
+
+	// Create a primitive progress bar with ruler-like style
+	auto ruler = progressbar::Ruler('#');
+
+	ruler.start();
+	for (ms t(0); t <= time; t += tau) {
+		std::this_thread::sleep_for(tau); // simulate some work
+		const double percentage = double(t.count()) / time.count();
+
+		ruler.set_progress(percentage);
+	}
+	ruler.finish();
 
 	return 0;
 }

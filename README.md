@@ -13,6 +13,10 @@ This is a collection of various utilities that aim to provide a set of concise "
 
 Math-related utilities.
 
+> [**utl::progressbar**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/progressbar.md)
+
+Configurable progress bars for console appls.
+
 > [**utl::random**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/random.md)
 
 Convenient random functions.
