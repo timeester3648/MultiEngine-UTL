@@ -1,5 +1,6 @@
 
 
+
 # utl::shell
 
 [<- back to README.md](https://github.com/DmitriBogdanov/prototyping_utils/tree/master)
@@ -51,7 +52,9 @@ Internally module keeps track of all created temporary files so they can be late
 > shell::clear_temp_files();
 > ```
 
-Deletes all temporary files created with `generate_temp_file()` during current runtime.
+Deletes all temporary files created with `generate_temp_file()` during current runtime. **Called automatically when exiting the program.**
+
+**Note:** "Exiting" happens when program returns from `main()` or calls `std::exit()`.
 
 > ```cpp
 > shell::erase_temp_file(const std::string &file);
@@ -60,20 +63,18 @@ Deletes all temporary files created with `generate_temp_file()` during current r
 Deletes a single temporary file. Used to make methods that can clean up internal temporary files without affecting the global state.
 
 > ```cpp
-> std::string shell::get_exe_path(char** argv);
-> std::string_view shell::get_exe_path_view(char** argv);
+> std::string_view shell::get_exe_path(char** argv);
 > ```
 
-Parses program executable path from `argv` as `std::string` or `std::string_view`. Views have lower overhead, but keep pointers to original data.
+Parses program executable path from `argv` as `std::string_view`.
 
 `argc == 1` is a reasonable assumption since the only way to achieve such launch is to run executable through a null `execv()`, most command-line programs assume such scenario to be either impossible or an error on user side.
 
 > ```cpp
-> std::vector<std::string> shell::get_command_line_args(int argc, char** argv);
-> std::vector<std::string_view> shell::get_command_line_args_view(int argc, char** argv);
+> std::vector<std::string_view> shell::get_command_line_args(int argc, char** argv);
 > ```
 
-Parses program command line arguments from `argv` as `std::string` or `std::string_view`. Views have lower overhead, but keep pointers to original data.
+Parses program command line arguments from `argv` as `std::string_view`.
 
 > ```cpp
 > CommandResult shell::run_command(const std::string &command);
@@ -95,7 +96,9 @@ std::ofstream(temp_file_path) << temp_file_text;
 std::cout << "Temp. file path: " << temp_file_path << "\n";
 std::cout << "Temp. file text: " << temp_file_text << "\n";
 
-shell::clear_temp_files();
+// We can clear files manually, but otherwise they will be automatically cleared upon exit
+// ('exit' is triggered by calling std::exit() or returning from main())
+// shell::clear_temp_files();
 ```
 
 Output:

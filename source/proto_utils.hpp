@@ -764,10 +764,29 @@ namespace utl {
 		// - Temp files -
 		// --------------
 		inline std::unordered_set<std::string> _temp_files; // currently existing temp files
+		inline bool _temp_files_cleanup_registered = false;
+
+		inline void clear_temp_files() {
+			for (const auto &file : _temp_files) std::filesystem::remove(file);
+			_temp_files.clear();
+		}
+
+		inline void erase_temp_file(const std::string &file) {
+			// we take 'file' as 'std::string&' instead of 'std::string_view' because it is
+			// used to call '.erase()' on the map of 'std::string', which does not take string_view
+			std::filesystem::remove(file);
+			_temp_files.erase(file);
+		}
 
 		inline std::string generate_temp_file() {
 			constexpr size_t MAX_ATTEMPTS = 500; // shouldn't realistically be encountered but still
 			constexpr size_t NAME_LENGTH = 30;
+
+			// Register std::atexit() if not already registered
+			if (!_temp_files_cleanup_registered) {
+				const bool success = (std::atexit(clear_temp_files) == 0);
+				_temp_files_cleanup_registered = success;
+			}
 
 			// Try creating files until unique name is found
 			for (size_t i = 0; i < MAX_ATTEMPTS; ++i) {
@@ -778,26 +797,15 @@ namespace utl {
 				const std::ofstream temp_file(temp_path);
 
 				if (temp_file.good()) {
-					_temp_files.insert(temp_path.string());
+					_temp_files.insert(temp_path.string());	
 					return temp_path.string();
 				}
 				else {
 					return std::string();
-				}
-				
+				}	
 			}
 
 			return std::string();
-		}
-
-		inline void clear_temp_files() {
-			for (const auto &file : _temp_files) std::filesystem::remove(file);
-			_temp_files.clear();
-		}
-
-		inline void erase_temp_file(const std::string &file) {
-			std::filesystem::remove(file);
-			_temp_files.erase(file);
 		}
 
 
@@ -810,6 +818,9 @@ namespace utl {
 		};
 
 		inline CommandResult run_command(const std::string &command) {
+			// we take 'std::string&' instead of 'std::string_view' because there
+			// has to be a guarantee that contained string is null-terminated
+
 			const auto stdout_file = utl::shell::generate_temp_file();
 			const auto stderr_file = utl::shell::generate_temp_file();
 
@@ -838,24 +849,14 @@ namespace utl {
 
 		// - Argc/Argv parsing -
 		// ---------------------
-		inline std::string get_exe_path(char** argv) {
+		inline std::string_view get_exe_path(char** argv) {
 			// argc == 1 is a reasonable assumption since the only way to achieve such launch
 			// is to run executable through a null-execv, most command-line programs assume
 			// such scenario to be either impossible or an error on user side
-			return std::string(argv[0]);
-		}
-
-		inline std::string_view get_exe_path_view(char** argv) {
 			return std::string_view(argv[0]);
 		}
 
-		inline std::vector<std::string> get_command_line_args(int argc, char** argv) {
-			std::vector<std::string> arguments(argc - 1);
-			for (size_t i = 0; i < arguments.size(); ++i) arguments.emplace_back(argv[i]);
-			return arguments;
-		}
-
-		inline std::vector<std::string_view> get_command_line_args_view(int argc, char** argv) {
+		inline std::vector<std::string_view> get_command_line_args(int argc, char** argv) {
 			std::vector<std::string_view> arguments(argc - 1);
 			for (size_t i = 0; i < arguments.size(); ++i) arguments.emplace_back(argv[i]);
 			return arguments;
@@ -1119,6 +1120,14 @@ namespace utl {
 	// ### utl::progressbar ###
 	// ########################
 	//
+	// # ::set_ostream() #
+	// Sets ostream used for progress bars.
+	//
+	// # ::Percentage #
+	// Proper progress bar, uses carriage return escape sequence (\r) to render new states in the same spot.
+	//
+	// # ::Ruler #
+	// Primitive & lightweight progress bar, useful when terminal has no proper support for escape sequences.
 	//
 	#ifdef _UTL_PROGRESSBAR
 	namespace progressbar {
@@ -1328,6 +1337,9 @@ namespace utl {
 // 'enum_name' namespace.
 // NOTE: Enums can't be declared inside functions.
 //
+// # UTL_EXIT(message = "<NO MESSAGE>", code = 1) #
+// Call std::exit() with given codem print message and call site to std::cerr.
+//
 #ifdef _UTL_MACROS
 
 
@@ -1338,8 +1350,8 @@ inline std::ostream *_utl_log_ostream = &std::cout;
 #define UTL_LOG_SET_OUTPUT(new_stream_) _utl_log_ostream = &new_stream_;
 
 template<typename... Args>
-void _utl_log_print(const std::string &file, int line, const std::string &func, const Args&... args) {
-	std::string filename = file.substr(file.find_last_of("/\\") + 1);
+void _utl_log_print(std::string_view file, int line, std::string_view func, const Args&... args) {
+	const std::string_view filename = file.substr(file.find_last_of("/\\") + 1);
 
 	///(*_utl_log_ostream) << "\033[31;1m"; // Supported by Linux and Windows10+, but prints to files, figure out a fix
 	(*_utl_log_ostream) << "[" << filename << ":" << line << ", " << func << "()]";
@@ -1379,6 +1391,14 @@ void _utl_log_print(const std::string &file, int line, const std::string &func, 
 	#define UTL_CURRENT_OS ""
 #endif
 
+
+// - Detect Debug -
+// ----------------
+#ifdef _DEBUG
+	#define UTL_IS_DEBUG true
+#else
+	#define UTL_IS_DEBUG false
+#endif
 
 // - Repeat loop -
 // ---------------
@@ -1516,5 +1536,39 @@ inline void _utl_split_enum_args(const char* va_args, std::string *strings, int 
 		// through 'using is_function_present = is_function_present_impl<ReturnType, __VA_ARGS__>'.
 		//
 		// ALTERNATIVES: Perhaps some sort of inline SFINAE can be done through C++14 generic lambdas, look into it.
+
+// - Exit -
+// --------
+void _utl_exit_with_message(
+	std::string_view file, int line, std::string_view func,
+	std::string_view message = "<NO MESSAGE>", int code = 1
+) {
+	constexpr int  HLINE_WIDTH  = 50;
+	constexpr char HLINE_SYMBOL = '-';
+	
+	const std::string_view filename = file.substr(file.find_last_of("/\\") + 1);
+
+	// Create some more space
+	std::cerr << std::endl;
+
+	// Horizontal line
+	std::fill_n(std::ostreambuf_iterator<char>(std::cerr), HLINE_WIDTH, HLINE_SYMBOL);
+	std::cerr << std::endl;
+
+	// Text
+	std::cerr
+		<< "Exit triggered on [" << filename << ":" << line << ", " << func << "()] with:" << std::endl
+		<< "Message => " << message << std::endl
+		<< "Code    => " << code << std::endl;
+
+	// Horizontal line
+	std::fill_n(std::ostreambuf_iterator<char>(std::cerr), HLINE_WIDTH, HLINE_SYMBOL);
+	std::cerr << std::endl;
+
+	std::exit(code);
+}
+
+#define UTL_EXIT(...) _utl_exit_with_message(__FILE__, __LINE__, __func__, __VA_ARGS__);
+	
 
 #endif

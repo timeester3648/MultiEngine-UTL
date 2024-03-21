@@ -1,6 +1,7 @@
 
 
 
+
 # UTL_MACROS
 
 [<- back to README.md](https://github.com/DmitriBogdanov/prototyping_utils/tree/master)
@@ -23,6 +24,8 @@
 // Convenience macros
 #define UTL_REPEAT(repeats) // repeat loop
 #define UTL_CURRENT_OS
+#define UTL_IS_DEBUG
+#define UTL_EXIT(message, code) // omitted args get replaced with default values
 ```
 
 All macros in this module are prefixed with `UTL_` since namespaces do not affect the scope of preprocessor directives.
@@ -82,6 +85,17 @@ Evaluates to string that contains the name of compilation platform.
 
 Possible values: `"Windows64"`, `"Windows32"`, `"Windows (CYGWIN)"`, `"Android"`, `"Linux"`, `"Unix-like OS"`, `"MacOS"`, `""` (if none of the platforms were detected).
 
+> ```cpp
+> UTL_IS_DEBUG
+> ```
+
+Evaluated as `true`  for a debug build, otherwise `false`.
+
+> ```cpp
+> UTL_EXIT(message, code)
+> ```
+
+Prints call site & message to  `std::cerr` and calls `std::exit()` with a given code. Omitted arguments take default values: `message = "<NO MESSAGE>"` and `code = 1`.
 
 ## Example 1 (logging)
 
@@ -177,12 +191,33 @@ Linux   'localtime_r()' present: false
 
 ## Example 5 (getting compilation platform name)
 
-[ [Run this code](https://godbolt.org/#g:!((g:!((g:!((h:codeEditor,i:(filename:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,selection:(endColumn:108,endLineNumber:1,positionColumn:108,positionLineNumber:1,selectionStartColumn:108,selectionStartLineNumber:1,startColumn:108,startLineNumber:1),source:'%23include+%3Chttps://raw.githubusercontent.com/DmitriBogdanov/prototyping_utils/master/source/proto_utils.hpp%3E%0A%0Aint+main(int+argc,+char+**argv)+%7B%0A%0A++++std::cout+%3C%3C+%22Current+platform:+%22+%3C%3C+UTL_CURRENT_OS+%3C%3C+%22%5Cn%22%3B%0A%0A++++return+0%3B%0A%7D%0A'),l:'5',n:'0',o:'C%2B%2B+source+%231',t:'0')),k:71.71783148269105,l:'4',n:'0',o:'',s:0,t:'0'),(g:!((g:!((h:compiler,i:(compiler:clang1600,filters:(b:'0',binary:'1',binaryObject:'1',commentOnly:'0',debugCalls:'1',demangle:'0',directives:'0',execute:'0',intel:'0',libraryCode:'0',trim:'1'),flagsViewOpen:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,libs:!(),options:'-std%3Dc%2B%2B17+-O2',overrides:!(),selection:(endColumn:1,endLineNumber:1,positionColumn:1,positionLineNumber:1,selectionStartColumn:1,selectionStartLineNumber:1,startColumn:1,startLineNumber:1),source:1),l:'5',n:'0',o:'+x86-64+clang+16.0.0+(Editor+%231)',t:'0')),header:(),l:'4',m:50,n:'0',o:'',s:0,t:'0'),(g:!((h:output,i:(compilerName:'x86-64+clang+16.0.0',editorid:1,fontScale:14,fontUsePx:'0',j:1,wrap:'1'),l:'5',n:'0',o:'Output+of+x86-64+clang+16.0.0+(Compiler+%231)',t:'0')),k:46.69421860597116,l:'4',m:50,n:'0',o:'',s:0,t:'0')),k:28.282168517308946,l:'3',n:'0',o:'',t:'0')),l:'2',n:'0',o:'',t:'0')),version:4) ]
+[ [Run this code](https://godbolt.org/#g:!((g:!((g:!((h:codeEditor,i:(filename:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,selection:(endColumn:14,endLineNumber:5,positionColumn:14,positionLineNumber:5,selectionStartColumn:14,selectionStartLineNumber:5,startColumn:14,startLineNumber:5),source:'%23include+%3Chttps://raw.githubusercontent.com/DmitriBogdanov/prototyping_utils/master/source/proto_utils.hpp%3E%0A%0Aint+main(int+argc,+char+**argv)+%7B%0A%0A++++std::cout%0A%09%09%3C%3C+%22Current+platform:+%22+%3C%3C+UTL_CURRENT_OS+%3C%3C+%22%5Cn%22%0A%09%09%3C%3C+%22Compilation+mode:+%22+%3C%3C+(UTL_IS_DEBUG+%3F+%22Debug%22+:+%22Release%22)+%3C%3C+%22%5Cn%22%3B%0A%0A++++return+0%3B%0A%7D%0A'),l:'5',n:'0',o:'C%2B%2B+source+%231',t:'0')),k:71.71783148269105,l:'4',n:'0',o:'',s:0,t:'0'),(g:!((g:!((h:compiler,i:(compiler:clang1600,filters:(b:'0',binary:'1',binaryObject:'1',commentOnly:'0',debugCalls:'1',demangle:'0',directives:'0',execute:'0',intel:'0',libraryCode:'0',trim:'1'),flagsViewOpen:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,libs:!(),options:'-std%3Dc%2B%2B17+-O2',overrides:!(),selection:(endColumn:1,endLineNumber:1,positionColumn:1,positionLineNumber:1,selectionStartColumn:1,selectionStartLineNumber:1,startColumn:1,startLineNumber:1),source:1),l:'5',n:'0',o:'+x86-64+clang+16.0.0+(Editor+%231)',t:'0')),header:(),l:'4',m:50,n:'0',o:'',s:0,t:'0'),(g:!((h:output,i:(compilerName:'x86-64+clang+16.0.0',editorid:1,fontScale:14,fontUsePx:'0',j:1,wrap:'1'),l:'5',n:'0',o:'Output+of+x86-64+clang+16.0.0+(Compiler+%231)',t:'0')),k:46.69421860597116,l:'4',m:50,n:'0',o:'',s:0,t:'0')),k:28.282168517308946,l:'3',n:'0',o:'',t:'0')),l:'2',n:'0',o:'',t:'0')),version:4) ]
 ```cpp
-std::cout << "Current platform: " << UTL_CURRENT_OS << "\n";
+std::cout
+		<< "Current platform: " << UTL_CURRENT_OS << "\n"
+		<< "Compilation mode: " << (UTL_IS_DEBUG ? "Debug" : "Release") << "\n";
 ```
 
 Output:
 ```
 Current platform: Windows64
+Compilation mode: Debug
+```
+
+## Example 6 (exiting)
+
+[ [Run this code](https://godbolt.org/#g:!((g:!((g:!((h:codeEditor,i:(filename:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,selection:(endColumn:1,endLineNumber:6,positionColumn:1,positionLineNumber:6,selectionStartColumn:1,selectionStartLineNumber:6,startColumn:1,startLineNumber:6),source:'%23include+%3Chttps://raw.githubusercontent.com/DmitriBogdanov/prototyping_utils/master/source/proto_utils.hpp%3E%0A%0Aint+main(int+argc,+char+**argv)+%7B%0A%0A++++UTL_EXIT(%22Some+condition+failed%22,+3)%3B%0A%0A%09//+Code+below+will+not+be+reached%0A%0A++++return+0%3B%0A%7D%0A'),l:'5',n:'0',o:'C%2B%2B+source+%231',t:'0')),k:71.71783148269105,l:'4',n:'0',o:'',s:0,t:'0'),(g:!((g:!((h:compiler,i:(compiler:clang1600,filters:(b:'0',binary:'1',binaryObject:'1',commentOnly:'0',debugCalls:'1',demangle:'0',directives:'0',execute:'0',intel:'0',libraryCode:'0',trim:'1'),flagsViewOpen:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,libs:!(),options:'-std%3Dc%2B%2B17+-O2',overrides:!(),selection:(endColumn:1,endLineNumber:1,positionColumn:1,positionLineNumber:1,selectionStartColumn:1,selectionStartLineNumber:1,startColumn:1,startLineNumber:1),source:1),l:'5',n:'0',o:'+x86-64+clang+16.0.0+(Editor+%231)',t:'0')),header:(),l:'4',m:50,n:'0',o:'',s:0,t:'0'),(g:!((h:output,i:(compilerName:'x86-64+clang+16.0.0',editorid:1,fontScale:14,fontUsePx:'0',j:1,wrap:'1'),l:'5',n:'0',o:'Output+of+x86-64+clang+16.0.0+(Compiler+%231)',t:'0')),k:46.69421860597116,l:'4',m:50,n:'0',o:'',s:0,t:'0')),k:28.282168517308946,l:'3',n:'0',o:'',t:'0')),l:'2',n:'0',o:'',t:'0')),version:4) ]
+```cpp
+UTL_EXIT("Some condition failed",  3);
+
+// Code below will not be reached
+```
+
+Output:
+```
+--------------------------------------------------
+Exit triggered on [examples.cpp:312, main()] with:
+Message => Some condition failed
+Code    => 3
+--------------------------------------------------
 ```

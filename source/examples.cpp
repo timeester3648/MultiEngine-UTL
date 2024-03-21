@@ -162,7 +162,9 @@ int main(int argc, char* argv[]) {
 		<< "command_result.stdout_output = " << command_result.stdout_output << "\n"
 		<< "command_result.stderr_output = " << command_result.stderr_output << "\n";
 
-	shell::clear_temp_files();
+	// We can clear files manually, but otherwise they will be automatically cleared upon exit
+	// ('exit' is triggered by calling std::exit() or returning from main())
+	// shell::clear_temp_files();
 
 	std::cout << "Exe path:\n" << shell::get_exe_path(argv) << "\n\n";
 
@@ -232,7 +234,9 @@ int main(int argc, char* argv[]) {
 
 	// NOTE: stre::to_str() can be used to pass complex objects to logger
 
-	std::cout << "Current platform: " << UTL_CURRENT_OS << "\n";
+	std::cout
+		<< "Current platform: " << UTL_CURRENT_OS << "\n"
+		<< "Compilation mode: " << (UTL_IS_DEBUG ? "Debug" : "Release") << "\n";
 
 	// Loop than repeats N times
 	UTL_REPEAT(5) {
@@ -274,7 +278,7 @@ int main(int argc, char* argv[]) {
 
 	using ms = std::chrono::milliseconds;
 
-	constexpr ms time(15'000);
+	constexpr ms time(1'000);
 	constexpr ms tau(10);
 
 	// Create progress bar with style '[#####...] xx.xx%' and width 50 that updates every 0.05%
