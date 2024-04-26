@@ -12,11 +12,11 @@
 #include <array>
 
 
-UTL_DECLARE_ENUM_WITH_STRING_CONVERSION(Sides, LEFT, RIGHT, TOP, BOTTOM)
+UTL_DEFINE_ENUM_WITH_STRING_CONVERSION(Sides, LEFT, RIGHT, TOP, BOTTOM)
 	// like a regular enum must be declared outside of function
 
-UTL_DECLARE_IS_FUNCTION_PRESENT(localtime_s, int, tm*, const time_t*)
-UTL_DECLARE_IS_FUNCTION_PRESENT(localtime_r, tm*, const time_t*, tm*)
+UTL_DEFINE_IS_FUNCTION_PRESENT(localtime_s, int, tm*, const time_t*)
+UTL_DEFINE_IS_FUNCTION_PRESENT(localtime_r, tm*, const time_t*, tm*)
 
 int main(int argc, char* argv[]) {
 	using namespace utl;
@@ -245,16 +245,16 @@ int main(int argc, char* argv[]) {
 	// NOTE: stre::to_str() can be used to pass complex objects to logger
 
 	std::cout
-		<< "Current platform: " << UTL_CURRENT_OS << "\n"
-		<< "Compilation mode: " << (UTL_IS_DEBUG ? "Debug" : "Release") << "\n";
+		<< "Current platform: " << UTL_DEFINE_CURRENT_OS_STRING << "\n"
+		<< "Compilation mode: " << (UTL_DEFINE_IS_DEBUG ? "Debug" : "Release") << "\n";
 
 	// Loop than repeats N times
-	UTL_REPEAT(5) {
+	UTL_DEFINE_REPEAT(5) {
 		std::cout << "Ho\n";
 	}
 
 	// Variadic macro that outputs size of __VA_ARGS__
-	#define VARIADIC_MACRO(...) UTL_VA_ARGS_COUNT(__VA_ARGS__)
+	#define VARIADIC_MACRO(...) UTL_DEFINE_VA_ARGS_COUNT(__VA_ARGS__)
 
 	constexpr int args = VARIADIC_MACRO(1, 2., "3", A, B, (std::pair<int, int>{4, 5}), "12,3");
 
