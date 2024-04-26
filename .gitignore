@@ -1,0 +1,12 @@
+# Ignore everything
+*
+# Whitelist directories
+!*/
+# Whitelist itself
+!.gitignore
+# Whilelist allowed extensions
+!*.h
+!*.hpp
+!*.c
+!*.cpp
+!*.md
