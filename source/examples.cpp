@@ -1,5 +1,5 @@
 #include "proto_utils.hpp"
-#include "proto_utils.hpp"
+#include "proto_utils.hpp" // double include to check that it doesn't break anything
 
 #include <iostream>
 #include <unordered_map>
@@ -7,6 +7,8 @@
 #include <set>
 #include <list>
 #include <thread>
+#include <array>
+
 
 
 UTL_DECLARE_ENUM_WITH_STRING_CONVERSION(Sides, LEFT, RIGHT, TOP, BOTTOM)
@@ -202,8 +204,16 @@ int main(int argc, char* argv[]) {
 
 	// Inline stringstream
 	const std::string str = stre::InlineStream() << "Value " << 3.14 << " is smaller than " << 6.28;
-	std::cout << str << "\n";
+	std::cout << str << "\n\n";
 
+	// Repeats string
+	std::cout
+		<< "repeat_symbol('h',  7) = "   << stre::repeat_symbol('h',   7) << "\n"
+		<< "repeat_string(\"xo\", 5) = " << stre::repeat_string("xo-", 5) << "\n\n";
+
+	// Pad with zeroes
+	std::cout
+		<< "pad_with_zeroes(15) = " << stre::pad_with_zeroes(15) << "\n";
 
 	// ### utl::timer:: ###
 	std::cout << "\n\n### utl::timer:: ###\n\n";
@@ -278,7 +288,7 @@ int main(int argc, char* argv[]) {
 
 	using ms = std::chrono::milliseconds;
 
-	constexpr ms time(1'000);
+	constexpr ms time(100);
 	constexpr ms tau(10);
 
 	// Create progress bar with style '[#####...] xx.xx%' and width 50 that updates every 0.05%
@@ -308,6 +318,41 @@ int main(int argc, char* argv[]) {
 		ruler.set_progress(percentage);
 	}
 	ruler.finish();
+
+	// ### utl::config:: ###
+	std::cout << "\n\n### utl::config:: ###\n\n";
+
+	std::cout << "Saving config json...\n";
+
+	config::export_json(
+		"cfg.json",
+		config::entry("date",              "2024.04.02"              ),
+		config::entry("time_steps",        500                       ),
+		config::entry("time_period",       1.24709e+2                ),
+		config::entry("auxiliary_info",    true                      ),
+		config::entry("scaling_functions", { "identity", "log10" }   ),
+		config::entry("options",           { 17, 45 }                ),
+		config::entry("coefs",             { 0.125, 0.3 }            ),
+		config::entry("flags",             { true, true, false }     ),
+		config::entry("matrix",            { { 0.7, -1.3 }, { 3.1 } }) // 2D, 3D, 4D arrays are also fine
+	);
+
+	// ### MACRO_PROFILER ###
+	std::cout << "\n\n### UTL_PROFILER ###\n\n";
+
+	UTL_PROFILE {
+		std::this_thread::sleep_for(std::chrono::milliseconds(650));
+	}
+
+	// Profilers can be nested, this is fine
+	UTL_PROFILE_LABELED("outer loop")
+	for (int i = 0; i < 5; ++i) {
+		std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+		UTL_PROFILE_LABELED("inner loop")
+		std::this_thread::sleep_for(std::chrono::milliseconds(200));
+	}
+	// we expect to see that 'inner loop' will measure about half the time of an 'outer loop'
 
 	return 0;
 }

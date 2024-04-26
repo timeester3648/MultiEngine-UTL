@@ -1,6 +1,6 @@
 #pragma once
 
-// ~~~ DmitriBogdanov/prototyping_utils ~~~
+// ~~~~~~~~~~~~~~~~~~~~~~ DmitriBogdanov/prototyping_utils ~~~~~~~~~~~~~~~~~~~~~~
 //
 // MIT License
 // 
@@ -23,28 +23,39 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
+//
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-// Enabled modules (comment out to disable)
-#define _UTL_VOIDSTREAM
-#define _UTL_TABLE
-#define _UTL_TIMER
-#define _UTL_SLEEP
-#define _UTL_RANDOM
-#define _UTL_MATH
-#define _UTL_SHELL
-#define _UTL_STRE
-#define _UTL_PROGRESSBAR
+
+#ifndef UTL_PICK_MODULES
+
+// >>> Enabled modules (comment out to disable) <<<
+#define UTLMODULE_VOIDSTREAM
+#define UTLMODULE_TABLE
+#define UTLMODULE_TIMER
+#define UTLMODULE_SLEEP
+#define UTLMODULE_RANDOM
+#define UTLMODULE_MATH
+#define UTLMODULE_SHELL
+#define UTLMODULE_STRE
+#define UTLMODULE_PROGRESSBAR
+#define UTLMODULE_CONFIG
+
+// >>> Enable MACRO-modules  (comment out to disable) <<<
+#define UTLMACRO_CODEGEN
+#define UTLMACRO_PROFILER
+
+#endif
+
 
 #define _UTL_MACROS
 
-
-
 // Module dependencies
-#ifdef _UTL_VOIDSTREAM
+#ifdef UTLMODULE_VOIDSTREAM
 #include <ostream>
 #endif
 
-#ifdef _UTL_TABLE
+#ifdef UTLMODULE_TABLE
 #include <initializer_list>
 #include <iomanip>
 #include <ios>
@@ -53,29 +64,29 @@
 #include <vector>
 #endif
 
-#ifdef _UTL_TIMER
+#ifdef UTLMODULE_TIMER
 #include <chrono>
 #include <ctime>
 #include <iostream>
 #include <string>
 #endif
 
-#ifdef _UTL_SLEEP
+#ifdef UTLMODULE_SLEEP
 #include <chrono>
 #include <cmath>
 #include <thread>
 #endif
 
-#ifdef _UTL_RANDOM
+#ifdef UTLMODULE_RANDOM
 #include <cstdlib>
 #include <initializer_list>
 #endif
 
-#ifdef _UTL_MATH
+#ifdef UTLMODULE_MATH
 #include <type_traits>
 #endif
 
-#ifdef _UTL_SHELL
+#ifdef UTLMODULE_SHELL
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -87,23 +98,41 @@
 #include <vector>
 #endif
 
-#ifdef _UTL_STRE
+#ifdef UTLMODULE_STRE
+#include <iomanip>
 #include <sstream>
 #include <string>
 #include <type_traits>
 #include <utility>
 #endif
 
-#ifdef _UTL_PROGRESSBAR
+#ifdef UTLMODULE_PROGRESSBAR
 #include <chrono>
 #include <iostream>
 #include <iomanip>
 #endif
 
+#ifdef UTLMODULE_CONFIG
+#include <fstream>
+#include <iterator>
+#include <string>
+#include <variant>
+#endif
+
 #ifdef _UTL_MACROS
+#include <string>
+#include <sstream>
 #include <cctype>
 #endif
 
+#ifdef UTLMACRO_PROFILER
+#include <chrono>
+#include <cstdlib>
+#include <string>
+#include <sstream>
+#include <unordered_map>
+#include <iomanip>
+#endif
 
 
 namespace utl {
@@ -126,7 +155,7 @@ namespace utl {
 	// Output stream that produces no output, usage example:
 	//   > vout << VALUE; // produces nothing
 	//
-	#ifdef _UTL_VOIDSTREAM
+	#ifdef UTLMODULE_VOIDSTREAM
 	namespace voidstream {
 
 		class VoidStreamBuf : public std::streambuf {
@@ -172,7 +201,7 @@ namespace utl {
 	// Draws a single table cell, if multiple arguments are passed, draws each one in a new cell.
 	// Accepts any type with a defined "<<" ostream operator.
 	//
-	#ifdef _UTL_TABLE
+	#ifdef UTLMODULE_TABLE
 	namespace table {
 
 
@@ -302,7 +331,7 @@ namespace utl {
 	// Current local date and time in format "%y-%m-%d-%H-%M-%S".
 	// Less readable that usual format, but can be used in filenames which prohibit ":" usage.
 	//
-	#ifdef _UTL_TIMER
+	#ifdef UTLMODULE_TIMER
 	namespace timer {
 
 
@@ -450,7 +479,7 @@ namespace utl {
 	// # ::system() #
 	// Worst precision, frees CPU.
 	//
-	#ifdef _UTL_SLEEP
+	#ifdef UTLMODULE_SLEEP
 	namespace sleep {
 		using _clock = std::chrono::steady_clock;
 		using _chrono_ns = std::chrono::nanoseconds;
@@ -522,7 +551,7 @@ namespace utl {
 	// Produces "c A + (1-c) B" with random "0 < c < 1" assuming objects "A", "B" support arithmetic operations.
 	// Useful for vector and color operations.
 	//
-	#ifdef _UTL_RANDOM
+	#ifdef UTLMODULE_RANDOM
 	namespace random {
 
 		inline void seed(unsigned int random_seed) { srand(random_seed); }
@@ -575,7 +604,7 @@ namespace utl {
 	// Faster branchless ternary for integer types.
 	// If 2nd return is ommited, 0 is assumed, which allows for significant optimization.
 	//
-	#ifdef _UTL_MATH
+	#ifdef UTLMODULE_MATH
 	namespace math {
 
 
@@ -745,7 +774,7 @@ namespace utl {
 	// Parses command line arguments from argcv as std::string or std::string_view.
 	// Views have lower overhead, but keep pointers to original data.
 	//
-	#ifdef _UTL_SHELL
+	#ifdef UTLMODULE_SHELL
 	namespace shell {
 		
 
@@ -905,7 +934,10 @@ namespace utl {
 	// Works with nested containers/tuples through recursive template instantiation, which
 	// resolves as long as types at the end of recursion have a valid operator<<() for ostreams.
 	//
-	#ifdef _UTL_STRE
+	// # ::repeat_symbol(), ::repeat_symbol() #
+	// Repeats character/string a given number of times.
+	//
+	#ifdef UTLMODULE_STRE
 	namespace stre {
 
 
@@ -1050,7 +1082,7 @@ namespace utl {
 
 		// - to_str(tuple) helpers -
 		template<typename TupleElemType>
-		std::string _deduce_and_perform_string_conversion(const TupleElemType &elem) {
+		inline std::string _deduce_and_perform_string_conversion(const TupleElemType &elem) {
 			std::stringstream temp_ss;
 
 			if constexpr (utl::stre::is_to_str_convertible<TupleElemType>::value)
@@ -1062,7 +1094,7 @@ namespace utl {
 		}
 
 		template<typename TupleLikeType, std::size_t... Is>
-		void _print_tuple_fold(std::stringstream& ss, const TupleLikeType& tuple, std::index_sequence<Is...>) {
+		inline void _print_tuple_fold(std::stringstream& ss, const TupleLikeType& tuple, std::index_sequence<Is...>) {
 				((ss << (Is == 0 ? "" : _TUPLE_DELIMER_M) << _deduce_and_perform_string_conversion(std::get<Is>(tuple))), ...);
 		} // prints tuple to stream
 	
@@ -1112,6 +1144,27 @@ namespace utl {
 		private:
 			std::stringstream ss;
 		};
+
+		// Repeat symbol/string
+		inline std::string repeat_symbol(char symbol, size_t repeats) {
+			return std::string(repeats, symbol);
+		}
+		inline std::string repeat_string(std::string_view str, size_t repeats) {
+			std::string res;
+			res.reserve(str.size() * repeats);
+			while (repeats--) res += str;
+			return res;
+		}
+
+		// 
+		template<typename IntegerType>
+		inline std::enable_if_t<
+			std::is_integral<IntegerType>::value
+		, std::string> pad_with_zeroes(IntegerType number, std::streamsize total_size = 10) {
+			std::stringstream ss;
+			ss << std::setfill('0') << std::setw(total_size) << number;
+			return ss.str();
+		}
 	}
 	#endif
 
@@ -1129,7 +1182,7 @@ namespace utl {
 	// # ::Ruler #
 	// Primitive & lightweight progress bar, useful when terminal has no proper support for escape sequences.
 	//
-	#ifdef _UTL_PROGRESSBAR
+	#ifdef UTLMODULE_PROGRESSBAR
 	namespace progressbar {
 
 		inline std::ostream *_output_stream = &std::cout;
@@ -1270,7 +1323,7 @@ namespace utl {
 		public:
 			Ruler(char done_char = '#') :
 				done_char(done_char),
-				length_total(52),
+				length_total(51),
 				length_current(0)
 			{}
 
@@ -1287,18 +1340,165 @@ namespace utl {
 			void set_progress(double percentage) {
 				const size_t length_new = static_cast<size_t>(percentage * static_cast<double>(this->length_total));
 
-				if (!(length_new > length_current)) return;
+				if (length_new > length_current) {
+					const auto chars_to_add = length_new - this->length_current;
+					std::fill_n(std::ostreambuf_iterator<char>(*_output_stream), chars_to_add, this->done_char);
+				}
 
 				this->length_current = length_new;
-				(*_output_stream) << this->done_char;
 			}
 
 			void finish() {
+				if (this->length_total > this->length_current) {
+					const auto chars_to_add = this->length_total - this->length_current;
+					std::fill_n(std::ostreambuf_iterator<char>(*_output_stream), chars_to_add, this->done_char);
+				}
+
 				this->length_current = this->length_total;
+
 				(*_output_stream) << "\n";
 			}
 		};
 
+	}
+	#endif
+
+	// ###################
+	// ### utl::config ###
+	// ###################
+	//
+	#ifdef UTLMODULE_CONFIG
+	namespace config {
+
+		// - Export config -
+		// -----------------
+		template<typename T>
+		inline void _write_formatted_value_to_ostream(std::ostream &os, const T &value) {
+			constexpr bool is_string = std::is_convertible<T, std::string_view>::value;
+			constexpr bool is_array = !std::is_scalar<T>::value;
+
+			// Array => Expand recursively, add brackets and comma separators
+			if constexpr (is_array) {
+				os << "[ ";
+				for (auto it = value.begin(); it != value.end(); ++it) {
+					_write_formatted_value_to_ostream(os, *it);
+					if (std::next(it) != value.end()) os << ", "; // prevents trailing comma
+				}
+				os << " ]";
+			}
+			// String => Add quotes
+			else if constexpr (is_string) {
+				os << "\"" << value << "\"";
+			}
+			// Numeric/Bool => Nothing
+			else {
+				os << value;
+			}
+		}
+
+		inline void _write_entries(std::ostream &os) {
+			os << std::flush;
+		};
+
+		template<typename T, typename... TupleTypes>
+		void _write_entries(std::ostream &os, std::tuple<std::string_view, T> entry, const TupleTypes... other_entries) {
+			// Write one entry
+			const auto &key = std::get<0>(entry);
+			const auto &value = std::get<1>(entry);
+
+			os << "    \"" << key << "\": ";
+			_write_formatted_value_to_ostream(os, value);
+			if constexpr (sizeof...(other_entries) != 0) os << ","; // prevents trailing comma
+			os << "\n";
+
+			_write_entries(os, other_entries...);
+		}
+
+		template<typename... TupleTypes>
+		void export_json(std::string_view path, const TupleTypes... entries) {
+			std::ofstream file(path);
+			file << std::boolalpha; // in JSON bools are written as true/false
+
+			file << "{\n";
+			_write_entries(file, entries...);
+			file << "}";
+		}
+
+		template<typename T>
+		std::tuple<std::string_view, T> entry(std::string_view key, T value) {
+			return { key, value };
+			// may feel like a redundancy but without it there is no way for compiler to deduce std::tuple<>
+		}
+
+		// - std::initializer_list resolution overloads -
+		// Contains overloads that specify that brace-initialization should be interpreted as std::initializer_list<>.
+		// Up to 4 levels of nesting are specified, after that you do that manually on the call site.
+		// Also I can't imagine an adequate person saving 5D arrays to JSON.
+		template<typename T>
+		using _il = std::initializer_list<T>; // shortcut name to make nested 'std::initializer_list' less verbose
+
+		// 1D
+		template<typename T>
+		std::tuple<std::string_view, _il<T>> entry(std::string_view key, _il<T> value) {
+			return { key, value };
+		}
+
+		// 2D
+		template<typename T>
+		std::tuple<std::string_view, _il<_il<T>>> entry(std::string_view key, _il<_il<T>> value) {
+			return { key, value };
+		}
+
+		// 3D
+		template<typename T>
+		std::tuple<std::string_view, _il<_il<_il<T>>>> entry(std::string_view key, _il<_il<_il<T>>> value) {
+			return { key, value };
+		}
+
+		// 4D
+		template<typename T>
+		std::tuple<std::string_view, _il<_il<_il<_il<T>>>>> entry(std::string_view key, _il< _il<_il<_il<T>>>> value) {
+			return { key, value };
+		}
+
+		// ... we can continue so on and so forth but it isn't really necessary
+		// if someone needs more layers of nesting they can specify type resolutions with std::initializer_list{ ... }
+
+		// - Import config -
+		// -----------------
+		//template<typename T>
+		//std::tuple<std::string_view, T&> parse(std::string_view key, T &value) {
+		//	return { key, value };
+		//	// may feel like a redundancy but without it there is no way for compiler to deduce std::tuple<>
+		//}
+
+		//inline void _read_entries(std::istream &is) {
+		//	
+		//};
+
+		//template<typename T, typename... TupleTypes>
+		//void _read_entries(std::istream &is, std::tuple<std::string_view, T&> entry, const TupleTypes... other_entries) {
+		//	// Read one entry
+		//	std::string key = std::get<0>(entry);
+		//	auto &value = std::get<1>(entry);
+
+		//	std::cout << typeid(value).name() << std::endl;
+
+		//	is.ignore('\"');
+		//	is >> key;
+		//	is.ignore(':');
+		//	is >> value;
+		//	is.ignore(',');
+
+		//	_read_entries(is, other_entries...);
+		//}
+
+		//template<typename... TupleTypes>
+		//void import_json(std::string_view path, const TupleTypes... entries) {
+		//	std::ifstream file(path);
+		//	
+		//	_read_entries(file, entries...);
+		//}
 	}
 	#endif
 }
@@ -1350,7 +1550,7 @@ inline std::ostream *_utl_log_ostream = &std::cout;
 #define UTL_LOG_SET_OUTPUT(new_stream_) _utl_log_ostream = &new_stream_;
 
 template<typename... Args>
-void _utl_log_print(std::string_view file, int line, std::string_view func, const Args&... args) {
+inline void _utl_log_print(std::string_view file, int line, std::string_view func, const Args&... args) {
 	const std::string_view filename = file.substr(file.find_last_of("/\\") + 1);
 
 	///(*_utl_log_ostream) << "\033[31;1m"; // Supported by Linux and Windows10+, but prints to files, figure out a fix
@@ -1535,11 +1735,11 @@ inline void _utl_split_enum_args(const char* va_args, std::string *strings, int 
 		// To do so we can use variadic template syntax and then just forward '__VA_ARGS__' to the template
 		// through 'using is_function_present = is_function_present_impl<ReturnType, __VA_ARGS__>'.
 		//
-		// ALTERNATIVES: Perhaps some sort of inline SFINAE can be done through C++14 generic lambdas, look into it.
+		// ALTERNATIVES: Perhaps some sort of tricky inline SFINAE can be done through C++14 generic lambdas.
 
 // - Exit -
 // --------
-void _utl_exit_with_message(
+inline void _utl_exit_with_message(
 	std::string_view file, int line, std::string_view func,
 	std::string_view message = "<NO MESSAGE>", int code = 1
 ) {
@@ -1569,6 +1769,259 @@ void _utl_exit_with_message(
 }
 
 #define UTL_EXIT(...) _utl_exit_with_message(__FILE__, __LINE__, __func__, __VA_ARGS__);
+
+#endif
+
+// #####################
+// ### MACRO_CODEGEN ###
+// #####################
+#ifdef UTLMACRO_CODEGEN
+
+#endif
+
+// ######################
+// ### MACRO_PROFILER ###
+// ######################
+#ifdef UTLMACRO_PROFILER
+
+using _utl_profiler_clock = std::chrono::steady_clock;
+using _utl_profiler_time_duration = _utl_profiler_clock::duration;
+using _utl_profiler_time_point = _utl_profiler_clock::time_point;
+
+static const _utl_profiler_time_point _utl_profiler_program_init_time_point = _utl_profiler_clock::now();
+	// automatically gets program launch time so we can compute total runtime later
+
+inline std::string _utl_profiler_format_call_site(std::string_view file, int line, std::string_view func) {
+	const std::string_view filename = file.substr(file.find_last_of("/\\") + 1);
 	
+	std::stringstream ss;
+	ss << filename << ":" << line << ", " << func << "()";
+	return ss.str();
+}
+
+struct _utl_profiler_record {
+	std::string label;
+	_utl_profiler_time_duration duration;
+};
+
+inline void _utl_profiler_atexit(); // predeclare, it needs '_utl_profiler' but used by '_utl_profiler'
+
+class _utl_profiler {
+private:
+	std::string call_site;
+	std::string label;
+	_utl_profiler_time_point construction_time_point;
+
+public:
+	inline static std::unordered_map<std::string, _utl_profiler_record> records;
+
+	operator bool() const { return true; } // needed so we can use 'if (auto x = _utl_profiler())' construct
+
+public:
+	_utl_profiler(std::string_view file, int line, std::string_view func, std::string_view label) {
+		this->call_site = _utl_profiler_format_call_site(file, line, func);
+		this->label = label;
+		this->construction_time_point = _utl_profiler_clock::now();
+
+		// If profiler ever gets called => registed results output at std::exit()
+		static bool first_call = true;
+		if (first_call) {
+			std::atexit(_utl_profiler_atexit);
+			first_call = false;
+		}
+	}
+
+	~_utl_profiler() {
+		const auto it = _utl_profiler::records.find(this->call_site);
+		const auto profiled_duration = _utl_profiler_clock::now() - this->construction_time_point;
+
+		// Record with the same callsite exists => accumulate duration
+		if (it != _utl_profiler::records.end()) {
+			(*it).second.duration += profiled_duration;
+		}
+		// Otherwise => add new record with duration
+		else {
+			_utl_profiler::records.insert({
+				std::string(this->call_site),
+				_utl_profiler_record{ this->label, profiled_duration }
+			});
+		}
+	}
+};
+
+inline void _utl_profiler_atexit() {
+	namespace chr = std::chrono;
+
+	const auto total_runtime = _utl_profiler_clock::now() - _utl_profiler_program_init_time_point;
+	//const auto total_runtime = std::chrono::duration_cast<std::chrono::milliseconds>();
+
+	// Convenience functions
+	const auto duration_to_sec = [](_utl_profiler_time_duration duration) -> double {
+		return chr::duration_cast<chr::nanoseconds>(duration).count() / 1e9;
+	};
+
+	const auto duration_percentage = [&](double duration_sec) -> double {
+		const double total_runtime_sec = duration_to_sec(total_runtime);
+		return (duration_sec / total_runtime_sec) * 100.;
+	};
+
+	const auto float_printed_size = [](double value, std::streamsize precision, decltype(std::fixed) format,
+		std::string_view postfix) -> std::streamsize {
+		std::stringstream ss;
+		ss << std::setprecision(precision) << format << value << postfix;
+		return ss.str().size(); // can be done faster but we don't really care here
+	};
+
+	const auto repeat_hline_symbol = [](std::streamsize repeats) -> std::string {
+		return std::string(static_cast<size_t>(repeats), '-');
+	};
+
+	constexpr std::streamsize  duration_precision = 2;
+	constexpr auto             duration_format    = std::fixed;
+	constexpr std::string_view duration_postfix   = " s";
+
+	constexpr std::streamsize  percentage_precision = 1;
+	constexpr auto             percentage_format    = std::fixed;
+	constexpr std::string_view percentage_postfix   = "%";
+
+	// Collect max length of each column (for proper formatting)
+	constexpr std::string_view column_name_call_site  = "Call Site";
+	constexpr std::string_view column_name_label      = "Label";
+	constexpr std::string_view column_name_duration   = "Time";
+	constexpr std::string_view column_name_percentage = "Time %";
+
+	std::streamsize max_length_call_site  = column_name_call_site.size();
+	std::streamsize max_length_label      = column_name_label.size();
+	std::streamsize max_length_duration   = column_name_duration.size();
+	std::streamsize max_length_percentage = column_name_percentage.size();
+
+	for (const auto &record : _utl_profiler::records) {
+		const auto  &call_site    = record.first;
+		const auto  &label        = record.second.label;
+		const double duration_sec = duration_to_sec(record.second.duration);
+
+		// 'Call Site' column
+		const std::streamsize length_call_site = call_site.size();
+		if (max_length_call_site < length_call_site) max_length_call_site = length_call_site;
+
+		// 'Label' column
+		const std::streamsize length_label = label.size();
+		if (max_length_label < length_label) max_length_label = length_label;
+
+		// 'Time' column
+		const std::streamsize length_duration = float_printed_size(duration_sec, duration_precision, duration_format, duration_postfix);
+		if (max_length_duration < length_duration) max_length_duration = length_duration;
+
+		// 'Time %' column
+		const auto percentage = duration_percentage(duration_sec);
+		const std::streamsize length_percentage = float_printed_size(percentage, percentage_precision, percentage_format, percentage_postfix);
+		if (max_length_percentage < length_percentage) max_length_percentage = length_percentage;
+	}
+
+	// Print formatted profiler header
+	constexpr std::string_view HEADER_TEXT = " UTL PROFILING RESULTS ";
+
+	const std::streamsize total_table_length = 
+		sizeof( "| ") - 1 + max_length_call_site  +
+		sizeof(" | ") - 1 + max_length_label      +
+		sizeof(" | ") - 1 + max_length_duration   +
+		sizeof(" | ") - 1 + max_length_percentage +
+		sizeof(" |" ) - 1; // -1 because sizeof(char[]) accounts for invisible '\0' at the end
+
+	const std::streamsize header_text_length = HEADER_TEXT.size();
+	const std::streamsize header_left_pad = (total_table_length - header_text_length) / 2;
+	const std::streamsize header_right_pad = total_table_length - header_text_length - header_left_pad;
+
+	std::cout
+		<< repeat_hline_symbol(header_left_pad + 1) << HEADER_TEXT << repeat_hline_symbol(header_right_pad + 1) << '\n'
+		// + 1 makes header hline extend 1 character past the table on both sides
+		<< "\n"
+		<< " Total runtime -> " << std::setprecision(duration_precision) << duration_format << duration_to_sec(total_runtime) << " sec\n"
+		<< "\n";
+
+	// Print formatted table header
+	std::cout
+			<< " | "
+			<< std::setw(max_length_call_site)  << column_name_call_site
+			<< " | "
+			<< std::setw(max_length_label)      << column_name_label
+			<< " | "
+			<< std::setw(max_length_duration)   << column_name_duration
+			<< " | "
+			<< std::setw(max_length_percentage) << column_name_percentage
+			<< " |\n";
+
+	std::cout
+		<< " |"
+		<< repeat_hline_symbol(max_length_call_site  + 2) // add 2 to account for delimers not having spaces in hline
+		<< "|"
+		<< repeat_hline_symbol(max_length_label      + 2)
+		<< "|"
+		<< repeat_hline_symbol(max_length_duration   + 2)
+		<< "|"
+		<< repeat_hline_symbol(max_length_percentage + 2)
+		<< "|\n";
+
+	std::cout << std::setfill(' '); // reset the fill so we don't mess with table contents
+
+
+	// Print formatted table contents
+	for (const auto &record : _utl_profiler::records) {
+		const auto  &call_site    = record.first;
+		const auto  &label        = record.second.label;
+		const double duration_sec = duration_to_sec(record.second.duration);
+		const double percentage   = duration_percentage(duration_sec);
+
+		// Joint floats with their postfixes into a single string so they are properly handled by std::setw()
+		// (which only affects the first value leading to a table misaligned by postfix size)
+		std::stringstream ss_duration;
+		ss_duration
+			<< std::setprecision(duration_precision) << duration_format
+			<< duration_sec << duration_postfix;
+
+		std::stringstream ss_percentage;
+		ss_percentage
+			<< std::setprecision(percentage_precision) << percentage_format
+			<< percentage << percentage_postfix;
+
+		std::cout
+			<< " | "
+			<< std::setw(max_length_call_site)  << call_site
+			<< " | "
+			<< std::setw(max_length_label)      << label
+			<< " | "
+			<< std::setw(max_length_duration)   << ss_duration.str()
+			<< " | "
+			<< std::setw(max_length_percentage) << ss_percentage.str()
+			<< " |\n";
+	}
+}
+
+#define _utl_profiler_concat_tokens(a, b) a ## b
+#define _utl_profiler_concat_tokens_wrapper(a, b) _utl_profiler_concat_tokens(a, b)
+#define _utl_profiler_add_line_number_to_variable_name(varname_) _utl_profiler_concat_tokens_wrapper(varname_, __LINE__)
+	// This macro creates token 'varname_##__LINE__' from 'varname_'.
+	//
+	// The reason we can't just write it as is, is that function-macros only expands their macro-arguments
+	// if neither the stringizing operator # nor the token-pasting operator ## are applied to the arguments
+	// inside the macro body.
+	//
+	// Which means in a simple 'varname_##__LINE__' macro '__LINE__' doesn't expand to it's value.
+	//
+	// We can get around this fact by introducing indirection,
+	// '__LINE__' gets expanded in '_utl_profiler_concat_tokens_wrapper()'
+	// and then tokenized and concatenated in '_utl_profiler_concat_tokens()'
+
+#define UTL_PROFILE_LABELED(label_) \
+	if (auto _utl_profiler_add_line_number_to_variable_name(profiler_) = _utl_profiler(__FILE__, __LINE__, __func__, label_))
+	// We add line number to profiler variable name to prevent nested profiler scopes from shadowing
+	// each other's 'profiler_' variable. While such shadowing has no effect on an actual behavior,
+	// it does cause a warning from most compilers.
+	//
+	// Such solution isn't perfect (2 scopes can be nested on the same line in deffirent files), but it
+	// is good enough and there is no way to get a better 'unique varname' without resorting to
+	// specific compiler extensions.
+
+#define UTL_PROFILE UTL_PROFILE_LABELED("<NONE>")
 
 #endif
