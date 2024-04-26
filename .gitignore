@@ -1,5 +1,6 @@
 # Ignore everything
 *
+
 # Whitelist directories
 !*/
 # Whitelist itself
@@ -10,3 +11,7 @@
 !*.c
 !*.cpp
 !*.md
+
+# Ignore build directories regarless of their contents
+build/
+.cache/

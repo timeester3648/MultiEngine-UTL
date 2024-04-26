@@ -1,4 +1,4 @@
-#pragma once
+//#pragma once
 
 // ~~~~~~~~~~~~~~~~~~~~~~ DmitriBogdanov/prototyping_utils ~~~~~~~~~~~~~~~~~~~~~~
 //
@@ -114,8 +114,10 @@
 
 #ifdef UTLMODULE_CONFIG
 #include <fstream>
+#include <initializer_list>
 #include <iterator>
 #include <string>
+#include <string_view>
 #include <variant>
 #endif
 
@@ -1416,7 +1418,8 @@ namespace utl {
 
 		template<typename... TupleTypes>
 		void export_json(std::string_view path, const TupleTypes... entries) {
-			std::ofstream file(path);
+			std::string str(path);
+			std::ofstream file(str);
 			file << std::boolalpha; // in JSON bools are written as true/false
 
 			file << "{\n";
@@ -1435,7 +1438,12 @@ namespace utl {
 		// Up to 4 levels of nesting are specified, after that you do that manually on the call site.
 		// Also I can't imagine an adequate person saving 5D arrays to JSON.
 		template<typename T>
-		using _il = std::initializer_list<T>; // shortcut name to make nested 'std::initializer_list' less verbose
+		using _il = const std::initializer_list<T>; // shortcut name to make nested 'std::initializer_list' less verbose
+			// for some reason without 'const' GCC & clang have issues deducing template type in entry(),
+			// while MSVC performs type deduction as one would expect
+		
+		template<typename T>
+		using _ret = std::tuple<std::string_view, _il<T>>;
 
 		// 1D
 		template<typename T>
@@ -1450,16 +1458,16 @@ namespace utl {
 		}
 
 		// 3D
-		template<typename T>
-		std::tuple<std::string_view, _il<_il<_il<T>>>> entry(std::string_view key, _il<_il<_il<T>>> value) {
-			return { key, value };
-		}
+		// template<typename T>
+		// std::tuple<std::string_view, _il<_il<_il<T>>>> entry(std::string_view key, _il<_il<_il<T>>> value) {
+		// 	return { key, value };
+		// }
 
 		// 4D
-		template<typename T>
-		std::tuple<std::string_view, _il<_il<_il<_il<T>>>>> entry(std::string_view key, _il< _il<_il<_il<T>>>> value) {
-			return { key, value };
-		}
+		// template<typename T>
+		// std::tuple<std::string_view, _il<_il<_il<_il<T>>>>> entry(std::string_view key, _il< _il<_il<_il<T>>>> value) {
+		// 	return { key, value };
+		// }
 
 		// ... we can continue so on and so forth but it isn't really necessary
 		// if someone needs more layers of nesting they can specify type resolutions with std::initializer_list{ ... }
@@ -1736,6 +1744,9 @@ inline void _utl_split_enum_args(const char* va_args, std::string *strings, int 
 		// through 'using is_function_present = is_function_present_impl<ReturnType, __VA_ARGS__>'.
 		//
 		// ALTERNATIVES: Perhaps some sort of tricky inline SFINAE can be done through C++14 generic lambdas.
+		//
+		// NOTE: Some versions of 'clangd' give a 'bugprone-sizeof-expression' warning for sizeof(*A),
+		// this is a false alarm.
 
 // - Exit -
 // --------

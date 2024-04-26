@@ -1,6 +1,8 @@
-#include "proto_utils.hpp"
 #include "proto_utils.hpp" // double include to check that it doesn't break anything
 
+#include <ctime>
+#include <filesystem>
+#include <initializer_list>
 #include <iostream>
 #include <unordered_map>
 #include <tuple>
@@ -10,13 +12,11 @@
 #include <array>
 
 
-
 UTL_DECLARE_ENUM_WITH_STRING_CONVERSION(Sides, LEFT, RIGHT, TOP, BOTTOM)
 	// like a regular enum must be declared outside of function
 
 UTL_DECLARE_IS_FUNCTION_PRESENT(localtime_s, int, tm*, const time_t*)
 UTL_DECLARE_IS_FUNCTION_PRESENT(localtime_r, tm*, const time_t*, tm*)
-
 
 int main(int argc, char* argv[]) {
 	using namespace utl;
@@ -323,9 +323,11 @@ int main(int argc, char* argv[]) {
 	std::cout << "\n\n### utl::config:: ###\n\n";
 
 	std::cout << "Saving config json...\n";
-
+	
+	std::filesystem::create_directory("temp");
+	
 	config::export_json(
-		"cfg.json",
+		"temp/cfg.json",
 		config::entry("date",              "2024.04.02"              ),
 		config::entry("time_steps",        500                       ),
 		config::entry("time_period",       1.24709e+2                ),
