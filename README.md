@@ -51,6 +51,10 @@ Timing methods.
 
 ## Macro-Modules
 
+> [**UTL_DEFINE**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/MACRO_DEFINE.md)
+
+Macros for automatic code generation of commonly needed concepts.
+
 > [**UTL_LOG**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/MACRO_LOG.md)
 
 Macros for simple debug/release logging.
@@ -58,10 +62,6 @@ Macros for simple debug/release logging.
 > [**UTL_PROFILER**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/MACRO_PROFILER.md)
 
 Macros for quick scope & expression profiling.
-
-> [**UTL_MACROS**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/MACROS.md)
-
-Macros for automatic code generation, logging and general convenience
 
 ## Design goals
 
@@ -79,14 +79,24 @@ Secondary design goals also include:
 
 ## Work in progress
 
+* `UTL_PROFILE` module docs (godbold);
+* `UTL_DEFINE` module docs (godbold);
+* `utl::config` module docs (godbold).
+* `utl::stre` docs for `stre::repeat_symbol()`, `stre::repeat_string()` and `stre::pad_with_zeroes()`.
+* `UTL_PROFILER_SET_OSTREAM()` macro;
+* Method for selecting folder for temp file creation in `utl::shell`;
+* `timer::benchmark()` function;
+* `UTL_DEFINE_BITFLAG_ENUM()` macro;
+* `UTL_DEFINE_BITFLAG_COMPAT_CHECK()` macro;
+* `utl::bitflag` module with shortcut for various enum bitflag operations;
+* `config::import_json()` function;
+* `stre::centered()` stream operator;
+* Potentially add `utl::config()` support for TOML and JSON5 with comments declared through `config:comment()` entries;
 * Coordinate transformations in **utl::math**;
 * More type traits in **utl::math**;
 * Async module with functions like `async::run_task()` and `async::await(task)`;
 * `stre::to_str()` implementation for `std::stack` and `std::queue`;
-* Colored text module or color support for log macros that does not involve including '<Windows.h>';
-* `UTL_PROFILE` module docs (godbold);
-* `UTL_DEFINE` module docs (godbold);
-* `utl::config` module docs (godbold).
+* Colored text module or color support for log macros that does not involve including `<Windows.h>`, perhaps a full-on `utl::font` module;
 
 
 ## Requirements
