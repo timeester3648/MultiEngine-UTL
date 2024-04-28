@@ -7,15 +7,15 @@
 ## Definitions
 
 ```cpp
-UTL_PROFILE           // assigns default label to profiler
-UTL_PROFILE_LABELED() // assigns custom  label to profiler
+UTL_PROFILER           // assigns default label to profiler
+UTL_PROFILER_LABELED() // assigns custom  label to profiler
 ```
 
 ## Methods
 
 > ```cpp
-> UTL_PROFILE
-> UTL_PROFILE_LABELED(label)
+> UTL_PROFILER
+> UTL_PROFILER_LABELED(label)
 > ```
 
 Profiles the following scope or expression. If profiled scope was entered at any point of the program, upon exiting `main()` the table with profiling results will be printed. Profiling results include:
