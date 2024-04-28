@@ -9,41 +9,51 @@ This is a collection of various utilities that aim to provide a set of concise "
 
 ## Modules
 
-> [**utl::math**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/math.md)
+> [**utl::config**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_config.md)
+
+Simple export/import of JSON configs.
+
+> [**utl::math**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_math.md)
 
 Math-related utilities.
 
-> [**utl::progressbar**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/progressbar.md)
+> [**utl::progressbar**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_progressbar.md)
 
 Configurable progress bars for console appls.
 
-> [**utl::random**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/random.md)
+> [**utl::random**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_random.md)
 
 Convenient random functions.
 
-> [**utl::shell**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/shell.md)
+> [**utl::shell**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_shell.md)
 
 Command-line related utilities.
 
-> [**utl::sleep**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/sleep.md)
+> [**utl::sleep**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_sleep.md)
 
 Precise sleep implementations.
 
-> [**utl::stre**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/stre.md)
+> [**utl::stre**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_stre.md)
 
 String conversion extensions.
 
-> [**utl::table**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/table.md)
+> [**utl::table**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_table.md)
 
 Table rendering tools.
 
-> [**utl::timer**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/timer.md)
+> [**utl::timer**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_timer.md)
 
 Timing methods.
 
-> [**utl::voidstream**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/voidstream.md)
+> [**utl::voidstream**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_voidstream.md)
 
 `std::ostream` API silencing method.
+
+## Macro-Modules
+
+> [**UTL_PROFILER**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/MACROS.md)
+
+Macros for quick scope & expression profiling.
 
 > [**UTL_MACROS**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/MACROS.md)
 
@@ -67,13 +77,17 @@ Secondary design goals also include:
 
 * Coordinate transformations in **utl::math**;
 * More type traits in **utl::math**;
-* `shell::run_command_async()` method;
+* Async module with functions like `async::run_task()` and `async::await(task)`;
 * `stre::to_str()` implementation for `std::stack` and `std::queue`;
-* Colored text module or color support for log macros that does not involve including '<Windows.h>'.
+* Colored text module or color support for log macros that does not involve including '<Windows.h>';
+* `UTL_PROFILE` module docs (godbold);
+* `UTL_DEFINE` module docs;
+* `utl::config` module docs (godbold).
+
 
 ## Requirements
 
-* Requires C++17 support;
+* Requires **C++17** support;
 * Some modules require POSIX-compliant system (Linux) or Windows.
 
 

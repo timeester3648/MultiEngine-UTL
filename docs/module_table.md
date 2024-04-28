@@ -7,6 +7,7 @@
 **table** implements LaTeX-like table drawing methods. Useful in benchmarks and prototyping of algorithms to represent results as a table.
 
 ## Definitions
+
 ```cpp
 // Table setup
 void create(std::initializer_list<_uint> &&widths);
@@ -30,6 +31,7 @@ ColumnFormat BOOL;                          // bools as text
 ```
 
 ## Methods
+
 > ```cpp
 > table::create(std::initializer_list<_uint> &&widths);
 > ```

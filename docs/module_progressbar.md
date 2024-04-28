@@ -11,7 +11,7 @@
 
 ```cpp
 // Configuration
-set_ostream(std::ostream &new_ostream);
+void set_ostream(std::ostream &new_ostream);
 
 // 'Percentage' progressbar
 // > Proper progress bar, uses carriage return escape

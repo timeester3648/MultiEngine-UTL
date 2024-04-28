@@ -9,6 +9,7 @@
 For scientific applications with higher random quality requirements use [&lt;random&gt;](https://en.cppreference.com/w/cpp/header/random) Mersenne Twister generator.
 
 ## Definitions
+
 ```cpp
 void seed(unsigned int random_seed);
 void seed_with_time(); // seed with time(NULL)
@@ -32,6 +33,7 @@ T rand_linear_combination(const T& A, const T& B);
 ```
 
 ## Methods
+
 > ```cpp
 > random::seed(unsigned int random_seed);
 > random::seed_with_time();

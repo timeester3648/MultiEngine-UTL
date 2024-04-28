@@ -7,6 +7,7 @@
 **str**ing **e**xpansions module contains various string-related utilities, such as: [&lt;type_traits&gt;](https://en.cppreference.com/w/cpp/header/type_traits) expansions, universal version of [std::to_string](https://en.cppreference.com/w/cpp/string/basic_string/to_string), inline [std::stringstream](https://en.cppreference.com/w/cpp/io/basic_stringstream) and etc.
 
 ## Definitions
+
 ```cpp
 // Unary type traits
 template<typename Type>
@@ -44,6 +45,7 @@ public:
 In reality `to_str()` is a number of conditionally enabled templates that expand recursively over any passed `Type` as long as types at the end of recursion satisfy `is_printable`.
 
 ## Methods
+
 > ```cpp
 > stre::is_printable;
 > ```

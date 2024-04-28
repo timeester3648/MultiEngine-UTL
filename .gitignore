@@ -12,7 +12,7 @@
 !*.cpp
 !*.md
 
-# Ignore build directories regarless of their contents
+# Ignore build & temporary directories regarless of their contents
 build/
 temp/
 .cache/

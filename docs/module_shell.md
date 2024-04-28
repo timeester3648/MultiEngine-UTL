@@ -8,6 +8,7 @@
 **shell** contains convenience functions for command line and system related operations.
 
 ## Definitions
+
 ```cpp
 // Temporary file operations
 std::string random_ascii_string(size_t length);
@@ -34,6 +35,7 @@ CommandResult run_command(const std::string &command);
 ```
 
 ## Methods
+
 > ```cpp
 > std::string shell::random_ascii_string(size_t length);
 > ```

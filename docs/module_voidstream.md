@@ -6,12 +6,14 @@
 **voidstream** is specification of [std::ostream](https://en.cppreference.com/w/cpp/io/basic_ostream) that does nothing. This paradoxically inert class can be passed to API's that use streams to silence their output, avoiding the boilerplate of getting and then discarding undesirable output.
 
 ## Definitions
+
 ```cpp
 VoidStreamBuf vstreambuf; // streambuf that discards overflow
 VoidStream    vout;       // ostream that discards input
 ```
 
 ## Methods
+
 > ```cpp
 > voidstream::vstreambuf;
 > ```

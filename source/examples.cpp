@@ -342,16 +342,16 @@ int main(int argc, char* argv[]) {
 	// ### MACRO_PROFILER ###
 	std::cout << "\n\n### UTL_PROFILER ###\n\n";
 
-	UTL_PROFILE {
+	UTL_PROFILER {
 		std::this_thread::sleep_for(std::chrono::milliseconds(650));
 	}
 
 	// Profilers can be nested, this is fine
-	UTL_PROFILE_LABELED("outer loop")
+	UTL_PROFILER_LABELED("outer loop")
 	for (int i = 0; i < 5; ++i) {
 		std::this_thread::sleep_for(std::chrono::milliseconds(200));
 
-		UTL_PROFILE_LABELED("inner loop")
+		UTL_PROFILER_LABELED("inner loop")
 		std::this_thread::sleep_for(std::chrono::milliseconds(200));
 	}
 	// we expect to see that 'inner loop' will measure about half the time of an 'outer loop'

@@ -6,13 +6,15 @@
 **sleep** implements 3 variations of sleep() function with a goal of providing improved precision.
 
 ## Definitions
+
 ```cpp
-spinlock(double ms); //   precise, uses CPU 100% of time, expected error ~0.01 ms
-hybrid(double ms);   //   precise, uses CPU  ~5% of time, expected error ~0.01 ms
-system(double ms);   // imprecise, uses CPU   0% of time, expected error ~0.1-5 ms
+void spinlock(double ms); //   precise, uses CPU 100% of time, expected error ~0.01 ms
+void hybrid(double ms);   //   precise, uses CPU  ~5% of time, expected error ~0.01 ms
+void system(double ms);   // imprecise, uses CPU   0% of time, expected error ~0.1-5 ms
 ```
 
 ## Methods
+
 > ```cpp
 > sleep::system(double ms);
 > ```

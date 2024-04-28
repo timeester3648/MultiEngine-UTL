@@ -54,7 +54,7 @@ namespace utl::config {
 	// Utils for exporting/importing configs.
 	// Currently suppors JSON.
 	//
-	// # ::export_config() #
+	// # ::export_json() #
 	// Exports JSON with given key-value entries. Entries support homogenous arrays with any level of nesting,
 	// (after 4 levels some additional boilerplate is needed but who need 4D+ json matrices). Object entries and
 	// non-homogenous (type-wise) arrays are not supported.
@@ -1990,8 +1990,8 @@ inline void _utl_log_print(std::string_view file, int line, std::string_view fun
 
 // Macros for quick code profiling.
 //
-// # UTL_PROFILE, UTL_PROFILE_LABELED() #
-// Profiles the following exression/scope. If profiled scope was entered at any point of the program,
+// # UTL_PROFILER, UTL_PROFILER_LABELED() #
+// Profiles the following expression/scope. If profiled scope was entered at any point of the program,
 // upon exiting 'main()' the table with profiling results will be printed. Profiling results include:
 // - Total program runtime
 // - Total runtime of each profiled scope
@@ -2229,7 +2229,7 @@ inline void _utl_profiler_atexit() {
 	// '__LINE__' gets expanded in '_utl_profiler_concat_tokens_wrapper()'
 	// and then tokenized and concatenated in '_utl_profiler_concat_tokens()'
 
-#define UTL_PROFILE_LABELED(label_) \
+#define UTL_PROFILER_LABELED(label_) \
 	if (auto _utl_profiler_add_line_number_to_variable_name(profiler_) = _utl_profiler(__FILE__, __LINE__, __func__, label_))
 	// We add line number to profiler variable name to prevent nested profiler scopes from shadowing
 	// each other's 'profiler_' variable. While such shadowing has no effect on an actual behavior,
@@ -2239,7 +2239,7 @@ inline void _utl_profiler_atexit() {
 	// is good enough and there is no way to get a better 'unique varname' without resorting to
 	// specific compiler extensions.
 
-#define UTL_PROFILE UTL_PROFILE_LABELED("<NONE>")
+#define UTL_PROFILER UTL_PROFILER_LABELED("<NONE>")
 
 // ========= header guard end =========
 
