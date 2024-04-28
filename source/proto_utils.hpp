@@ -29,9 +29,9 @@
 
 
 
-// ----------------------------
+// -------------------------------
 // --------- utl::config ---------
-// ----------------------------
+// -------------------------------
 #if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_CONFIG)
 #ifndef UTLHEADERGUARD_CONFIG
 #define UTLHEADERGUARD_CONFIG
@@ -66,8 +66,7 @@ namespace utl::config {
 	
 	// _________ IMPLEMENTATION _________
 	
-	// - Export config -
-	// -----------------
+	// --- Export config ---
 	template<typename T>
 	inline void _write_formatted_value_to_ostream(std::ostream &os, const T &value) {
 		constexpr bool is_string = std::is_convertible<T, std::string_view>::value;
@@ -167,8 +166,7 @@ namespace utl::config {
 	// if someone needs more layers of nesting they can specify type resolutions with std::initializer_list{ ... }
 	
 	// TODO:
-	// - Import config -
-	// -----------------
+	// --- Import config ---
 	//template<typename T>
 	//std::tuple<std::string_view, T&> parse(std::string_view key, T &value) {
 	//	return { key, value };
