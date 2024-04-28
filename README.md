@@ -51,7 +51,11 @@ Timing methods.
 
 ## Macro-Modules
 
-> [**UTL_PROFILER**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/MACROS.md)
+> [**UTL_LOG**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/MACRO_LOG.md)
+
+Macros for simple debug/release logging.
+
+> [**UTL_PROFILER**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/MACRO_PROFILER.md)
 
 Macros for quick scope & expression profiling.
 
@@ -81,7 +85,7 @@ Secondary design goals also include:
 * `stre::to_str()` implementation for `std::stack` and `std::queue`;
 * Colored text module or color support for log macros that does not involve including '<Windows.h>';
 * `UTL_PROFILE` module docs (godbold);
-* `UTL_DEFINE` module docs;
+* `UTL_DEFINE` module docs (godbold);
 * `utl::config` module docs (godbold).
 
 

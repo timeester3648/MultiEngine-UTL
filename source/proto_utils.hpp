@@ -1683,11 +1683,11 @@ namespace utl::voidstream {
 // be surrounded by parentheses aka '(std::pair<int, int>{4, 5})', since 'std::pair<int, int>{4, 5}' gets
 // interpreted as 3 separate args 'std::pair<int', ' int>{4', ' 5}' by any variadic macro.
 //
-// # UTL_DECLARE_ENUM_WITH_STRING_CONVERSION(enum_name, enum_values...) #
+// # UTL_DEFINE_ENUM_WITH_STRING_CONVERSION(enum_name, enum_values...) #
 // Create enum 'enum_name' with given enum_values and methods 'to_string()', 'from_string()' inside 'enum_name' namespace.
 // Note: Enums can't be declared inside functions.
 //
-// # UTL_DECLARE_IS_FUNCTION_PRESENT(function_name, return_type, argumet_types...) #
+// # UTL_DEFINE_IS_FUNCTION_PRESENT(function_name, return_type, argumet_types...) #
 // Creates integral constant named 'is_function_present_{function_name}' that
 // returns in "::value" whether function with given name and mask is a valid identifier.
 // Usefull for detecting existance of platform-specific methods.

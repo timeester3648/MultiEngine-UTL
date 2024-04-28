@@ -1,7 +1,3 @@
-
-
-
-
 # UTL_PROFILER
 
 [<- back to README.md](https://github.com/DmitriBogdanov/prototyping_utils/tree/master)
