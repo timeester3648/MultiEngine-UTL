@@ -92,8 +92,8 @@ Secondary design goals also include:
 * `config::import_json()` function;
 * `stre::centered()` stream modifier;
 * Potentially add `utl::config()` support for TOML and JSON5 with comments declared through `config:comment()` entries;
-* Coordinate transformations in `**`utl::math`**`;
-* More type traits in `**`utl::math`**`;
+* Coordinate transformations in `utl::math`;
+* More type traits in `utl::math`;
 * Async module with functions like `async::run_task()` and `async::await(task)`;
 * `stre::to_str()` implementation for `std::stack` and `std::queue`;
 * Colored text module or color support for log macros that does not involve including `<Windows.h>`, perhaps a full-on `utl::font` module;
