@@ -10,19 +10,26 @@ A rundown of usage examples can be found at [`source/examples.cpp`](https://gith
 
 ## Building with a script
 
-Building the project:
+Clone the repo:
+
+```bash
+git clone https://github.com/DmitriBogdanov/prototyping_utils.git &&
+cd "prototyping_utils/"
+```
+
+Build the project:
 
 ```bash
 bash actions.sh clear config build
 ```
 
-Running all tests:
+Run all tests:
 
 ```bash
 bash actions.sh test
 ```
 
-Running examples:
+Run examples:
 
 ```bash
 bash actions.sh run
@@ -45,13 +52,20 @@ target_compile_options(run PRIVATE -O2 -Wall -Wextra -Wpedantic -Werror)
 
 ## Building manually
 
-From the root directory, configure **CMake**:
+Clone the repo:
+
+```bash
+git clone https://github.com/DmitriBogdanov/prototyping_utils.git &&
+cd "prototyping_utils/"
+```
+
+Configure **CMake**:
 
 ```bash
 cmake -D CMAKE_CXX_COMPILER=g++ -B "build/" -S .
 ```
 
-Build project:
+Build the project:
 
 ```bash
 cmake --build "build/"
