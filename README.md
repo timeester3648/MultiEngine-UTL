@@ -1,11 +1,11 @@
-
-
 [![Language](https://img.shields.io/badge/C++-std=17-blue.svg?style=flat&logo=cplusplus)](https://en.wikipedia.org/wiki/C%2B%2B#Standardization)
 [![GitHub license](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/LICENSE.md)
 
 # Prototyping utils
 
 This is a collection of various utilities that aim to provide a set of concise "helpers" that allow prototying with minimal boilerplate. Most of the following modules were created during my work in gamedev and university projects.
+
+For the ease of integration, this library is distributed in a form of a **single header**, which can be found [here](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/source/proto_utils.hpp).
 
 ## Modules
 
@@ -69,6 +69,8 @@ Macros for quick scope & expression profiling.
 
 * [Names reserved for implementation](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/guide_reserved_names.md)
 
+* [Building tests & examples](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/guide_building_project.md)
+
 ## Design goals
 
 Implementation of this library sets following design goals:
@@ -101,12 +103,14 @@ Secondary design goals also include:
 * `stre::to_str()` implementation for `std::stack` and `std::queue`;
 * Colored text module or color support for log macros that does not involve including `<Windows.h>`, perhaps a full-on `utl::font` module;
 
-
 ## Requirements
 
 * Requires **C++17** support;
 * Some modules require POSIX-compliant system (Linux) or Windows.
 
+## Dependencies
+
+* Per-module unit tests depend on [doctest](https://github.com/doctest/doctest) framework, which is embedded in a repo (no additional installation required). **This does not concern distributed implementation**.
 
 ## License
 

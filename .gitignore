@@ -11,11 +11,9 @@
 !*.c
 !*.cpp
 !*.md
+!*.txt
 
 # Ignore build & temporary directories regarless of their contents
+.cache/
 build/
 temp/
-.cache/
-
-# Ignore work-in-progress directories
-tests/

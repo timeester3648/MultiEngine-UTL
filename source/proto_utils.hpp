@@ -1336,7 +1336,7 @@ namespace utl::table {
 
 	// --- Internal state ---
 	inline std::vector<_Column> _columns;
-	inline int _current_column = 0;
+	inline std::size_t _current_column = 0;
 	inline std::ostream *_output_stream = &std::cout;
 
 

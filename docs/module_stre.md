@@ -82,7 +82,7 @@ Standard types that are tuple-like include: [std::tuple](https://en.cppreference
 > stre::is_string;
 > ```
 
-`is_string<Type>::value` returns at compile time whether `Type` objects can be decayed to `char*`, `const char*` or `std::string`.
+`is_string<Type>::value` returns at compile time whether `Type` objects can be converted to `std::string_view` (which is true for all usual string types). Strings denoted by `char16_t`, `char32_t` and `wchar_t` aren't considered "regular strings" in the context of this trait.
 
 > ```cpp
 > stre::is_to_str_convertible;
