@@ -1087,14 +1087,7 @@ namespace utl::stre {
 
 	// --- type trait: is_string ---
 	template<typename Type>
-	struct is_string
-		:  std::disjunction<
-			std::is_same<char*, std::decay_t<Type>>,
-			std::is_same<const char*, std::decay_t<Type>>,
-			std::is_same<std::string, std::decay_t<Type>>
-		> {};
-		// NOTE: Perhaps convetabless to std::string_view can be a good criteria for a 'string-like' object
-	
+	struct is_string : std::is_convertible<Type, std::string_view> {};	
 
 	// --- to_str() ---
 

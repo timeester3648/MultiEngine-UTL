@@ -4,7 +4,7 @@
 
 Due to the header-only nature of the library, all internal identifiers can be accessed from outside.
 
-Identifiers that are not a part of public interface are considered **implementation identifiers**. All such identifiers are prefixed with `_` and follow a standardized naming convention that aims to reduce the probability of accidental name collisions.
+Identifiers that are not a part of the public interface are considered **implementation identifiers**. All such identifiers are prefixed with `_` and follow a standardized naming convention that aims to reduce the probability of accidental name collisions.
 
 ## Reserved Local Identifiers
 

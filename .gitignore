@@ -16,3 +16,6 @@
 build/
 temp/
 .cache/
+
+# Ignore work-in-progress directories
+tests/
