@@ -9,4 +9,5 @@ endmacro()
 
 # Tests
 doctest(module_stre)
+doctest(module_random)
 doctest(MACRO_LOG)

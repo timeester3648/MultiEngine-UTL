@@ -14,6 +14,7 @@ void set_ostream(std::ostream &new_ostream);
 // > Proper progress bar, uses carriage return escape
 // > sequence (\r) to render new states in the same spot
 class Percentage {
+public:
 	Percentage(
 		char done_char = '#',
 		char not_done_char = '.',
@@ -30,7 +31,8 @@ class Percentage {
 // 'Ruler' progressbar
 // > Primitive & lightweight progress bar, useful when
 // > terminal has no proper support for escape sequences
-class Ruler{
+class Ruler {
+public:
 	Percentage(
 		char done_char = '#'
 	);

@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <initializer_list>
 #include <iostream>
+#include <random>
 #include <unordered_map>
 #include <tuple>
 #include <set>
@@ -355,6 +356,10 @@ int main(int argc, char* argv[]) {
 		std::this_thread::sleep_for(std::chrono::milliseconds(200));
 	}
 	// we expect to see that 'inner loop' will measure about half the time of an 'outer loop'
-
+	
+	constexpr int size_1 = sizeof(utl::random::XorShift64StarGenerator);
+	constexpr int size_2 = sizeof(std::mt19937);
+	constexpr int size_3 = sizeof(std::minstd_rand);
+	
 	return 0;
 }

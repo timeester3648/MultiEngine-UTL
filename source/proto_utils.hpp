@@ -32,6 +32,8 @@
 // -------------------------------
 // --------- utl::config ---------
 // -------------------------------
+#include <cstddef>
+#include <random>
 #if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_CONFIG)
 #ifndef UTLHEADERGUARD_CONFIG
 #define UTLHEADERGUARD_CONFIG
@@ -538,6 +540,7 @@ namespace utl::progressbar {
 			length_current(0),
 			last_update_percentage(0),
 			update_rate(update_rate),
+			timepoint_start(Clock::now()),
 			previous_string_length(static_cast<int>(bar_length) + sizeof("[] 100.00%"))
 		{}
 
@@ -633,9 +636,10 @@ namespace utl::progressbar {
 
 // ======== header guard start ========
 
-#include <cstdlib>
 #include <ctime>
 #include <initializer_list>
+#include <limits>
+#include <random>
 
 namespace utl::random {
 	
@@ -643,6 +647,18 @@ namespace utl::random {
 	
 	// Various convenient random functions, utilizes rand() internally.
 	// If good quality random is necessary use std::random generators instead.
+	//
+	// # XorShift64StarGenerator #
+	// Random 'std::uint64_t' generator that satisfies uniform random number generator requirements
+	// from '<random>' (see https://en.cppreference.com/w/cpp/named_req/UniformRandomBitGenerator).
+	// Implementation "XorShift64* suggested by Marsaglia G. in 2003 "Journal of Statistical Software"
+	// (see https://www.jstatsoft.org/article/view/v008i14).
+	// Slightly faster than 'std::rand()', while providing higher quality random. 
+	// Significantly faster than 'std::mt19937'.
+	// State consists of a single 'std::uint64_t', requires seed >= 1.
+	//
+	// # xorshift64star #
+	// Global instance if XorShift64StarGenerator.
 	//
 	// # ::seed(), ::seed_with_time() #
 	// Seeds random with value or current time.
@@ -663,19 +679,81 @@ namespace utl::random {
 	
 	// _________ IMPLEMENTATION _________
 	
-	inline void seed(unsigned int random_seed) { std::srand(random_seed); }
-	inline void seed_with_time() { std::srand(static_cast<unsigned int>(std::time(NULL))); }
+	class XorShift64StarGenerator {
+		// meets uniform random number generator requirements
+		// (see https://en.cppreference.com/w/cpp/named_req/UniformRandomBitGenerator)
+		//
+		// implementation XorShift64* suggested by Marsaglia G. in 2003 "Journal of Statistical Software" 
+		// (see https://www.jstatsoft.org/article/view/v008i14)
+	public:
+		using result_type = std::uint64_t;
+		
+	private:
+		result_type state;
+		
+	public:
+		XorShift64StarGenerator(result_type seed = 0) : state(seed + 1) {}
+	
+		static constexpr result_type min() { return std::numeric_limits<result_type>::min(); }
+		static constexpr result_type max() { return std::numeric_limits<result_type>::max(); }
+		
+		void seed(result_type seed) { this->state = seed + 1; } // enforce seed >= 1 by always adding +1 to uint
+		
+		result_type operator()() { 
+			this->state ^= this->state >> 12;
+			this->state ^= this->state << 25;
+			this->state ^= this->state >> 27;
+			return this->state * 0x2545F4914F6CDD1DULL;
+		}
+	};
+	
+	inline XorShift64StarGenerator xorshift64star;
+	
+	inline void seed(XorShift64StarGenerator::result_type random_seed) {
+		xorshift64star.seed(random_seed);
+	}
+	
+	inline void seed_with_time() {
+		seed(static_cast<XorShift64StarGenerator::result_type>(std::time(NULL)));
+	}
+	
+	// --- Uniform distribution shortcuts ---
+	// Note: despite common sense benchmarks show that creating 'std::uniform_..._distribution<>'
+	// repeatedly doesn't introduce any noticeble overhead
+	// sizeof(std::uniform_int_distribution<int>) == 8
+	// sizeof(std::uniform_real_distribution<double>) == 16
+	
+	inline int rand_int(int min, int max) {
+		std::uniform_int_distribution<int> distr{ min, max };
+		return distr(xorshift64star);
+	}
+	
+	inline int rand_uint(unsigned int min, unsigned int max) {
+		std::uniform_int_distribution<unsigned int> distr{ min, max };
+		return distr(xorshift64star);
+	}
 
-	inline int rand_int(int min, int max) { return min + std::rand() % (max - min + 1); }
-	inline int rand_uint(unsigned int min, unsigned int max) { return min + static_cast<unsigned int>(std::rand()) % (max - min + 1u); }
+	inline float rand_float() {
+		return std::generate_canonical<float, std::numeric_limits<float>::digits>(xorshift64star);
+	}
+	
+	inline float rand_float(float min, float max) {
+		std::uniform_real_distribution<float> distr{ min, max };
+		return distr(xorshift64star);
+	}
 
-	inline float rand_float() { return std::rand() / (static_cast<float>(RAND_MAX) + 1.f); }
-	inline float rand_float(float min, float max) { return min + (max - min) * rand_float(); }
+	inline double rand_double() {
+		return std::generate_canonical<double, std::numeric_limits<double>::digits>(xorshift64star);
+	}
+	
+	inline double rand_double(double min, double max) {
+		std::uniform_real_distribution<double> distr{ min, max };
+		return distr(xorshift64star);
+	}
 
-	inline double rand_double() { return std::rand() / (static_cast<double>(RAND_MAX) + 1.); }
-	inline double rand_double(double min, double max) { return min + (max - min) * rand_double(); }
-
-	inline bool rand_bool() { return static_cast<bool>(std::rand() % 2); }
+	inline bool rand_bool() {
+		return static_cast<bool>(xorshift64star() % 2);
+	}
 
 	template<class T>
 	const T& rand_choise(std::initializer_list<T> objects) {
@@ -1650,6 +1728,7 @@ namespace utl::voidstream {
 #include <cctype>
 #include <sstream>
 #include <string>
+#include <type_traits>
 
 // _________ DEVELOPER DOCS _________
 
@@ -1719,7 +1798,7 @@ namespace utl::voidstream {
 #endif
 
 // --- Repeat loop ---
-#define UTL_DEFINE_REPEAT(repeats_) for (int count_ = 0; count_ < repeats_; ++count_)
+#define UTL_DEFINE_REPEAT(repeats_) for (std::remove_const<decltype(repeats_)>::type count_ = 0; count_ < repeats_; ++count_)
 
 // --- Size of __VA_ARGS__ in variadic macros ---
 #define _utl_expand_va_args( x_ ) x_ // a fix for MSVC bug not expanding __VA_ARGS__ properly
@@ -2141,6 +2220,7 @@ inline void _utl_profiler_atexit() {
 	const std::streamsize header_right_pad = total_table_length - header_text_length - header_left_pad;
 
 	std::cout
+		<< "\n"
 		<< repeat_hline_symbol(header_left_pad + 1) << HEADER_TEXT << repeat_hline_symbol(header_right_pad + 1) << '\n'
 		// + 1 makes header hline extend 1 character past the table on both sides
 		<< "\n"
