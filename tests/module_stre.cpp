@@ -1,5 +1,6 @@
 // __________ TEST FRAMEWORK & LIBRARY  __________
 
+#include <random>
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include "doctest.h"
 
@@ -10,8 +11,11 @@
 // ________________ TEST INCLUDES ________________
 
 #include <array>
-#include <vector>
 #include <cuchar>
+#include <random>
+#include <tuple>
+#include <unordered_map>
+#include <vector>
 
 // _____________ TEST IMPLEMENTATION _____________
 
@@ -45,4 +49,24 @@ TEST_CASE_TEMPLATE("(stre::is_string<T> == false) for T = ", T,
     std::u32string_view
 ) {
     CHECK(utl::stre::is_string<T>::value == false);
+}
+
+TEST_CASE_TEMPLATE("(stre::is_to_str_convertible<T> == true) for T = ", T,
+    // "Directly printable" types
+    char*,
+    const char*,
+    std::string,
+    std::string_view,
+    int,
+    unsigned int,
+    float,
+    double,
+    // "Complex" types
+    std::vector<int>,                                                                         // vector
+    std::tuple<int, double, std::string>,                                                     // tuple
+    std::vector<std::vector<int>>,                                                            // vector of vectors
+    std::unordered_map<std::string, int>,                                                     // map
+    std::tuple<std::vector<bool>, std::vector<std::string>, std::vector<std::pair<int, int>>> // tuple of vectors
+) {
+    CHECK(utl::stre::is_to_str_convertible<T>::value == true);
 }

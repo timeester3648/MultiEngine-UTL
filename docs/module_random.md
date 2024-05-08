@@ -64,6 +64,7 @@ Global instance of `XorShift64StarGenerator`.
 > ```cpp
 > random::seed(uint64_t random_seed);
 > random::seed_with_time();
+> random::seed_with_random_device();
 > ```
 
 Seeds random with a value.

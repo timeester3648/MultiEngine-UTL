@@ -329,7 +329,8 @@ namespace utl::math {
 	template<typename Type, std::enable_if_t<std::is_arithmetic<Type>::value, bool> = true>
 	constexpr Type cube(Type x) { return x * x * x; }
 
-	template<typename Type,
+	template<
+		typename Type,
 		std::enable_if_t<utl::math::is_addable_with_itself<Type>::value, bool> = true,
 		std::enable_if_t<utl::math::is_multipliable_by_scalar<Type>::value, bool> = true
 	>
@@ -660,8 +661,10 @@ namespace utl::random {
 	// # xorshift64star #
 	// Global instance if XorShift64StarGenerator.
 	//
-	// # ::seed(), ::seed_with_time() #
-	// Seeds random with value or current time.
+	// # ::seed(), ::seed_with_time(), ::seed_with_random_device() #
+	// Seeds random with value/current_time/random_device.
+	// Random device is a better source of entropy, however it is more expensive to initialize
+	// than just taking current time with <ctime>.
 	//
 	// # ::rand_int(), ::rand_uint(), ::rand_float(), ::rand_double() #
 	// Random value in [min, max] range.
@@ -714,7 +717,12 @@ namespace utl::random {
 	}
 	
 	inline void seed_with_time() {
-		seed(static_cast<XorShift64StarGenerator::result_type>(std::time(NULL)));
+		utl::random::seed(static_cast<XorShift64StarGenerator::result_type>(std::time(NULL)));
+	}
+	
+	inline void seed_with_random_device() {
+		std::random_device rd;
+		utl::random::seed(static_cast<XorShift64StarGenerator::result_type>(rd()));
 	}
 	
 	// --- Uniform distribution shortcuts ---
@@ -1186,22 +1194,20 @@ namespace utl::stre {
 	// - predeclarations (to_str(tuple)) -
 	template<
 		template<typename... Params> class TupleLikeType,
-		typename... Args
+		typename... Args,
+		std::enable_if_t<!utl::stre::is_printable<TupleLikeType<Args...>>::value, bool> = true,
+		std::enable_if_t<!utl::stre::is_const_iterable_through<TupleLikeType<Args...>>::value, bool> = true,
+		std::enable_if_t<utl::stre::is_tuple_like<TupleLikeType<Args...>>::value, bool> = true
 	>
-	std::enable_if_t<
-		!utl::stre::is_printable<TupleLikeType<Args...>>::value &&
-		!utl::stre::is_const_iterable_through<TupleLikeType<Args...>>::value &&
-		utl::stre::is_tuple_like<TupleLikeType<Args...>>::value
-	, std::string> to_str(const TupleLikeType<Args...> &tuple);
+	std::string to_str(const TupleLikeType<Args...> &tuple);
 		// predeclare to resolve circular dependency between to_str(container) and to_str(tuple)
 
 	// - to_str(printable) -
 	template<
-		typename Type
+		typename Type,
+		std::enable_if_t<utl::stre::is_printable<Type>::value, bool> = true
 	>
-	std::enable_if_t<
-		utl::stre::is_printable<Type>::value
-	, std::string> to_str(const Type &value) {
+	std::string to_str(const Type &value) {
 		std::stringstream ss;
 
 		ss << value;
@@ -1211,13 +1217,12 @@ namespace utl::stre {
 
 	// - to_str(container) -
 	template<
-		typename ContainerType
+		typename ContainerType,
+		std::enable_if_t<!utl::stre::is_printable<ContainerType>::value, bool> = true,
+		std::enable_if_t<utl::stre::is_const_iterable_through<ContainerType>::value, bool> = true,
+		std::enable_if_t<utl::stre::is_to_str_convertible<typename ContainerType::value_type>::value, bool> = true
 	>
-	std::enable_if_t<
-		!utl::stre::is_printable<ContainerType>::value &&
-		utl::stre::is_const_iterable_through<ContainerType>::value &&
-		utl::stre::is_to_str_convertible<typename ContainerType::value_type>::value
-	, std::string> to_str(const ContainerType &container) {
+	std::string to_str(const ContainerType &container) {
 
 		std::stringstream ss;
 
@@ -1261,14 +1266,13 @@ namespace utl::stre {
 
 	// - to_str(tuple) -
 	template<
-		template<typename...> class TupleLikeType,
-		typename... Args
+		template<typename... Params> class TupleLikeType,
+		typename... Args,
+		std::enable_if_t<!utl::stre::is_printable<TupleLikeType<Args...>>::value, bool>,
+		std::enable_if_t<!utl::stre::is_const_iterable_through<TupleLikeType<Args...>>::value, bool>,
+		std::enable_if_t<utl::stre::is_tuple_like<TupleLikeType<Args...>>::value, bool>
 	>
-	std::enable_if_t<
-		!utl::stre::is_printable<TupleLikeType<Args...>>::value &&
-		!utl::stre::is_const_iterable_through<TupleLikeType<Args...>>::value &&
-		utl::stre::is_tuple_like<TupleLikeType<Args...>>::value
-	, std::string> to_str(const TupleLikeType<Args...> &tuple) {
+	std::string to_str(const TupleLikeType<Args...> &tuple) {
 
 		std::stringstream ss;
 
@@ -1316,11 +1320,11 @@ namespace utl::stre {
 		return res;
 	}
 
-	// 
-	template<typename IntegerType>
-	inline std::enable_if_t<
-		std::is_integral<IntegerType>::value
-	, std::string> pad_with_zeroes(IntegerType number, std::streamsize total_size = 10) {
+	// - Small utils -
+	template<typename IntegerType,
+		std::enable_if_t<std::is_integral<IntegerType>::value, bool> = true
+	>
+	std::string pad_with_zeroes(IntegerType number, std::streamsize total_size = 10) {
 		std::stringstream ss;
 		ss << std::setfill('0') << std::setw(total_size) << number;
 		return ss.str();
