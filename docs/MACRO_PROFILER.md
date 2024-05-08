@@ -28,7 +28,8 @@ Profiles the following scope or expression. If profiled scope was entered at any
 - Profiler **labels** (if using `UTL_PROFILE_LABELED()`, otherwise the label is set to `<NONE>`)
 - Profiler locations: file, function, line
 
-Miltiple profilers can exist at the same time. Profiled scopes can be nested. Profiler overhead corresponds to entering & exiting the profiled scope, while insignificant in most applications, it may affect runtime in a tight loop.
+> [!NOTE]
+> Miltiple profilers can exist at the same time. Profiled scopes can be nested. Profiler overhead corresponds to entering & exiting the profiled scope, while insignificant in most applications, it may affect runtime in a tight loop.
 
 > ```cpp
 > UTL_PROFILER_REROUTE_TO_FILE(filepath)
