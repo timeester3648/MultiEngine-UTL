@@ -2065,6 +2065,9 @@ inline void _utl_log_print(std::string_view file, int line, std::string_view fun
 
 // Macros for quick code profiling.
 //
+// # UTL_PROFILER_REROUTE_TO_FILE(filepath) #
+// Reroutes profiler summary from std::cout to a file with a given name.
+//
 // # UTL_PROFILER, UTL_PROFILER_LABELED() #
 // Profiles the following expression/scope. If profiled scope was entered at any point of the program,
 // upon exiting 'main()' the table with profiling results will be printed. Profiling results include:
@@ -2076,11 +2079,15 @@ inline void _utl_log_print(std::string_view file, int line, std::string_view fun
 
 // _________ IMPLEMENTATION _________
 
+inline std::string _utl_profiler_reroute_to_filepath = "";
+
+#define UTL_PROFILER_REROUTE_TO_FILE(filepath_) _utl_profiler_reroute_to_filepath = filepath_;
+
 using _utl_profiler_clock = std::chrono::steady_clock;
 using _utl_profiler_time_duration = _utl_profiler_clock::duration;
 using _utl_profiler_time_point = _utl_profiler_clock::time_point;
 
-static const _utl_profiler_time_point _utl_profiler_program_init_time_point = _utl_profiler_clock::now();
+inline const _utl_profiler_time_point _utl_profiler_program_init_time_point = _utl_profiler_clock::now();
 	// automatically gets program launch time so we can compute total runtime later
 
 inline std::string _utl_profiler_format_call_site(std::string_view file, int line, std::string_view func) {
@@ -2143,9 +2150,18 @@ public:
 
 inline void _utl_profiler_atexit() {
 	namespace chr = std::chrono;
-
+	
 	const auto total_runtime = _utl_profiler_clock::now() - _utl_profiler_program_init_time_point;
 	//const auto total_runtime = std::chrono::duration_cast<std::chrono::milliseconds>();
+	
+	// Choose whether to print or reroute output to file
+	std::ostream *ostr = &std::cout;
+	std::ofstream output_file;
+	
+	if (!_utl_profiler_reroute_to_filepath.empty()) {
+		output_file.open(_utl_profiler_reroute_to_filepath);
+		ostr = &output_file;
+	}
 
 	// Convenience functions
 	const auto duration_to_sec = [](_utl_profiler_time_duration duration) -> double {
@@ -2224,7 +2240,7 @@ inline void _utl_profiler_atexit() {
 	const std::streamsize header_left_pad = (total_table_length - header_text_length) / 2;
 	const std::streamsize header_right_pad = total_table_length - header_text_length - header_left_pad;
 
-	std::cout
+	*ostr
 		<< "\n"
 		<< repeat_hline_symbol(header_left_pad + 1) << HEADER_TEXT << repeat_hline_symbol(header_right_pad + 1) << '\n'
 		// + 1 makes header hline extend 1 character past the table on both sides
@@ -2233,7 +2249,7 @@ inline void _utl_profiler_atexit() {
 		<< "\n";
 
 	// Print formatted table header
-	std::cout
+	*ostr
 			<< " | "
 			<< std::setw(max_length_call_site)  << column_name_call_site
 			<< " | "
@@ -2244,7 +2260,7 @@ inline void _utl_profiler_atexit() {
 			<< std::setw(max_length_percentage) << column_name_percentage
 			<< " |\n";
 
-	std::cout
+	*ostr
 		<< " |"
 		<< repeat_hline_symbol(max_length_call_site  + 2) // add 2 to account for delimers not having spaces in hline
 		<< "|"
@@ -2255,7 +2271,7 @@ inline void _utl_profiler_atexit() {
 		<< repeat_hline_symbol(max_length_percentage + 2)
 		<< "|\n";
 
-	std::cout << std::setfill(' '); // reset the fill so we don't mess with table contents
+	*ostr << std::setfill(' '); // reset the fill so we don't mess with table contents
 
 
 	// Print formatted table contents
@@ -2277,7 +2293,7 @@ inline void _utl_profiler_atexit() {
 			<< std::setprecision(percentage_precision) << percentage_format
 			<< percentage << percentage_postfix;
 
-		std::cout
+		*ostr
 			<< " | "
 			<< std::setw(max_length_call_site)  << call_site
 			<< " | "

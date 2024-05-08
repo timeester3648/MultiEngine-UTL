@@ -9,6 +9,8 @@
 ```cpp
 UTL_PROFILER           // assigns default label to profiler
 UTL_PROFILER_LABELED() // assigns custom  label to profiler
+
+UTL_PROFILER_REROUTE_TO_FILE(filepath)
 ```
 
 ## Methods
@@ -27,6 +29,12 @@ Profiles the following scope or expression. If profiled scope was entered at any
 - Profiler locations: file, function, line
 
 Miltiple profilers can exist at the same time. Profiled scopes can be nested. Profiler overhead corresponds to entering & exiting the profiled scope, while insignificant in most applications, it may affect runtime in a tight loop.
+
+> ```cpp
+> UTL_PROFILER_REROUTE_TO_FILE(filepath)
+> ```
+
+Reroutes profiler summary from `std::cout` to a file with a given name.
 
 ## Example 1 (profiling a function called inside a loop)
 

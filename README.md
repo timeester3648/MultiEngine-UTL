@@ -87,7 +87,6 @@ Secondary design goals also include:
 
 ## Work in progress
 
-* `UTL_PROFILER_SET_OSTREAM()` macro;
 * Method for selecting folder for temp file creation in `utl::shell`;
 * `timer::benchmark()` function;
 * `UTL_DEFINE_BITFLAG_ENUM()` macro;

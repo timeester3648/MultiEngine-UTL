@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <ctime>
 #include <filesystem>
+#include <fstream>
 #include <initializer_list>
 #include <iostream>
 #include <numeric>
@@ -401,6 +402,8 @@ int main(int argc, char* argv[]) {
 		std::this_thread::sleep_for(std::chrono::milliseconds(200));
 	}
 	// we expect to see that 'inner loop' will measure about half the time of an 'outer loop'
+	
+	UTL_PROFILER_REROUTE_TO_FILE("profiling.txt");
 	
 	return 0;
 }
