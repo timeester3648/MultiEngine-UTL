@@ -5,8 +5,7 @@
 
 This is a collection of various utilities that aim to provide a set of concise "helpers" that allow prototying with minimal boilerplate. Most of the following modules were created during my work in gamedev and university projects.
 
-> [!NOTE]
-> For the ease of integration, this library is distributed in a form of a **single header**, which can be found [here](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/source/proto_utils.hpp).
+For the ease of integration, this library is distributed in a form of a **single header**, which can be found [here](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/source/proto_utils.hpp).
 
 ## Modules
 

@@ -50,8 +50,7 @@ Internally module keeps track of all created temporary files so they can be late
 
 Deletes all temporary files created with `generate_temp_file()` during current runtime. **Called automatically when exiting the program.**
 
-> [!NOTE]
-> "Exiting" happens when program returns from `main()` or calls `std::exit()`.
+**Note:** "Exiting" happens when program returns from `main()` or calls `std::exit()`.
 
 > ```cpp
 > shell::erase_temp_file(const std::string &file);

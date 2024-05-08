@@ -45,8 +45,7 @@ std::string repeat_string(std::string_view str, size_t repeats);
 std::string pad_with_zeroes(IntegerType number, std::streamsize total_size = 10);
 ```
 
-> [!NOTE]
-> In reality `to_str()` is a number of [SFINAE-resolved](https://en.cppreference.com/w/cpp/language/sfinae) templates that expand recursively over any passed `Type` as long as types at the end of recursion satisfy `is_printable`.
+**Note:** In reality `to_str()` is a number of [SFINAE-resolved](https://en.cppreference.com/w/cpp/language/sfinae) templates that expand recursively over any passed `Type` as long as types at the end of recursion satisfy `is_printable`.
 
 ## Methods
 
