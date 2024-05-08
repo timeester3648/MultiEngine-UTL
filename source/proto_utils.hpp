@@ -787,9 +787,9 @@ namespace utl::random {
 
 
 
-// ----------------------------
+// ------------------------------
 // --------- utl::shell ---------
-// ----------------------------
+// ------------------------------
 #if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_SHELL)
 #ifndef UTLHEADERGUARD_SHELL
 #define UTLHEADERGUARD_SHELL
