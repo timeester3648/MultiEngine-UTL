@@ -255,14 +255,11 @@ int main(int argc, char* argv[]) {
 	const std::string str = stre::InlineStream() << "Value " << 3.14 << " is smaller than " << 6.28;
 	std::cout << str << "\n\n";
 
-	// Repeats string
+	// Other utilities
 	std::cout
 		<< "repeat_symbol('h',  7) = "   << stre::repeat_symbol('h',   7) << "\n"
-		<< "repeat_string(\"xo\", 5) = " << stre::repeat_string("xo-", 5) << "\n\n";
-
-	// Pad with zeroes
-	std::cout
-		<< "pad_with_zeroes(15) = " << stre::pad_with_zeroes(15) << "\n";
+		<< "repeat_string(\"xo\", 5) = " << stre::repeat_string("xo-", 5) << "\n"
+		<< "pad_with_zeroes(15) = "      << stre::pad_with_zeroes(15)     << "\n";
 
 	// ### utl::timer:: ###
 	std::cout << "\n\n### utl::timer:: ###\n\n";

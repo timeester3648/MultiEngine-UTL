@@ -1321,7 +1321,8 @@ namespace utl::stre {
 	}
 
 	// - Small utils -
-	template<typename IntegerType,
+	template<
+		typename IntegerType,
 		std::enable_if_t<std::is_integral<IntegerType>::value, bool> = true
 	>
 	std::string pad_with_zeroes(IntegerType number, std::streamsize total_size = 10) {

@@ -38,9 +38,14 @@ public:
 	
 	operator std::string() const;
 }
+
+// Utils
+std::string repeat_symbol(char symbol, size_t repeats);
+std::string repeat_string(std::string_view str, size_t repeats);
+std::string pad_with_zeroes(IntegerType number, std::streamsize total_size = 10);
 ```
 
-In reality `to_str()` is a number of conditionally enabled templates that expand recursively over any passed `Type` as long as types at the end of recursion satisfy `is_printable`.
+In reality `to_str()` is a number of [SFINAE-resolved](https://en.cppreference.com/w/cpp/language/sfinae) templates that expand recursively over any passed `Type` as long as types at the end of recursion satisfy `is_printable`.
 
 ## Methods
 
@@ -108,6 +113,19 @@ Respects custom `operator<<()` overloads and gives them priority in recursion, w
 
 Use `InlineStream() << ...` to build strings using stream syntax without explicitly creating [std::stringstream](https://en.cppreference.com/w/cpp/io/basic_stringstream) object.
 
+> ```cpp
+> std::string repeat_symbol(char symbol, size_t repeats);
+> std::string repeat_string(std::string_view str, size_t repeats);
+> ```
+
+Repeats given character or string a given number of times and returns as a string.
+
+> ```cpp
+> std::string pad_with_zeroes(IntegerType number, std::streamsize total_size = 10);
+> ```
+
+Pads given integer with zeroes until total length reaches `total_size`. Usefull for numbering files/data entries in a way which makes them uniform and lexicographically sortable.
+
 ## Example 1 (type traits)
 
 [ [Run this code](https://godbolt.org/#z:OYLghAFBqd5QCxAYwPYBMCmBRdBLAF1QCcAaPECAMzwBtMA7AQwFtMQByARg9KtQYEAysib0QXACx8BBAKoBnTAAUAHpwAMvAFYTStJg1DIApACYAQuYukl9ZATwDKjdAGFUtAK4sGe1wAyeAyYAHI%2BAEaYxCAArKQADqgKhE4MHt6%2BekkpjgJBIeEsUTHxdpgOaUIETMQEGT5%2BXLaY9nkM1bUEBWGR0XG2NXUNWc0KQ93BvcX9sQCUtqhexMjsHOYAzMHI3lgA1CYbbggEBAkKIAD0l8RMAO4AdMCECF4RXkorsowED2gslwAIixCMQ8BZUMB0IZUAA3S4JYioIgEACeCWCwAA%2Bl5HLQFJcWExxtFLgolitMAikUQcXiFA8EAkEodsCYNABBdlcsxbBg7Lz7Q5uJQEVnczbbXaYA5HWh4cbiznc4IEPZE4IQOYHADsVk5e0New%2BmL2zDYCgSTFWxoItEO%2Bq5BqN43QIBQSzFzqNRuFwr2rvdEVQnjECQQTG5Pp9fqOBzMZgVWMRqqYEXo/tVsuw0dzecNh0B8bMsrc/vGxHYICTKcEaYzR1VrPdsLEXhl%2Bc7BaO/vMZhMsTcDD7UbzsbcxaThGi9cwWIICCRXmACHLBDdIHlisbglZ2e7Rb7pbXlfdU4IM/Tc4XS5XwsDm4VYp3z7ZG2wLbbHfHxYHQ5H3rRj%2BfZJgQXgJPQWLygA1pga4bhWpp7l2hbFsecYVlWoHgZBMFwUcD6IUYzYgK23gdp2wEJn%2Bw7UYBMY9nGIEKFiRHAP6aAMOMezIBGxAAFT7l2DGHgm6ETphZ4sWxwqcdxvG1PxJFke2wkMWWTHUYOtH9vRvqMROzHzqgrEEMQWKcbC0SOFe8HuqKwpNu%2B%2B6oUeP6SdWLG0hWFkCFZdR4LZBHrvZmDPm4Tlvh%2BpFfuJv7aSOGyOqOhqVmBxAMHsGgOhKOqAtyHALLQnCxLwfgcFopCoJwZaWNYAYUjamw8KQBCaIVCzQSAOpcA8PU6gAHBsUgDWYABsACcXAaPExUcJIZXtVVnC8BcGite1CxwLAMCIB6LAYvQZAUBA/yHf0OyGMAXBjRo600LQF7EBcEAREtETBLUqKcC1H3MMQqIAPIRNoFRtdwvD/GwgiAwwtDfRVvBYO8wBuGI%2BI/UjmBEkY4iI6Q%2BCVpUVkXPjmCqBUuJrJVqqtEt8oRLcAMeFgS1mXgLCYwsVAGMACgAGp4JgdyAwkjCYzIggiGI7BSJL8hKGoS26M0BhGCg1jWPogUXJACyoAk7SkwAtK6hamHVlhcDqezG4DZi8HC0Rglgutai0bRpC4DDuJ4jT%2BD7PRFCU2TJKkAgjE0iRh%2B0Qd9DEYytGDVQTJHejlJUAidHUcczAngxdGnYwTLnIdcAs5LLKsEhFSVi349VHB7KoA1jcbY2SDxavAHsN0PBo/d7BAuCECQ8bDXMvDg1ocwLAgmBMFgMTu3NC2kJzsTreVlWN6tIDrdPhWkNte2egkuLkJQZ10NEoSsGsLdtx3XdXb3Y39/3vCYPgRAu3o/BS1EOIOWACFYqHUPjFWpA7i3ASFzfQddSDb0dpwQGuJz5qlQFQZurd26d0ukYN%2BH8NBDw8AdG%2BxBx7lynptTqIBJDv0mpIMwXBW4zQmj1G6CD5q8A3lvJau9bD7w2ojWepAupmAGg8SRLCxoDViNbDYGgBoTQYdwjY9cd4rRETPWuHAHZIIEdow%2BYj/IpGcJIIAA) ]
@@ -170,7 +188,7 @@ to_str(tuple of vectors with bools, strings and pairs):
 
 ## Example 3 (inline stringstream)
 
-[ [Run this code](https://godbolt.org/#g:!((g:!((g:!((h:codeEditor,i:(filename:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,selection:(endColumn:1,endLineNumber:9,positionColumn:1,positionLineNumber:9,selectionStartColumn:1,selectionStartLineNumber:9,startColumn:1,startLineNumber:9),source:'%23include+%3Chttps://raw.githubusercontent.com/DmitriBogdanov/prototyping_utils/master/source/proto_utils.hpp%3E%0A%0A%23include+%3Cvector%3E%0A%23include+%3Ctuple%3E%0A%23include+%3Cunordered_map%3E%0A%0Aint+main()+%7B%0A++++using+namespace+utl%3B%0A%0A++++std::string+str+%3D+stre::InlineStream()+%3C%3C+%22Value+%22+%3C%3C+3.14+%3C%3C+%22+is+smaller+than+%22+%3C%3C+6.28%3B%0A++++std::cout+%3C%3C+str+%3C%3C+%22%5Cn%22%3B%0A%0A++++return+0%3B%0A%7D%0A'),l:'5',n:'0',o:'C%2B%2B+source+%231',t:'0')),k:71.71783148269105,l:'4',n:'0',o:'',s:0,t:'0'),(g:!((g:!((h:compiler,i:(compiler:clang1600,filters:(b:'0',binary:'1',binaryObject:'1',commentOnly:'0',debugCalls:'1',demangle:'0',directives:'0',execute:'0',intel:'0',libraryCode:'0',trim:'1'),flagsViewOpen:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,libs:!(),options:'-std%3Dc%2B%2B17+-O2',overrides:!(),selection:(endColumn:1,endLineNumber:1,positionColumn:1,positionLineNumber:1,selectionStartColumn:1,selectionStartLineNumber:1,startColumn:1,startLineNumber:1),source:1),l:'5',n:'0',o:'+x86-64+clang+16.0.0+(Editor+%231)',t:'0')),header:(),l:'4',m:50,n:'0',o:'',s:0,t:'0'),(g:!((h:output,i:(compilerName:'x86-64+clang+16.0.0',editorid:1,fontScale:14,fontUsePx:'0',j:1,wrap:'1'),l:'5',n:'0',o:'Output+of+x86-64+clang+16.0.0+(Compiler+%231)',t:'0')),k:46.69421860597116,l:'4',m:50,n:'0',o:'',s:0,t:'0')),k:28.282168517308946,l:'3',n:'0',o:'',t:'0')),l:'2',n:'0',o:'',t:'0')),version:4) ]
+[ [Run this code](https://godbolt.org/#g:!((g:!((g:!((h:codeEditor,i:(filename:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,selection:(endColumn:1,endLineNumber:5,positionColumn:1,positionLineNumber:5,selectionStartColumn:1,selectionStartLineNumber:5,startColumn:1,startLineNumber:5),source:'%23include+%3Chttps://raw.githubusercontent.com/DmitriBogdanov/prototyping_utils/master/source/proto_utils.hpp%3E%0A%0Aint+main()+%7B%0A++++using+namespace+utl%3B%0A%0A++++std::string+str+%3D+stre::InlineStream()+%3C%3C+%22Value+%22+%3C%3C+3.14+%3C%3C+%22+is+smaller+than+%22+%3C%3C+6.28%3B%0A++++std::cout+%3C%3C+str+%3C%3C+%22%5Cn%22%3B%0A%0A++++return+0%3B%0A%7D%0A'),l:'5',n:'0',o:'C%2B%2B+source+%231',t:'0')),k:71.71783148269105,l:'4',n:'0',o:'',s:0,t:'0'),(g:!((g:!((h:compiler,i:(compiler:clang1600,filters:(b:'0',binary:'1',binaryObject:'1',commentOnly:'0',debugCalls:'1',demangle:'0',directives:'0',execute:'0',intel:'0',libraryCode:'0',trim:'1',verboseDemangling:'0'),flagsViewOpen:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,libs:!(),options:'-std%3Dc%2B%2B17+-O2',overrides:!(),selection:(endColumn:1,endLineNumber:1,positionColumn:1,positionLineNumber:1,selectionStartColumn:1,selectionStartLineNumber:1,startColumn:1,startLineNumber:1),source:1),l:'5',n:'0',o:'+x86-64+clang+16.0.0+(Editor+%231)',t:'0')),header:(),l:'4',m:50,n:'0',o:'',s:0,t:'0'),(g:!((h:output,i:(compilerName:'x86-64+clang+16.0.0',editorid:1,fontScale:14,fontUsePx:'0',j:1,wrap:'1'),l:'5',n:'0',o:'Output+of+x86-64+clang+16.0.0+(Compiler+%231)',t:'0')),k:46.69421860597116,l:'4',m:50,n:'0',o:'',s:0,t:'0')),k:28.282168517308946,l:'3',n:'0',o:'',t:'0')),l:'2',n:'0',o:'',t:'0')),version:4) ]
 ```cpp
 using namespace utl;
 
@@ -181,4 +199,23 @@ std::cout << str << "\n";
 Output:
 ```
 Value 3.14 is smaller than 6.28
+```
+
+## Example 4 (other utilities)
+
+[ [Run this code](https://godbolt.org/#g:!((g:!((g:!((h:codeEditor,i:(filename:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,selection:(endColumn:77,endLineNumber:9,positionColumn:77,positionLineNumber:9,selectionStartColumn:77,selectionStartLineNumber:9,startColumn:77,startLineNumber:9),source:'%23include+%3Chttps://raw.githubusercontent.com/DmitriBogdanov/prototyping_utils/master/source/proto_utils.hpp%3E%0A%0Aint+main()+%7B%0A++++using+namespace+utl%3B%0A%0A++++std::cout%0A%09%09%3C%3C+%22repeat_symbol(!'h!',++7)+%3D+%22+++%3C%3C+stre::repeat_symbol(!'h!',+++7)+%3C%3C+%22%5Cn%22%0A%09%09%3C%3C+%22repeat_string(%5C%22xo%5C%22,+5)+%3D+%22+%3C%3C+stre::repeat_string(%22xo-%22,+5)+%3C%3C+%22%5Cn%22%0A%09%09%3C%3C+%22pad_with_zeroes(15)+%3D+%22++++++%3C%3C+stre::pad_with_zeroes(15)+++++%3C%3C+%22%5Cn%22%3B%0A%0A++++return+0%3B%0A%7D%0A'),l:'5',n:'0',o:'C%2B%2B+source+%231',t:'0')),k:71.71783148269105,l:'4',n:'0',o:'',s:0,t:'0'),(g:!((g:!((h:compiler,i:(compiler:clang1600,filters:(b:'0',binary:'1',binaryObject:'1',commentOnly:'0',debugCalls:'1',demangle:'0',directives:'0',execute:'0',intel:'0',libraryCode:'0',trim:'1',verboseDemangling:'0'),flagsViewOpen:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,libs:!(),options:'-std%3Dc%2B%2B17+-O2',overrides:!(),selection:(endColumn:1,endLineNumber:1,positionColumn:1,positionLineNumber:1,selectionStartColumn:1,selectionStartLineNumber:1,startColumn:1,startLineNumber:1),source:1),l:'5',n:'0',o:'+x86-64+clang+16.0.0+(Editor+%231)',t:'0')),header:(),l:'4',m:50,n:'0',o:'',s:0,t:'0'),(g:!((h:output,i:(compilerName:'x86-64+clang+16.0.0',editorid:1,fontScale:14,fontUsePx:'0',j:1,wrap:'1'),l:'5',n:'0',o:'Output+of+x86-64+clang+16.0.0+(Compiler+%231)',t:'0')),k:46.69421860597116,l:'4',m:50,n:'0',o:'',s:0,t:'0')),k:28.282168517308946,l:'3',n:'0',o:'',t:'0')),l:'2',n:'0',o:'',t:'0')),version:4) ]
+```cpp
+using namespace utl;
+
+std::cout
+	<< "repeat_symbol('h',  7) = "   << stre::repeat_symbol('h',   7) << "\n"
+	<< "repeat_string(\"xo\", 5) = " << stre::repeat_string("xo-", 5) << "\n"
+	<< "pad_with_zeroes(15) = "      << stre::pad_with_zeroes(15)     << "\n";
+```
+
+Output:
+```
+repeat_symbol('h',  7) = hhhhhhh
+repeat_string("xo", 5) = xo-xo-xo-xo-xo-
+pad_with_zeroes(15) = 0000000015
 ```

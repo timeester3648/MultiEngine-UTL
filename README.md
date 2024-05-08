@@ -87,7 +87,6 @@ Secondary design goals also include:
 
 ## Work in progress
 
-* `utl::stre` docs for `stre::repeat_symbol()`, `stre::repeat_string()` and `stre::pad_with_zeroes()`.
 * `UTL_PROFILER_SET_OSTREAM()` macro;
 * Method for selecting folder for temp file creation in `utl::shell`;
 * `timer::benchmark()` function;
