@@ -15,11 +15,8 @@ void clear_temp_files();
 void erase_temp_file(const std::string &file);
 
 // Argc/argv parsers
-std::string get_exe_path(char** argv);
-std::string_view get_exe_path_view(char** argv);
-
-std::vector<std::string> get_command_line_args(int argc, char** argv);
-std::vector<std::string_view> get_command_line_args_view(int argc, char** argv);
+std::string_view get_exe_path(char** argv);
+std::vector<std::string_view> get_command_line_args(int argc, char** argv);
 
 // Command line utils
 struct CommandResult {
