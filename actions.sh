@@ -12,7 +12,7 @@
 #     > bash actions.sh [ACTIONS]
 #   
 #   Actions:
-#      clear  - Clears "build/" folder
+#     clear  - Clears "build/" folder
 #     config - Configures CMake with appropriate args
 #     build  - Builds the project (requires configured CMake)
 #     run    - Runs main executable (requires successful build)
