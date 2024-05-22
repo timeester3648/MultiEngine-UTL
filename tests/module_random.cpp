@@ -28,6 +28,7 @@ double vec_max(const std::vector<double> &vec) {
 }
 
 TEST_CASE("Uniform distribution mean/min/max are sensible") {
+    
     constexpr std::size_t N = 500'000; // number of random vals
     constexpr double eps = 2e-2; // epsilon used for double comparison, 1e-2 ~ 1% allowed error
     std::vector<double> vec(N);

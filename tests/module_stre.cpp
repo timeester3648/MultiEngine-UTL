@@ -1,6 +1,7 @@
 // __________ TEST FRAMEWORK & LIBRARY  __________
 
 #include <random>
+#include <string>
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include "doctest.h"
 
@@ -12,6 +13,7 @@
 
 #include <array>
 #include <cuchar>
+#include <map>
 #include <random>
 #include <tuple>
 #include <unordered_map>
@@ -69,4 +71,33 @@ TEST_CASE_TEMPLATE("(stre::is_to_str_convertible<T> == true) for T = ", T,
     std::tuple<std::vector<bool>, std::vector<std::string>, std::vector<std::pair<int, int>>> // tuple of vectors
 ) {
     CHECK(utl::stre::is_to_str_convertible<T>::value == true);
+}
+
+TEST_CASE("stre::to_str() performs as expected") {
+    
+    std::vector<int>                     test1 = { 1, 2, 3 };
+    std::vector<std::vector<int>>        test2 = { { 1, 2 }, { 3 }, { 4, 5, 6 } };
+    std::tuple<int, double, std::string> test3 = { 17, 0.5, "text" };
+    std::map<std::string, int>           test4 = { { "key1", 1 }, { "key2", 2 } };
+    
+    CHECK(utl::stre::to_str(test1) == std::string("[ 1, 2, 3 ]"                     ));
+    CHECK(utl::stre::to_str(test2) == std::string("[ [ 1, 2 ], [ 3 ], [ 4, 5, 6 ] ]"));
+    CHECK(utl::stre::to_str(test3) == std::string("< 17, 0.5, text >"               ));
+    CHECK(utl::stre::to_str(test4) == std::string("[ < key1, 1 >, < key2, 2 > ]"    ));
+}
+
+TEST_CASE("Formatting utils perform as expected") {
+    
+    std::string result = (utl::stre::InlineStream() << "Value is " << 3 << '\n');
+    CHECK(result == std::string("Value is 3\n"));
+    
+    CHECK(utl::stre::pad_with_zeroes(15,   4) == std::string("0015"));
+    CHECK(utl::stre::pad_with_zeroes(137,  3) == std::string("137" ));
+    CHECK(utl::stre::pad_with_zeroes(4321, 2) == std::string("4321"));
+    
+    CHECK(utl::stre::repeat_symbol('k', 6) == std::string("kkkkkk"));
+    CHECK(utl::stre::repeat_symbol('k', 0) == std::string(""));
+    
+    CHECK(utl::stre::repeat_string("xo", 3) == std::string("xoxoxo"));
+    CHECK(utl::stre::repeat_string("xo", 0) == std::string(""));
 }
