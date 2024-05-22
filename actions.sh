@@ -1,8 +1,27 @@
-# This script contains shortcuts for building, running
-# and testing the project. All action keywords can be
-# chained which causes them to be executed one after another.
+# ---------------------------------- CONTENTS -----------------------------------
+#   
+#   This script contains shortcuts for building, running
+#   and testing the project. All action keywords can be
+#   chained which causes them to be executed one after another.
 #
-# See "docs/guide_building_project.md" for the usage guide.
+#   See "docs/guide_building_project.md" for the whole building guide.
+#   
+# ------------------------------------ GUIDE ------------------------------------
+#   
+#   Usage format:
+#     > bash actions.sh [ACTIONS]
+#   
+#   Actions:
+#      clear  - Clears "build/" folder
+#     config - Configures CMake with appropriate args
+#     build  - Builds the project (requires configured CMake)
+#     run    - Runs main executable (requires successful build)
+#     test   - Runs CTest tests
+#   
+#   Usage example:
+#     > bash actions.sh clear config build run
+#   
+# -------------------------------------------------------------------------------
 
 # -----------------------
 # ---- Configuration ----

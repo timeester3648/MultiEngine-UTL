@@ -9,9 +9,9 @@
 
 // ________________ TEST INCLUDES ________________
 
-#include <vector>
 #include <algorithm>
 #include <numeric>
+#include <vector>
 
 // _____________ TEST IMPLEMENTATION _____________
 
