@@ -1155,11 +1155,12 @@ namespace utl::storage {
 	//
 	// This is a NOT A RUNTIME POLYMORPHIC class! (which means NO VIRTUALIZATION OVERHEAD)
 	//
-	// AbstractIndexableObject is a classic example of [CRTP](https://en.cppreference.com/w/cpp/language/crtp)
+	// _const_indexable_object is a classic example of [CRTP](https://en.cppreference.com/w/cpp/language/crtp)
 	// "compile-time polymorphism", when a base class exposes an interface, and derived classes implement such interface.
 	//
 	// Base class reroutes its calls through 'static_assert<Derived*>(this)->some_function_impl()' which allows it to call
-	// 'some_function_impl()' implemented in a derived class inside the base class implementations.
+	// 'some_function_impl()' implemented in a derived class inside the base class implementations. The boilerplate of
+	// creating CTRP casts is handled by '_utl_storage_define_crtp_stuff' macro.
 	
 	// -- _const_indexable_object ---
 	template<_utl_storage_define_crtp_args>
@@ -1257,9 +1258,14 @@ namespace utl::storage {
 			
 		private:
 			pointer _ptr;
-				// NOTE: Rework to using index instead of pointer, since pointer introduces assumption that data lies
-				// in 'ascending pointer values' order, which wasn't here before (before we merely had an indexing func)
-				// this assumption is almost always true but better be safe than sorry
+				// NOTE: Using pointer introduces assumption that data lies in 'ascending pointer values' order,
+				// which wasn't here before (before we merely had an arbitrary indexing func).
+				//
+				// This assumption is almost always true but, some special cases (like index-reversed views) might break it.
+				//
+				// A more generic way would be to store { const _const_indexable_object& _parent; size_type _idx; } and
+				// use _parent->operator[](idx) to dereference. This is more overhead, but perhaps worth it. Check the
+				// benchmark with mutable iterator using <algorithm> and see if it matters. (probably not much)
 		};
 		
 		using const_reverse_iterator = std::reverse_iterator<const_iterator>;
@@ -1358,10 +1364,6 @@ namespace utl::storage {
 		
 		// NOTE: Resolve ambiguous .size() (provided by both base classes, we want the matrix one)
 		using _main_base_type::size;
-		using _main_base_type::cbegin;
-		using _main_base_type::cend;
-		using _main_base_type::crbegin;
-		using _main_base_type::crend;
 		
 		// NOTE: Const & non-const functions with the same name have to be explicitly brought into the class,
 		// otherwise compiler considers them ambiguous during multiple inheritance
@@ -1376,8 +1378,12 @@ namespace utl::storage {
 		using _main_base_type::data;
 		// mutable .data() is declared here
 		
-		// NOTE: Resolve ambiguous .to_std_vector() (provided by both base classes, is same, but compiler isn't smart enough to realize that)
+		// NOTE: Resolve ambiguous methods that are same in both base classes, but compiler isn't smart enough to realize that
 		using _main_base_type::to_std_vector;
+		using _main_base_type::cbegin;
+		using _main_base_type::cend;
+		using _main_base_type::crbegin;
+		using _main_base_type::crend;
 			
 		// - Getters -
 		pointer data() noexcept { return _final_this()->_data.get(); }
