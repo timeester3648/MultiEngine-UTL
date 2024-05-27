@@ -1051,6 +1051,432 @@ namespace utl::sleep {
 
 
 
+// --------------------------------
+// --------- utl::storage ---------
+// --------------------------------
+#if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_STORAGE)
+#ifndef UTLHEADERGUARD_STORAGE
+#define UTLHEADERGUARD_STORAGE
+
+// ======== header guard start ========
+
+#include <memory>
+#include <vector>
+#include <functional>
+#include <stdexcept>
+#include <string>
+#include <sstream>
+
+namespace utl::storage {
+	
+	// _________ DEVELOPER DOCS _________
+	
+	// NOTE: Docs here (I dread the day I'll have to explain this multilayered CRTP with multiple inheritance)
+	
+	// _________ IMPLEMENTATION _________
+	
+	// Utility for creating unique_ptr arrays
+	template<class T>
+	std::unique_ptr<T[]> make_unique_ptr_array(size_t size) {
+		return std::unique_ptr<T[]>(new T[size]);
+	}
+	
+	// Utility used in views to allow observer pointers with the same interface as std::unique_ptr,
+	// which means CRTP base classes can use 'static_cast<Final*>->_data.get()' regardless of whether
+	// 'Final' class is owning or not NOTE: A clutch really, but it works.
+	template<class T>
+	class _observer_ptr {
+	public:
+		using element_type = T;
+		
+	private:
+        element_type* _data = nullptr;
+		
+	public:
+		// - Constructors -
+		constexpr _observer_ptr() noexcept = default;
+        constexpr _observer_ptr(std::nullptr_t) noexcept { }
+		explicit _observer_ptr(element_type* ptr) : _data(ptr) { }
+		
+		// - Interface -
+		constexpr element_type* get() const noexcept { return _data; }
+	};
+	
+	// Wrapper that allows passing standard set of member types down the CRTP chain
+	// (types have to be passed through template args one way or another. Trying to access
+	// 'derived_type::value_type' from the CRTP base class will fail, since in order for it to be available
+	// the derived class has to be "implemented" which can only happen after the base class is "implemented",
+	// which requires the type => a logical loop. So we wrap all the types in a class a pass them down
+	// the chain a "pack with everything" type of deal. This pack then gets "unwrapped" with
+	// '_utl_storage_define_types' macro in every class => we have all the member types defined).
+	template<class T>
+	struct _types {
+		using value_type      = T;
+		using size_type       = std::size_t;
+		using difference_type = std::ptrdiff_t;
+		using reference       = T&;
+		using const_reference = const T&;
+		using pointer         = T*;
+		using const_pointer   = const T*;
+	};
+	
+	#define _utl_storage_define_crtp_args class Derived, class Final, class Types
+			
+	#define _utl_storage_define_crtp_stuff                                                                      \
+		private:                                                                                                \
+			using derived_type = Derived;                                                                       \
+	    	using final_type   = Final;                                                                         \
+		private:                                                                                                \
+			derived_type*       _derived_this()       { return static_cast<      derived_type*>(this); }        \
+			const derived_type* _derived_this() const { return static_cast<const derived_type*>(this); }        \
+			final_type*           _final_this()       { return static_cast<      final_type*  >(this); }        \
+			const final_type*     _final_this() const { return static_cast<const final_type*  >(this); }
+		
+	#define _utl_storage_define_types                                                                      \
+		public:                                                                                            \
+			using value_type      = typename Types::value_type;                                            \
+			using size_type       = typename Types::size_type;                                             \
+			using difference_type = typename Types::difference_type;                                       \
+			using reference       = typename Types::reference;                                             \
+			using const_reference = typename Types::const_reference;                                       \
+			using pointer         = typename Types::pointer;                                               \
+			using const_pointer   = typename Types::const_pointer;
+	
+	template<typename... Args>
+	std::string _stringify(const Args&... args) {
+		std::stringstream ss;
+		(ss << ... << args);
+		return ss.str();
+	}
+	
+	
+	// Abstract indexable object that provides "default" behavior derived from size and 1D indexing function
+	//
+	// This is a NOT A RUNTIME POLYMORPHIC class! (which means NO VIRTUALIZATION OVERHEAD)
+	//
+	// AbstractIndexableObject is a classic example of [CRTP](https://en.cppreference.com/w/cpp/language/crtp)
+	// "compile-time polymorphism", when a base class exposes an interface, and derived classes implement such interface.
+	//
+	// Base class reroutes its calls through 'static_assert<Derived*>(this)->some_function_impl()' which allows it to call
+	// 'some_function_impl()' implemented in a derived class inside the base class implementations.
+	
+	// -- _const_indexable_object ---
+	template<_utl_storage_define_crtp_args>
+	class _const_indexable_object {
+		_utl_storage_define_crtp_stuff	
+		_utl_storage_define_types
+	public:
+		// - Defining methods -
+		const_reference operator[](size_type) const;
+		size_type size() const;
+		
+		// - Derived methods -
+		const_reference front() const { return _final_this()->operator[](0); }
+		const_reference back() const { return _final_this()->operator[](_final_this()->size() - 1); }
+		
+		const Final& for_each(std::function<void(const value_type&, size_type)> func) const {
+			for (size_type idx = 0; idx < _final_this()->size(); ++idx) func(_final_this()->operator[](idx), idx);
+			return *_final_this();
+		}
+		
+		const Final& for_each(std::function<void(const value_type&)> func) const {
+			for (size_type idx = 0; idx < _final_this()->size(); ++idx) func(_final_this()->operator[](idx));
+			return *_final_this();
+		}
+		
+		std::vector<value_type> to_std_vector() const {
+			const size_type size = _final_this()->size();
+			std::vector<value_type> vec(size);
+			for (size_type idx = 0; idx < size; ++idx) vec[idx] = _final_this()->operator[](idx);
+			return vec;
+		}
+	};
+	
+	// -- _mutable_indexable_object ---
+	template<_utl_storage_define_crtp_args>
+	class _mutable_indexable_object : public _const_indexable_object<_mutable_indexable_object<Derived, Final, Types>, Final, Types> {
+		_utl_storage_define_crtp_stuff
+		_utl_storage_define_types	
+	public:
+		// - Defining methods -
+		reference operator[](size_type);
+	
+		// - Derived methods -
+		reference front() { return _final_this()->operator[](0); }
+		reference back() { return _final_this()->operator[](_final_this()->size() - 1); }
+		
+		Final& for_each(std::function<void(value_type&, size_type)> func) {
+			for (size_type idx = 0; idx < _final_this()->size(); ++idx) func(_final_this()->operator[](idx), idx);
+			return *_final_this();
+		}
+		
+		Final& for_each(std::function<void(value_type&)> func) {
+			for (size_type idx = 0; idx < _final_this()->size(); ++idx) func(_final_this()->operator[](idx));
+			return *_final_this();
+		}
+		
+		Final& fill(const value_type &value) {
+			for (size_type idx = 0; idx < _final_this()->size(); ++idx) _final_this()->operator[](idx) = value;
+			return *_final_this();
+		}
+	};
+	
+	
+	// --- _const_matrixlike_object ---
+	template<_utl_storage_define_crtp_args, bool bound_checks>
+	class _const_matrixlike_object : public _const_indexable_object<_const_matrixlike_object<Derived, Final, Types, bound_checks>, Final, Types> {
+		_utl_storage_define_crtp_stuff
+		_utl_storage_define_types
+	protected:
+		// - Bound checks - ( only called if (bound_checks == true) )
+		void _bound_check_idx(size_type idx) const {
+			const size_type idx_bound = _final_this()->_rows * _final_this()->_cols;
+			if (idx >= idx_bound) throw std::out_of_range(_stringify("idx (which is ", idx, ") >= this->size() (which is ", idx_bound, ")"));
+		}
+		
+		void _bound_check_ij(size_type i, size_type j) const {
+			const size_type i_bound = _final_this()->_rows, j_bound = _final_this()->_cols;
+			if (i >= i_bound) throw std::out_of_range(_stringify("i (which is ", i, ") >= this->rows() (which is ", i_bound, ")"));
+			if (j >= j_bound) throw std::out_of_range(_stringify("j (which is ", j, ") >= this->cols() (which is ", j_bound, ")"));
+		}
+		
+	public:
+		// - Getters -
+		size_type rows() const noexcept { return _final_this()->_rows; }
+		size_type cols() const noexcept { return _final_this()->_cols; }
+		size_type size() const noexcept { return this->rows() * this->cols(); } // NOTE: Required by base class
+		const_pointer data() const noexcept { return _final_this()->_data.get(); }
+		bool empty() const noexcept { return (this->rows() == 0) && (this->cols() == 0) && (this->data() == nullptr); }
+
+		// - Element access -
+		size_type get_flat_index_of(size_type i, size_type j) const {
+			if constexpr (bound_checks) this->_bound_check_ij(i, j);
+			return i * this->rows() + j;
+		}
+		
+		const_reference operator[](size_type idx) const { // NOTE: Required by base class
+			if constexpr (bound_checks) this->_bound_check_idx(idx);
+			return this->data()[idx];
+		} 
+		
+		const_reference operator()(size_type i, size_type j) const {
+			if constexpr (bound_checks) this->_bound_check_ij(i, j);
+			return this->operator[](this->get_flat_index_of(i, j));
+		}
+	};
+	
+	// --- _mutable_matrixlike_object ---
+	template<_utl_storage_define_crtp_args, bool bound_checks>
+	class _mutable_matrixlike_object
+		: public _mutable_indexable_object<_mutable_matrixlike_object<Derived, Final, Types, bound_checks>, Final, Types>,
+		  public _const_matrixlike_object<_mutable_matrixlike_object<Derived, Final, Types, bound_checks>, Final, Types, bound_checks>
+	{
+		_utl_storage_define_crtp_stuff
+		_utl_storage_define_types
+	public:
+		using _main_base_type  = _const_matrixlike_object<_mutable_matrixlike_object<Derived, Final, Types, bound_checks>, Final, Types, bound_checks>;
+		using _other_base_type = _mutable_indexable_object<_mutable_matrixlike_object<Derived, Final, Types, bound_checks>, Final, Types>;
+		
+		// NOTE: Resolve ambiguous .size() (provided by both base classes, we want the matrix one)
+		using _main_base_type::size;
+		
+		// NOTE: Const & non-const functions with the same name have to be explicitly brought into the class,
+		// otherwise compiler considers them ambiguous during multiple inheritance
+		using _main_base_type::front;
+		using _other_base_type::front;
+		using _main_base_type::back;
+		using _other_base_type::back;
+		using _main_base_type::operator[];
+		using _other_base_type::operator[];
+		using _main_base_type::for_each;
+		using _other_base_type::for_each;
+		using _main_base_type::data;
+		// mutable .data() is declared here
+		
+		// NOTE: Resolve ambiguous .to_std_vector() (provided by both base classes, is same, but compiler isn't smart enough to realize that)
+		using _main_base_type::to_std_vector;
+			
+		// - Getters -
+		pointer data() noexcept { return _final_this()->_data.get(); }
+		
+		// - Element access -
+		reference operator[](size_type idx) { // NOTE: Required by base class
+			if constexpr (bound_checks) this->_bound_check_idx(idx);
+			return this->data()[idx];
+		}
+		
+		reference operator()(size_type i, size_type j) {
+			if constexpr (bound_checks) this->_bound_check_ij(i, j);
+			return this->operator[](this->get_flat_index_of(i, j));
+		}
+	};
+	
+	
+	// Predeclare matrix so it can be used in views
+	template<class T, bool bound_checks>
+	class _matrix;
+	
+	
+	// --- _const_matrix_view ---
+	template<class T, bool bound_checks>
+	class _const_matrix_view : public _const_matrixlike_object<_const_matrix_view<T, bound_checks>, _const_matrix_view<T, bound_checks>, _types<T>, bound_checks> {
+		using Types = _types<T>;
+		_utl_storage_define_types
+	public:
+		// - Data members -
+		_observer_ptr<const value_type> _data;
+		size_type                       _rows;
+		size_type                       _cols;
+		
+		// - Constructors -
+		// From matrix ctor
+		template<bool arg_bound_checks>
+		_const_matrix_view(const _matrix<T, arg_bound_checks> &matrix)
+			: _data(matrix.data()), _rows(matrix._rows), _cols(matrix._cols)
+		{}
+		
+		// From raw data ctor
+		_const_matrix_view(size_type rows, size_type cols, const_pointer data_ptr)
+			: _data(data_ptr), _rows(rows), _cols(cols)
+		{}
+	};
+	
+	
+	// --- _mutable_matrix_view ---
+	template<class T, bool bound_checks>
+	class _mutable_matrix_view : public _mutable_matrixlike_object<_mutable_matrix_view<T, bound_checks>, _mutable_matrix_view<T, bound_checks>, _types<T>, bound_checks> {
+		using Types = _types<T>;
+		_utl_storage_define_types
+	public:
+		// - Data members -
+		_observer_ptr<value_type> _data;
+		size_type                 _rows;
+		size_type                 _cols;
+		
+		// - Constructors -
+		// From matrix ctor
+		template<bool arg_bound_checks>
+		_mutable_matrix_view(_matrix<T, arg_bound_checks> &matrix)
+			: _data(matrix.data()), _rows(matrix._rows), _cols(matrix._cols)
+		{}
+		
+		// From raw data ctor
+		_mutable_matrix_view(size_type rows, size_type cols, pointer data_ptr)
+			: _data(data_ptr), _rows(rows), _cols(cols)
+		{}
+	};
+	
+	
+	// --- _matrix ---
+	template<class T, bool bound_checks>
+	class _matrix : public _mutable_matrixlike_object<_matrix<T, bound_checks>, _matrix<T, bound_checks>, _types<T>, bound_checks> {
+		using Types = _types<T>;
+		_utl_storage_define_types
+	public:
+		// - Data members -
+		std::unique_ptr<T[]> _data; // = nullprt by default
+		size_type            _rows = 0;
+		size_type            _cols = 0; // NOTE: Perhaps they can be made private, but that would require a complex system of friend templates
+	
+		// - Constructors -
+		// Default ctor
+		_matrix() noexcept = default;
+		
+		// Copy ctor
+		_matrix(const _matrix &other) noexcept :
+			_rows(other.rows()), _cols(other.cols())
+		{
+			for (size_type idx = 0; idx < this->size(); ++idx) this->_data[idx] = other._data[idx];
+		}
+		
+		template<bool arg_bound_checks>
+		explicit _matrix(const _matrix<T, arg_bound_checks> &other) noexcept  // NOTE: Conversion over config boundaries has to be explicit
+			: _rows(other.rows()), _cols(other.cols())
+		{
+			for (size_type idx = 0; idx < this->size(); ++idx) this->_data[idx] = other._data[idx];
+		}
+		
+		// Move ctor
+		_matrix(_matrix &&other) noexcept = default;
+		
+		template<bool arg_bound_checks>
+		explicit _matrix(_matrix<T, arg_bound_checks> &&other) noexcept // NOTE: Conversion over config boundaries has to be explicit
+			: _rows(other.rows()), _cols(other.cols())
+		{
+			this->_data = std::move(other._data);
+		}
+		
+		// Init-with-size ctor
+		explicit _matrix(size_type rows, size_type cols, const_reference value = T()) noexcept :
+			_rows(rows), _cols(cols)
+		{
+			this->_data = make_unique_ptr_array<value_type>(this->size());
+			for (size_type idx = 0; idx < this->size(); ++idx) this->_data[idx] = value;
+		}
+		
+		// Init-list ctor
+		_matrix(std::initializer_list<std::initializer_list<value_type>> init) {
+			this->_rows = init.size();
+			this->_cols = (*init.begin()).size();
+			this->_data = make_unique_ptr_array<value_type>(this->size());
+			
+			std::size_t idx = 0;
+			for (auto i = init.begin(); i < init.end(); ++i) {
+				auto row_begin = (*i).begin();
+				auto row_end   = (*i).end();
+				// Throw if argument dimensions are inappropriate (cols have different dimensions)
+				if (row_end - row_begin != this->_cols) throw std::invalid_argument("Initializer list dimensions don't match.");
+				for (auto j = row_begin; j < row_end; ++j) this->_data[idx++] = *j;
+			}
+		}
+		
+		// - Assignment -
+		_matrix& operator=(const _matrix &other) = default;
+		_matrix& operator=(_matrix &&other) = default;
+		
+		// - View getters -
+		_const_matrix_view<T, true>         get_const_checked_view()   const { return *this; }
+		_const_matrix_view<T, false>        get_const_unchecked_view() const { return *this; }
+		_const_matrix_view<T, bound_checks> get_const_view()           const { return *this; } // same bound checking as parent matrix
+		
+		_mutable_matrix_view<T, true>         get_checked_view()   { return *this; }
+		_mutable_matrix_view<T, true>         get_unchecked_view() { return *this; }
+		_mutable_matrix_view<T, bound_checks> get_view()           { return *this; } // same bound checking as parent matrix
+			// in generic case users can construct arbitrary view themselves, those are merely shortcuts to reduce boilerplate 
+	};
+	
+	// - BoundChecking enum -
+	enum class BoundChecking {
+		DISABLED,
+		ENABLED
+	};
+	
+	// - Matrix implementation wrappers -
+	template<class T, BoundChecking bound_checking_config = BoundChecking::DISABLED>
+	using ConstMatrixView = _const_matrix_view<T, (bound_checking_config == BoundChecking::ENABLED)>;
+		// by accepting enum as an argument we ensure proper type safety while forwarding
+		// a bool that is less verbose to handle inside the implementation
+		
+	template<class T, BoundChecking bound_checking_config = BoundChecking::DISABLED>
+	using MatrixView = _mutable_matrix_view<T, (bound_checking_config == BoundChecking::ENABLED)>;
+		
+	template<class T, BoundChecking bound_checking_config = BoundChecking::DISABLED>
+	using Matrix = _matrix<T, (bound_checking_config == BoundChecking::ENABLED)>;
+		
+		
+	
+}
+
+// ========= header guard end =========
+
+#endif
+#endif
+
+
+
+
+
+
 // -----------------------------
 // --------- utl::stre ---------
 // -----------------------------
