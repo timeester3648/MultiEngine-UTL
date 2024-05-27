@@ -286,3 +286,43 @@ TEST_CASE("Matrix views behave as expected") {
         CHECK(sum == 566); // computed by hand
     }
 }
+
+
+TEST_CASE("Iterators behave as expected") {
+    
+    
+    SUBCASE("Const iterator works") {
+        utl::storage::Matrix<int> matrix(4, 5);
+        matrix.for_each([](int &element, std::size_t idx) { element = idx; });
+        const auto &cref = matrix;
+        // Check that all filled values are read the same when const-iterating though
+        std::size_t idx = 0;
+        for(auto it = cref.cbegin(); it != cref.cend(); ++it, ++idx) CHECK(*it == idx);
+        // Check that we covered the whole array
+        CHECK(idx == cref.size());
+        // Check basic operations of random access iterator
+        CHECK(*cref.cbegin() == cref.front());                     // *it
+        CHECK(cref.cend() - cref.cbegin() == cref.size());         // it - it
+        CHECK(*(cref.cbegin() + 1) == 1);                          // it + n
+        CHECK(*(2 + cref.cbegin()) == 2);                          // n + it
+        CHECK(*(cref.cend() - 1) == cref.back());                  // it - n
+        CHECK(cref.cbegin()[2] == 2);                              // it[n]
+        CHECK(cref.cbegin() < cref.cend());                        // it1 < it2
+        CHECK(cref.cend() > cref.cbegin());                        // it1 > it2
+        CHECK(cref.cbegin() <= cref.cend());                       // it1 <= it2
+        CHECK(cref.cend() >= cref.cbegin());                       // it1 >= it2
+        CHECK(*(cref.cbegin() += 2) == 2);                         // it1 += n
+        CHECK(*(cref.cend() -= 1) == matrix.back());               // it1 -= n
+        // Check that operations don't mess up when we use derived reverse iterator
+        CHECK(cref.crbegin() < cref.crend());                        // it1 < it2
+        CHECK(cref.crend() > cref.crbegin());                        // it1 > it2
+    }
+    
+    
+    SUBCASE("Mutable iterator works") {
+        // Check that range-based for now works (it's a syntactic sugar defined for all containers with 
+        // defined forward iterators and .begin(), .end() methods)
+        //matrix.fill(7);
+        //for (const auto &element : cref) { CHECK(element == 7); }
+    }
+}

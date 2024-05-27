@@ -1066,6 +1066,7 @@ namespace utl::sleep {
 #include <stdexcept>
 #include <string>
 #include <sstream>
+#include <iterator>
 
 namespace utl::storage {
 	
@@ -1190,6 +1191,84 @@ namespace utl::storage {
 			for (size_type idx = 0; idx < size; ++idx) vec[idx] = _final_this()->operator[](idx);
 			return vec;
 		}
+		
+		// - Const iterator -
+		struct const_iterator {
+			// Iterator reqs: [General]
+			// Contains member types      =>
+			using iterator_category = std::random_access_iterator_tag;
+			using difference_type   = _const_indexable_object::difference_type;
+			using value_type        = _const_indexable_object::value_type;
+			using pointer           = _const_indexable_object::const_pointer;
+			using reference         = _const_indexable_object::const_reference;
+			
+			// Iterator reqs: [General]
+			// Constructible
+			const_iterator(pointer ptr) : _ptr(ptr) {}
+			// Copy-constructible => by default
+			// Copy-assignable    => by default
+			// Destructible       => by default
+			// Wwappable
+			friend void swap(const_iterator &lhs, const_iterator &rhs) { std::swap(lhs._ptr, rhs._ptr); }
+			
+			// Iterator reqs: [General]
+			// Can be incremented (prefix & postfix)
+			const_iterator& operator++()           {                              ++_ptr; return *this; } // prefix
+			const_iterator  operator++(value_type) { const_iterator temp = *this; ++_ptr; return temp;  } // postfix
+			
+			// Iterator reqs: [Input iterator]
+			// Supports equality/inequality comparisons
+			friend bool operator==(const const_iterator& it1, const const_iterator& it2) { return it1._ptr == it2._ptr; };
+			friend bool operator!=(const const_iterator& it1, const const_iterator& it2) { return it1._ptr != it2._ptr; };
+			// Can be dereferenced as an rvalue
+		 	reference operator*() const { return *_ptr; }
+			pointer operator->() const { return _ptr; }
+			
+			// Iterator reqs: [Output iterator]
+			// Can be dereferenced as an lvalue (only for mutable iterator types) => not needed
+			
+			// Iterator reqs: [Forward iterator]
+			// Default-constructible
+			const_iterator() : _ptr(nullptr) {}
+			// "Multi-pass" - dereferencing & incrementing does not affects dereferenceability => satisfied
+			
+			// Iterator reqs: [Bidirectional iterator]
+			// Can be decremented
+			const_iterator& operator--()           {                              --_ptr; return *this; } // prefix
+			const_iterator  operator--(value_type) { const_iterator temp = *this; --_ptr; return temp;  } // postfix
+			
+			// Iterator reqs: [Random Access iterator]
+			// See: https://en.cppreference.com/w/cpp/named_req/RandomAccessIterator
+			// Supports arithmetic operators: it + n, n + it, it - n, it1 - it2
+			friend const_iterator operator+(const const_iterator &it, difference_type diff) { return it._ptr + diff; }
+			friend const_iterator operator+(difference_type diff, const const_iterator &it) { return it._ptr + diff; }
+			friend const_iterator operator-(const const_iterator &it, difference_type diff) { return it._ptr - diff; }
+			friend difference_type operator-(const const_iterator &it1, const const_iterator &it2) { return it1._ptr - it2._ptr; }
+			// Supports inequality comparisons (<, >, <= and >=) between iterators
+			friend bool operator< (const const_iterator &it1, const const_iterator &it2) { return it1._ptr <  it2._ptr; }
+			friend bool operator> (const const_iterator &it1, const const_iterator &it2) { return it1._ptr >  it2._ptr; }
+			friend bool operator<=(const const_iterator &it1, const const_iterator &it2) { return it1._ptr <= it2._ptr; }
+			friend bool operator>=(const const_iterator &it1, const const_iterator &it2) { return it1._ptr >= it2._ptr; }
+			// Supports compound assignment operations += and -=
+			const_iterator& operator+=(difference_type diff) { _ptr += diff; return *this; }
+			const_iterator& operator-=(difference_type diff) { _ptr -= diff; return *this; }
+			// Supports offset dereference operator ([])
+			reference operator[](difference_type diff) const { return *(_ptr + diff); }
+			
+		private:
+			pointer _ptr;
+				// NOTE: Rework to using index instead of pointer, since pointer introduces assumption that data lies
+				// in 'ascending pointer values' order, which wasn't here before (before we merely had an indexing func)
+				// this assumption is almost always true but better be safe than sorry
+		};
+		
+		using const_reverse_iterator = std::reverse_iterator<const_iterator>;
+		
+		const_iterator cbegin() const { return const_iterator(&this->front()); } // points to first element
+		const_iterator cend()   const { return const_iterator(&this->back() + 1); } // points to invalid space after last
+	
+		const_reverse_iterator crbegin() const { return const_reverse_iterator(&this->back()); } // points to last element
+		const_reverse_iterator crend() const { return const_reverse_iterator(&this->front()) - 1; } // points to invalid space before first
 	};
 	
 	// -- _mutable_indexable_object ---
@@ -1279,6 +1358,10 @@ namespace utl::storage {
 		
 		// NOTE: Resolve ambiguous .size() (provided by both base classes, we want the matrix one)
 		using _main_base_type::size;
+		using _main_base_type::cbegin;
+		using _main_base_type::cend;
+		using _main_base_type::crbegin;
+		using _main_base_type::crend;
 		
 		// NOTE: Const & non-const functions with the same name have to be explicitly brought into the class,
 		// otherwise compiler considers them ambiguous during multiple inheritance
