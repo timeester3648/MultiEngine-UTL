@@ -38,19 +38,36 @@ test_flags="--rerun-failed --output-on-failure --timeout 60"
 # -----------------------
 # ------ Functions ------
 # -----------------------
+check_command_exists() {
+    if ! command -v $1 &> /dev/null
+    then
+        echo "Command [ $1 ] could not be found."
+        exit 1
+    fi
+}
+
 clear_files() {
-    rm --recursive $directory_build
+    if [ -d "$directory_build" ]; then
+        rm --recursive $directory_build
+        echo "Cleared directory [ $directory_build ]."
+    else
+        echo "Directory [ $directory_build ] is clear."
+    fi
 }
 
 cmake_config() {
+    check_command_exists "cmake"
+    check_command_exists "$compiler"
     cmake -D CMAKE_CXX_COMPILER=$compiler -B $directory_build -S .
 }
 
 cmake_build() {
+    check_command_exists "cmake"
     cmake --build $directory_build
 }
 
 cmake_test() {
+    check_command_exists "ctest"
     cd $directory_tests
     ctest $test_flags
     cd ..

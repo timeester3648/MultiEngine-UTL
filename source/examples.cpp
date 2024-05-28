@@ -403,7 +403,7 @@ int main(int argc, char* argv[]) {
 	}
 	// we expect to see that 'inner loop' will measure about half the time of an 'outer loop'
 	
-	UTL_PROFILER_REROUTE_TO_FILE("profiling.txt");
+	UTL_PROFILER_REROUTE_TO_FILE("temp/profiling.txt");
 	
 	return 0;
 }

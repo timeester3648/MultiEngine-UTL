@@ -6,7 +6,7 @@ This project uses [CMake](https://cmake.org) build system.
 
 Unit testing for modules is implemented using [doctest](https://github.com/doctest/doctest) together with **CMake** testing facilities (see [CTest](https://cmake.org/cmake/help/latest/manual/ctest.1.html)). All tests can be found in [`tests/`](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/tests) split by per-module basis.
 
-A rundown of usage examples can be found at [`source/examples.cpp`](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/source/examples.cpp), by default it's compiled with **GCC** `-Wall -Wextra -Wpedantic -Werror` to ensure strict standard compliance.
+A rundown of usage examples can be found at [`source/examples.cpp`](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/source/examples.cpp), by default it's compiled with **G++** `-Wall -Wextra -Wpedantic -Werror` to ensure stricter error checking.
 
 ## Building with a script
 

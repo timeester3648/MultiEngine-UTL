@@ -1126,7 +1126,7 @@ namespace utl::storage {
 	#define _utl_storage_define_crtp_stuff                                                                      \
 		private:                                                                                                \
 			using derived_type = Derived;                                                                       \
-	    	using final_type   = Final;                                                                         \
+			using final_type   = Final;                                                                         \
 		private:                                                                                                \
 			derived_type*       _derived_this()       { return static_cast<      derived_type*>(this); }        \
 			const derived_type* _derived_this() const { return static_cast<const derived_type*>(this); }        \
