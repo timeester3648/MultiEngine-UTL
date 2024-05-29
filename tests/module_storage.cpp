@@ -1,5 +1,6 @@
 // __________ TEST FRAMEWORK & LIBRARY  __________
 
+#include <numeric>
 #include <vector>
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include "doctest.h"
@@ -11,6 +12,7 @@
 // ________________ TEST INCLUDES ________________
 
 #include <stdexcept>
+#include <algorithm>
 
 // _____________ TEST IMPLEMENTATION _____________
 
@@ -316,13 +318,49 @@ TEST_CASE("Iterators behave as expected") {
         // Check that operations don't mess up when we use derived reverse iterator
         CHECK(cref.crbegin() < cref.crend());                        // it1 < it2
         CHECK(cref.crend() > cref.crbegin());                        // it1 > it2
+        // Iterate in reverse
+        matrix.for_each([&](int &element, std::size_t idx) { element = idx; }); // [ 0 .. N-1 ]
+        for (auto it = matrix.rbegin(); it != matrix.rend(); ++it) CHECK(matrix.rend() - 1 - it == *it); // true for how we filled matrix
+            // note that reverse_iterator also reverses the logic of 'it1 - it2', makes sense because '.crbegin() < .crend()'
     }
     
     
     SUBCASE("Mutable iterator works") {
+        utl::storage::Matrix<int> matrix(4, 5);
         // Check that range-based for now works (it's a syntactic sugar defined for all containers with 
-        // defined forward iterators and .begin(), .end() methods)
-        //matrix.fill(7);
-        //for (const auto &element : cref) { CHECK(element == 7); }
+        // defined forward iterators and .begin(), .end() methods) (doesn't call .cbegin() & .cend() even if they exist)
+        for (auto &element : matrix) element = 7;
+        for (const auto &element : matrix) CHECK(element == 7);
+        // Check basic operations of random access iterator
+        matrix.for_each([](int &element, std::size_t idx) { element = idx; });
+        CHECK(*matrix.begin() == matrix.front());                     // *it
+        CHECK(matrix.end() - matrix.begin() == matrix.size());         // it - it
+        CHECK(*(matrix.begin() + 1) == 1);                          // it + n
+        CHECK(*(2 + matrix.begin()) == 2);                          // n + it
+        CHECK(*(matrix.end() - 1) == matrix.back());                  // it - n
+        CHECK(matrix.begin()[2] == 2);                              // it[n]
+        CHECK(matrix.begin() < matrix.end());                        // it1 < it2
+        CHECK(matrix.end() > matrix.begin());                        // it1 > it2
+        CHECK(matrix.begin() <= matrix.end());                       // it1 <= it2
+        CHECK(matrix.end() >= matrix.begin());                       // it1 >= it2
+        CHECK(*(matrix.begin() += 2) == 2);                         // it1 += n
+        CHECK(*(matrix.end() -= 1) == matrix.back());               // it1 -= n
+        // Check that operations don't mess up when we use derived reverse iterator
+        CHECK(matrix.rbegin() < matrix.rend());                        // it1 < it2
+        CHECK(matrix.rend() > matrix.rbegin());                        // it1 > it2
+        // Check that algorithms works
+        // std::sort
+        matrix.for_each([&](int &element, std::size_t idx) { element = matrix.size() - 1 - idx; }); // [ N-1 .. 0 ]
+        std::sort(matrix.begin(), matrix.end());                                                    // becomes [ 0 ... N-1 ]
+        matrix.for_each([&](int &element, std::size_t idx) { CHECK(element == idx); });
+        // std::fill + std::accumulate
+        std::fill(matrix.begin(), matrix.end(), 10);
+        const int sum_1 = std::accumulate(matrix.begin(), matrix.end(), 0);
+        int sum_2 = 0;
+        matrix.for_each([&](const int &element) { sum_2 += element; });
+        CHECK(sum_1 == sum_2);
+        // Iterate in reverse
+        matrix.for_each([&](int &element, std::size_t idx) { element = matrix.size() - 1 - idx; }); // [ N-1 .. 0 ]
+        for (auto it = matrix.rbegin(); it != matrix.rend(); ++it) CHECK(it - matrix.rbegin() == *it); // true for how we filled matrix
     }
 }
