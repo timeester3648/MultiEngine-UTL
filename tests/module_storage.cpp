@@ -78,11 +78,20 @@ TEST_CASE("Matrix constructors & methods derived from storage::AbstractIndexable
     }
     
     
-    SUBCASE("Matrix .for_each() (with index) test") {
+    SUBCASE("Matrix .for_each() (with idx) test") {
         // Fill matrix elements with their corresponding 1D indexes and check that it is correct
         auto matrix = utl::storage::Matrix<int>(3, 5);
         matrix.for_each([](int &element, std::size_t idx) { element = idx; });
         for (std::size_t i = 0; i < matrix.size(); ++i) CHECK(matrix[i] == i);
+    }
+    
+    SUBCASE("Matrix .for_each() (with i, j) test") {
+        // Fill matrix elements with their corresponding 1D indexes and check that it is correct
+        auto matrix = utl::storage::Matrix<int>(3, 5);
+        matrix.for_each([](int &element, std::size_t i, std::size_t j) { element = 10 * i + j; });
+        for (std::size_t i = 0; i < matrix.rows(); ++i)
+            for (std::size_t j = 0; j < matrix.cols(); ++j)
+                CHECK(matrix(i, j) == (10 * i + j));
     }
     
     SUBCASE("Matrix .front() and .back() test") {
@@ -113,7 +122,7 @@ TEST_CASE("Matrix constructors & methods derived from storage::AbstractIndexable
             });
         } catch (std::invalid_argument const& ex) {
             caught_appropriate_exception = true;
-            std::cout << "Caught exception: " << ex.what() << "\n";
+            INFO("Caught exception: ", ex.what(), "\n");
         }
         CHECK(caught_appropriate_exception);
     }
@@ -129,7 +138,7 @@ TEST_CASE("Basic matrix methods behave as expected") {
             try {
                 matrix[idx] = 0;
             } catch (std::out_of_range const& ex) {
-                std::cout << "Caught exception: " << ex.what() << "\n";
+                INFO("Caught exception: ", ex.what(), "\n");
                 return true;
             }
             return false;
@@ -144,7 +153,7 @@ TEST_CASE("Basic matrix methods behave as expected") {
             try {
                 matrix(i, j) = 0;
             } catch (std::out_of_range const& ex) {
-                std::cout << "Caught exception: " << ex.what() << "\n";
+                INFO("Caught exception: ", ex.what(), "\n");
                 return true;
             }
             return false;
@@ -160,9 +169,6 @@ TEST_CASE("Basic matrix methods behave as expected") {
     SUBCASE("Matrix CHECKED -> UNCHECKED conversion test") {
         utl::storage::Matrix<int, utl::storage::BoundChecking::ENABLED>    checked_matrix = { { 1, 2 }, { 3, 4 } };
         utl::storage::Matrix<int, utl::storage::BoundChecking::DISABLED> unchecked_matrix;
-        
-        std::cout << unchecked_matrix.rows() << "\n";
-        std::cout << unchecked_matrix.cols() << "\n";
         
         // CHECKED -> UNCHECKED move
         CHECK(  checked_matrix.empty() == false);
@@ -255,7 +261,7 @@ TEST_CASE("Matrix views behave as expected") {
             try {
                 checked_view(i, j) = 0;
             } catch (std::out_of_range const& ex) {
-                std::cout << "Caught exception: " << ex.what() << "\n";
+                INFO("Caught exception: ", ex.what(), "\n");
                 return true;
             }
             return false;

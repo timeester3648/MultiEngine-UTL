@@ -1121,6 +1121,16 @@ namespace utl::storage {
 		using const_pointer   = const T*;
 	};
 	
+	// Overload tags (dummy types used to create "overloads" of .for_each(), which changes the way compiler handles
+	// name based lookup, preventing shadowing of base class methods)
+	enum class _for_each_tag     { DUMMY };
+	enum class _for_each_idx_tag { DUMMY };
+	enum class _for_each_ij_tag  { DUMMY };
+	
+	// Shortcuts
+	template<class FuncType, class Signature>
+	using _enable_if_signature = std::enable_if_t<std::is_convertible_v<FuncType, std::function<Signature>>, bool>;
+	
 	#define _utl_storage_define_crtp_args class Derived, class Final, class Types
 			
 	#define _utl_storage_define_crtp_stuff                                                                      \
@@ -1174,7 +1184,7 @@ namespace utl::storage {
 		// Iterator reqs: [General]
 		// Can be incremented (prefix & postfix)
 		_flat_iterator& operator++()           {                              ++_ptr; return *this; } // prefix
-		_flat_iterator  operator++(value_type) { _flat_iterator temp = *this; ++_ptr; return temp;  } // postfix
+		_flat_iterator  operator++(int) { _flat_iterator temp = *this; ++_ptr; return temp;  } // postfix
 		
 		// Iterator reqs: [Input iterator]
 		// Supports equality/inequality comparisons
@@ -1195,7 +1205,7 @@ namespace utl::storage {
 		// Iterator reqs: [Bidirectional iterator]
 		// Can be decremented
 		_flat_iterator& operator--()           {                              --_ptr; return *this; } // prefix
-		_flat_iterator  operator--(value_type) { _flat_iterator temp = *this; --_ptr; return temp;  } // postfix
+		_flat_iterator  operator--(int) { _flat_iterator temp = *this; --_ptr; return temp;  } // postfix
 		
 		// Iterator reqs: [Random Access iterator]
 		// See: https://en.cppreference.com/w/cpp/named_req/RandomAccessIterator
@@ -1253,12 +1263,19 @@ namespace utl::storage {
 		const_reference front() const { return _final_this()->operator[](0); }
 		const_reference back() const { return _final_this()->operator[](_final_this()->size() - 1); }
 		
-		const Final& for_each(std::function<void(const value_type&, size_type)> func) const {
+		template<class FuncType, _enable_if_signature<FuncType, void(const value_type&, std::size_t)> = true>
+		const Final& for_each(FuncType func, _for_each_idx_tag = _for_each_idx_tag::DUMMY) const {
 			for (size_type idx = 0; idx < _final_this()->size(); ++idx) func(_final_this()->operator[](idx), idx);
 			return *_final_this();
 		}
+			// Just taking std::function is more convenient but adds significant overhead (~2x slowdown with g++)
+			// due to preventing lambda inlining, we can replace it with a template, overloads are "resolved"
+			// by 'std::enable_if' restrictions.
+			//
+			// Note: Dummy argument exists here for a reason, see enum class description
 		
-		const Final& for_each(std::function<void(const value_type&)> func) const {
+		template<class FuncType, _enable_if_signature<FuncType, void(const value_type&)> = true>
+		const Final& for_each(FuncType func, _for_each_tag = _for_each_tag::DUMMY) const {
 			for (size_type idx = 0; idx < _final_this()->size(); ++idx) func(_final_this()->operator[](idx));
 			return *_final_this();
 		}
@@ -1294,13 +1311,15 @@ namespace utl::storage {
 		// - Derived methods -
 		reference front() { return _final_this()->operator[](0); }
 		reference back() { return _final_this()->operator[](_final_this()->size() - 1); }
-		
-		Final& for_each(std::function<void(value_type&, size_type)> func) {
+				
+		template<class FuncType, _enable_if_signature<FuncType, void(value_type&, std::size_t)> = true>
+		Final& for_each(FuncType func, _for_each_idx_tag = _for_each_idx_tag::DUMMY) {
 			for (size_type idx = 0; idx < _final_this()->size(); ++idx) func(_final_this()->operator[](idx), idx);
 			return *_final_this();
 		}
 		
-		Final& for_each(std::function<void(value_type&)> func) {
+		template<class FuncType, _enable_if_signature<FuncType, void(value_type&)> = true>
+		Final& for_each(FuncType func, _for_each_tag = _for_each_tag::DUMMY) {
 			for (size_type idx = 0; idx < _final_this()->size(); ++idx) func(_final_this()->operator[](idx));
 			return *_final_this();
 		}
@@ -1328,6 +1347,8 @@ namespace utl::storage {
 	class _const_matrixlike_object : public _const_indexable_object<_const_matrixlike_object<Derived, Final, Types, bound_checks>, Final, Types> {
 		_utl_storage_define_crtp_stuff
 		_utl_storage_define_types
+	private:
+		using _base_type  = _const_indexable_object<_const_matrixlike_object<Derived, Final, Types, bound_checks>, Final, Types>;
 	protected:
 		// - Bound checks - ( only called if (bound_checks == true) )
 		void _bound_check_idx(size_type idx) const {
@@ -1345,17 +1366,17 @@ namespace utl::storage {
 		// - Getters -
 		size_type rows() const noexcept { return _final_this()->_rows; }
 		size_type cols() const noexcept { return _final_this()->_cols; }
-		size_type size() const noexcept { return this->rows() * this->cols(); } // NOTE: Required by base class
+		size_type size() const noexcept { return this->rows() * this->cols(); } // Required by base class
 		const_pointer data() const noexcept { return _final_this()->_data.get(); }
 		bool empty() const noexcept { return (this->rows() == 0) && (this->cols() == 0) && (this->data() == nullptr); }
 
 		// - Element access -
 		size_type get_flat_index_of(size_type i, size_type j) const {
 			if constexpr (bound_checks) this->_bound_check_ij(i, j);
-			return i * this->rows() + j;
-		}
+			return i * this->cols() + j;
+		} // TODO: Implement col-major storage here
 		
-		const_reference operator[](size_type idx) const { // NOTE: Required by base class
+		const_reference operator[](size_type idx) const { // Required by base class
 			if constexpr (bound_checks) this->_bound_check_idx(idx);
 			return this->data()[idx];
 		} 
@@ -1363,6 +1384,19 @@ namespace utl::storage {
 		const_reference operator()(size_type i, size_type j) const {
 			if constexpr (bound_checks) this->_bound_check_ij(i, j);
 			return this->operator[](this->get_flat_index_of(i, j));
+		}
+		
+		// - Methods -	
+		using _base_type::for_each; // Required so we don't override existing definitions with a new overload
+		
+		template<class FuncType, _enable_if_signature<FuncType, void(const value_type&, std::size_t, std::size_t)> = true>
+		const Final& for_each(FuncType func, _for_each_ij_tag = _for_each_ij_tag::DUMMY) const {
+			// A "hack" with a dummy argument that prevents name based lookup of this function from shadowing base class methods.
+			// Not sure why it happens, but changing signature seems to fix the issue.
+			for (size_type i = 0; i < this->rows(); ++i)
+				for (size_type j = 0; j < this->cols(); ++j)
+					func(this->operator()(i, j), i, j);
+			return *_final_this();
 		}
 	};
 	
@@ -1374,14 +1408,14 @@ namespace utl::storage {
 	{
 		_utl_storage_define_crtp_stuff
 		_utl_storage_define_types
-	public:
+	private:
 		using _main_base_type  = _const_matrixlike_object<_mutable_matrixlike_object<Derived, Final, Types, bound_checks>, Final, Types, bound_checks>;
 		using _other_base_type = _mutable_indexable_object<_mutable_matrixlike_object<Derived, Final, Types, bound_checks>, Final, Types>;
-		
-		// NOTE: Resolve ambiguous .size() (provided by both base classes, we want the matrix one)
+	public:
+		// Resolve ambiguous .size() (provided by both base classes, we want the matrix one)
 		using _main_base_type::size;
 		
-		// NOTE: Const & non-const functions with the same name have to be explicitly brought into the class,
+		// Const & non-const functions with the same name have to be explicitly brought into the class,
 		// otherwise compiler considers them ambiguous during multiple inheritance
 		using _main_base_type::front;
 		using _other_base_type::front;
@@ -1394,7 +1428,7 @@ namespace utl::storage {
 		using _main_base_type::data;
 		// mutable .data() is declared here
 		
-		// NOTE: Resolve ambiguous methods that are same in both base classes, but compiler isn't smart enough to realize that
+		// Resolve ambiguous methods that are same in both base classes, but compiler isn't smart enough to realize that
 		using _main_base_type::to_std_vector;
 		using _main_base_type::cbegin;
 		using _main_base_type::cend;
@@ -1413,6 +1447,15 @@ namespace utl::storage {
 		reference operator()(size_type i, size_type j) {
 			if constexpr (bound_checks) this->_bound_check_ij(i, j);
 			return this->operator[](this->get_flat_index_of(i, j));
+		}
+		
+		// - Methods -
+		template<class FuncType, _enable_if_signature<FuncType, void(value_type&, std::size_t, std::size_t)> = true>
+		Final& for_each(FuncType func, _for_each_ij_tag = _for_each_ij_tag::DUMMY) {
+			for (size_type i = 0; i < this->rows(); ++i)
+				for (size_type j = 0; j < this->cols(); ++j)
+					func(this->operator()(i, j), i, j);
+			return *_final_this();
 		}
 	};
 	
@@ -2586,11 +2629,11 @@ inline void _utl_log_print(std::string_view file, int line, std::string_view fun
 #include <iomanip>
 #include <ios>
 #include <iostream>
+#include <map>
 #include <ostream>
 #include <sstream>
 #include <string>
 #include <string_view>
-#include <unordered_map>
 
 // _________ DEVELOPER DOCS _________
 
@@ -2643,7 +2686,7 @@ private:
 	_utl_profiler_time_point construction_time_point;
 
 public:
-	inline static std::unordered_map<std::string, _utl_profiler_record> records;
+	inline static std::map<std::string, _utl_profiler_record> records; // std::map because we do WANT sorting by call-site name
 
 	operator bool() const { return true; } // needed so we can use 'if (auto x = _utl_profiler())' construct
 
