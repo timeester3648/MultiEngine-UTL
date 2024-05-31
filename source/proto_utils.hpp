@@ -1162,81 +1162,78 @@ namespace utl::storage {
 	
 	
 	// - Iterator template - (reduces code duplication for const & non-const variants)
-	template<class ValueType, class PointerType, class ReferenceType>
-	struct _flat_iterator {
+	// Uses 'operator[]' of 'ParentPointer' for all logic, thus allowing arbitrary containers that
+	// don't have to be contiguous or even ordered in memory
+	template<class ParentPointer, class Types, bool is_const_iter = false>
+	class _flat_iterator {
+		using parent_pointer    = ParentPointer;
+	public:
 		// Iterator reqs: [General]
 		// Contains member types      =>
 		using iterator_category = std::random_access_iterator_tag;
-		using difference_type   = std::ptrdiff_t;
-		using value_type        = ValueType;
-		using pointer           = PointerType;
-		using reference         = ReferenceType;
+		using difference_type   = typename Types::difference_type;
+		using value_type        = typename Types::value_type;
+		using pointer           = typename std::conditional_t<is_const_iter, typename Types::const_pointer,   typename Types::pointer  >;
+		using reference         = typename std::conditional_t<is_const_iter, typename Types::const_reference, typename Types::reference>;
 		
 		// Iterator reqs: [General]
 		// Constructible
-		_flat_iterator(pointer ptr) : _ptr(ptr) {}
+		_flat_iterator(parent_pointer parent, difference_type idx) : _parent(parent), _idx(idx) {}
 		// Copy-constructible => by default
 		// Copy-assignable    => by default
 		// Destructible       => by default
 		// Swappable
-		friend void swap(_flat_iterator &lhs, _flat_iterator &rhs) { std::swap(lhs._ptr, rhs._ptr); }
+		friend void swap(_flat_iterator &lhs, _flat_iterator &rhs) { std::swap(lhs._idx, rhs._idx); }
 		
 		// Iterator reqs: [General]
 		// Can be incremented (prefix & postfix)
-		_flat_iterator& operator++()           {                              ++_ptr; return *this; } // prefix
-		_flat_iterator  operator++(int) { _flat_iterator temp = *this; ++_ptr; return temp;  } // postfix
+		_flat_iterator& operator++()    {                              ++_idx; return *this; } // prefix
+		_flat_iterator  operator++(int) { _flat_iterator temp = *this; ++_idx; return temp;  } // postfix
 		
 		// Iterator reqs: [Input iterator]
 		// Supports equality/inequality comparisons
-		friend bool operator==(const _flat_iterator& it1, const _flat_iterator& it2) { return it1._ptr == it2._ptr; };
-		friend bool operator!=(const _flat_iterator& it1, const _flat_iterator& it2) { return it1._ptr != it2._ptr; };
+		friend bool operator==(const _flat_iterator& it1, const _flat_iterator& it2) { return it1._idx == it2._idx; };
+		friend bool operator!=(const _flat_iterator& it1, const _flat_iterator& it2) { return it1._idx != it2._idx; };
 		// Can be dereferenced as an rvalue
-		reference operator*() const { return *_ptr; }
-		pointer operator->() const { return _ptr; }
+		reference operator*() const { return  _parent->operator[](_idx); }
+		pointer operator->() const  { return &_parent->operator[](_idx); }
 		
 		// Iterator reqs: [Output iterator]
 		// Can be dereferenced as an lvalue (only for mutable iterator types) => not needed
 		
 		// Iterator reqs: [Forward iterator]
 		// Default-constructible
-		_flat_iterator() : _ptr(nullptr) {}
+		_flat_iterator() : _parent(nullptr), _idx(0) {}
 		// "Multi-pass" - dereferencing & incrementing does not affects dereferenceability => satisfied
 		
 		// Iterator reqs: [Bidirectional iterator]
 		// Can be decremented
-		_flat_iterator& operator--()           {                              --_ptr; return *this; } // prefix
-		_flat_iterator  operator--(int) { _flat_iterator temp = *this; --_ptr; return temp;  } // postfix
+		_flat_iterator& operator--()    {                              --_idx; return *this; } // prefix
+		_flat_iterator  operator--(int) { _flat_iterator temp = *this; --_idx; return temp;  } // postfix
 		
 		// Iterator reqs: [Random Access iterator]
 		// See: https://en.cppreference.com/w/cpp/named_req/RandomAccessIterator
 		// Supports arithmetic operators: it + n, n + it, it - n, it1 - it2
-		friend _flat_iterator operator+(const _flat_iterator &it, difference_type diff) { return it._ptr + diff; }
-		friend _flat_iterator operator+(difference_type diff, const _flat_iterator &it) { return it._ptr + diff; }
-		friend _flat_iterator operator-(const _flat_iterator &it, difference_type diff) { return it._ptr - diff; }
-		friend difference_type operator-(const _flat_iterator &it1, const _flat_iterator &it2) { return it1._ptr - it2._ptr; }
+		friend _flat_iterator operator+(const _flat_iterator &it, difference_type diff) { return _flat_iterator(it._parent, it._idx + diff); }
+		friend _flat_iterator operator+(difference_type diff, const _flat_iterator &it) { return _flat_iterator(it._parent, it._idx + diff); }
+		friend _flat_iterator operator-(const _flat_iterator &it, difference_type diff) { return _flat_iterator(it._parent, it._idx - diff); }
+		friend difference_type operator-(const _flat_iterator &it1, const _flat_iterator &it2) { return it1._idx - it2._idx; }
 		// Supports inequality comparisons (<, >, <= and >=) between iterators
-		friend bool operator< (const _flat_iterator &it1, const _flat_iterator &it2) { return it1._ptr <  it2._ptr; }
-		friend bool operator> (const _flat_iterator &it1, const _flat_iterator &it2) { return it1._ptr >  it2._ptr; }
-		friend bool operator<=(const _flat_iterator &it1, const _flat_iterator &it2) { return it1._ptr <= it2._ptr; }
-		friend bool operator>=(const _flat_iterator &it1, const _flat_iterator &it2) { return it1._ptr >= it2._ptr; }
+		friend bool operator< (const _flat_iterator &it1, const _flat_iterator &it2) { return it1._idx <  it2._idx; }
+		friend bool operator> (const _flat_iterator &it1, const _flat_iterator &it2) { return it1._idx >  it2._idx; }
+		friend bool operator<=(const _flat_iterator &it1, const _flat_iterator &it2) { return it1._idx <= it2._idx; }
+		friend bool operator>=(const _flat_iterator &it1, const _flat_iterator &it2) { return it1._idx >= it2._idx; }
+			// Standard assumption: Both iterators are from the same container => no need to compare '_parent'
 		// Supports compound assignment operations += and -=
-		_flat_iterator& operator+=(difference_type diff) { _ptr += diff; return *this; }
-		_flat_iterator& operator-=(difference_type diff) { _ptr -= diff; return *this; }
+		_flat_iterator& operator+=(difference_type diff) { _idx += diff; return *this; }
+		_flat_iterator& operator-=(difference_type diff) { _idx -= diff; return *this; }
 		// Supports offset dereference operator ([])
-		reference operator[](difference_type diff) const { return *(_ptr + diff); }
+		reference operator[](difference_type diff) const { return _parent->operator[](_idx + diff); }
 		
 	private:
-		pointer _ptr;
-			// NOTE: Using pointer introduces assumption that data lies in 'ascending pointer values' order,
-			// which wasn't here before (before we merely had an arbitrary indexing func).
-			//
-			// This assumption is almost always true but, some special cases (like index-reversed views) might break it.
-			//
-			// A more generic way would be to store { const _const_indexable_object& _parent; size_type _idx; } and
-			// use _parent->operator[](idx) to dereference. This is more overhead, but perhaps worth it. Check the
-			// benchmark with mutable iterator using <algorithm> and see if it matters. (probably not much)
+		parent_pointer  _parent;
+		difference_type _idx; // not size_type because we have to use it in 'difference_type' operations most of the time
 	};
-	
 	
 	// Abstract indexable object that provides "default" behavior derived from size and 1D indexing function
 	//
@@ -1288,14 +1285,14 @@ namespace utl::storage {
 		}
 		
 		// - Iterators -
-		using const_iterator = _flat_iterator<value_type, const_pointer, const_reference>;
+		using const_iterator = _flat_iterator<const Final*, Types, true>;
 		using const_reverse_iterator = std::reverse_iterator<const_iterator>;
 		
-		const_iterator cbegin() const { return const_iterator(&this->front()); } // points to first element
-		const_iterator cend()   const { return const_iterator(&this->back() + 1); } // points to invalid space after last
+		const_iterator cbegin() const { return const_iterator(_final_this(), 0); } // points to first element
+		const_iterator cend()   const { return const_iterator(_final_this(), _final_this()->size()); } // points to invalid space after last
 	
-		const_reverse_iterator crbegin() const { return const_reverse_iterator(&this->back() + 1); } // points to last element
-		const_reverse_iterator crend() const { return const_reverse_iterator(&this->front()); } // points to invalid space before first
+		const_reverse_iterator crbegin() const { return const_reverse_iterator(this->cend()); } // points to last element
+		const_reverse_iterator crend() const { return const_reverse_iterator(this->cbegin()); } // points to invalid space before first
 			// std::reverse_iterator adds a shift of 1 internally, so we use the same init values as regular iter
 	};
 	
@@ -1307,11 +1304,11 @@ namespace utl::storage {
 	public:
 		// - Defining methods -
 		reference operator[](size_type);
-	
+		
 		// - Derived methods -
 		reference front() { return _final_this()->operator[](0); }
 		reference back() { return _final_this()->operator[](_final_this()->size() - 1); }
-				
+		
 		template<class FuncType, _enable_if_signature<FuncType, void(value_type&, std::size_t)> = true>
 		Final& for_each(FuncType func, _for_each_idx_tag = _for_each_idx_tag::DUMMY) {
 			for (size_type idx = 0; idx < _final_this()->size(); ++idx) func(_final_this()->operator[](idx), idx);
@@ -1330,14 +1327,14 @@ namespace utl::storage {
 		}
 		
 		// - Iterators -
-		using iterator = _flat_iterator<value_type, pointer, reference>;
+		using iterator = _flat_iterator<Final*, Types>;
 		using reverse_iterator = std::reverse_iterator<iterator>;
 		
-		iterator begin() { return iterator(&this->front()); } // points to first element
-		iterator end()   { return iterator(&this->back() + 1); } // points to invalid space after last
+		iterator begin() { return iterator(_final_this(), 0); } // points to first element
+		iterator end()   { return iterator(_final_this(), _final_this()->size()); } // points to invalid space after last
 	
-		reverse_iterator rbegin() { return reverse_iterator(&this->back() + 1); } // points to last element
-		reverse_iterator rend()   { return reverse_iterator(&this->front()); } // points to invalid space before first
+		reverse_iterator rbegin() { return reverse_iterator(this->end()); } // points to last element
+		reverse_iterator rend()   { return reverse_iterator(this->begin()); } // points to invalid space before first
 			// std::reverse_iterator adds a shift of 1 internally, so we use the same init values as regular iter
 	};
 	
