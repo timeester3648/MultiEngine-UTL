@@ -24,7 +24,8 @@ public:
 XorShift64StarGenerator xorshift64star;
 
 void seed(uint64_t random_seed);
-void seed_with_time(); // seed with time(NULL)
+void seed_with_time();          // seed with time(NULL)
+void seed_with_random_device(); // seed with std::random_device
 
 // Convenient random functions
 int rand_int(int min, int max);
@@ -110,11 +111,11 @@ Returns $\alpha A + (1 - \alpha) B$, with random $0 < \alpha < 1$. Useful for ve
 
 ## Example 1 (getting random values)
 
-[ [Run this code](https://godbolt.org/#z:OYLghAFBqd5QCxAYwPYBMCmBRdBLAF1QCcAaPECAMzwBtMA7AQwFtMQByARg9KtQYEAysib0QXACx8BBAKoBnTAAUAHpwAMvAFYTStJg1DIApACYAQuYukl9ZATwDKjdAGFUtAK4sGIAJz%2BpK4AMngMmAByPgBGmMQBpAAOqAqETgwe3r4BQSlpjgJhEdEscQlBdpgOGUIETMQEWT5%2BgbaY9oUMdQ0ExVGx8YkK9Y3NOW0jvf2l5QEAlLaoXsTI7BzmAMzhyN5YANQmm24IBARJCiAA9FfETADuAHTAhAheMV5Kq7KMBI9oLCuABEWIRiHgLKhgOhDKgAG5XJLEVBEAgATyS4WAAH0vI5aAoriwmCN4lcFMtVphEciiLj8QpHggkkkjtgTBoAIIcznhAj7YnhCB8/YNYDIUj7ZAIBr7ABUcrFcPmhwA7FYufstftPlj9sw2Aokkw1jqCLQjhruZrtXcGOhUCwQCAlJh0Nj7q9sY42BB5paedr9iN0M60HjA0HtUc3DHDmYzHb3XyIBpJVwNBoVUcgfGzFGC1GY3Gk47nUnsSm0/sM1nC/XDsc4%2BYzCYAKxuBgtyMF4vHPMVh3veh%2Bxu5lsNyd9tz7UtOkCD5YxEcqyf16d59ud7s23tN/stxfDzAQAC0bclbezm3HCbX0f3M7n5cM7qHy5P58vq/vG%2B7Ha7BMeyLR8B1fbEYlQTxRxzPN7wbDdnwXcDIOgn94JA2MDyAgCd05ddQMPcDpVQPAlAgEx1S4SUzElTZKKBa9b3zBDQKQisSLIk9KIsaj9lo/Z6NVRip0InDtyA3dMObBMK1ocJMAabEARicImC6CAzEeOjHiYuDENfMtkPtbF5IiJSVLUjStJ068sJnf8JNbTYrWA4hMAIFYGH2DQAy5BieQ4RZaE4NteD8DgtFIVBOFjSxrGDSlTS2HhSAITQgsWABrEBVS4R48tVAAOTYpCKswADZ/AzC8Qo4SRwoy6LOF4S403SyKgtIOBYBgRAUEdTF6DICgIABIahl2QxgC4CrMz4OgCHiS4IBiJrVOYYg0U4VKNoaNEAHkYm0aoOtSgE2EEA6GFobbOtILAPmANwxAJHbeCwYkjHEe78Hcmo4UwS57swVRqjxdYor5DomvkmI7i2jwsCaghwSdbguqoAxgAUAA1PBMHuA6kkYd6ZEEEQxHYKRyfkJQ1Ca3RqIMIwUGsax9DwGJLkgRZUCSLpgdPEMc1MeLLC4VV9lPA6zF4eF4nBLAeb9dpOgyFx7XGPxqNCBTZiGaj8nSARtb0Y2uhmQYEmoqoagEHoxk8Fo9DtrpHb6fXrdd0YmmdnJbd9q2ykNxYKRWNYJGC0LGvumKOH2VQioq08KskKUWeAGsKseDRc/2CBcEIEh41K%2BZeA6rR5kWBBFKwBJVbqhrSCdNs0wiqL49akB2oyxYev65ZzjxchKHGuh4kiVh1iTlO04z6bs9z3PeDdYulb0fgKdEcQaa3umVHUe6mdIe47iSd7o44MLSA7%2BXOAOvEkjxfZUCoRPk9T9OpqMJe840AuHgWATWIKXLg5c0p92yiASQOcqqSDMFwZOGg2z%2BDyrNfQnBm6t3bk1Lutge6QM6tXUgOUzBFUeOQxBFUiptklpsDQRV/CwMwRwTYsdO4tSIVXK%2Bctb54K4ZXTKpBAbEDSM4SQQA%3D%3D%3D) ]
+[ [Run this code](https://godbolt.org/#z:OYLghAFBqd5QCxAYwPYBMCmBRdBLAF1QCcAaPECAMzwBtMA7AQwFtMQByARg9KtQYEAysib0QXACx8BBAKoBnTAAUAHpwAMvAFYTStJg1DIApACYAQuYukl9ZATwDKjdAGFUtAK4sGE6a4AMngMmAByPgBGmMQSAKykAA6oCoRODB7evv5JKWkCwaERLNGxXAl2mA7pQgRMxASZPn5Stpj2jgK19QSF4VEx8bZ1DU3ZrQojvSH9JYPlAJS2qF7EyOwc5gDMIcjeWADUJltuCAQEiQogAPTXxEwA7gB0wIQIXpFeSmuyjARPaBY1wAIixCMQ8BZUMB0IZUAA3a6JYioIgEACeiRCwAA%2Bl5HLQFNcWExJjFrgoVmtMEiUUQ8QSFE8EIlEsdsCYNABBTlckIEA4kkIQfkHerAZCkA7IBD1A4AKnl4vhCyOAHYrNyDtqDl9sQdmGwFIkmOtdQRaMdNTytTr7gx0KgWCAQEpMOgcQ83jj7Y6WDisPC8OsIAsrbydQdJugXWh8RHIzrjm5k0czGZfTj%2BRANFKuBoNKrjsC02ZE%2BXE8nU76nS7M9ncwd84WK62jidU%2BYzCY4m4GF2E%2BWqydS5nHR96KH2yWu2258O3Aca86QGOVpFJ6q562F6We32B7ahx2R121xPMBAALQJA5xItbGfp7dJk%2BL5d1wwe8cby83qX3i%2B2q7gOvb9umg6Vm%2Bo5fjikSoJ4U7FqWQE7tBH6rrB8GIVuqFQSmp4QWBh5cmhBGLmesEyqgeBKBAJgalwUpmFKWwMcCD5PmWba7hhmbUbRl4MRYTEHCxBxsWqHHztBoEHhBR74Z26aZrQMz1DigKRCETCdAwEBmE8rFPJxKG8V%2BtaYQ6OJqaEGlaTpekGUZEkme25F7sREFbNakHEJgBCrAwBwaOG3LsbyHBLLQnBxLwfjcLwqCcCmljWFGVJmtsPCkAQmhRUsADWIBqlwTylWqAAcWxSJVZgAGwAJz5gkMUcJI8X5aQyUcLwVy5nlHBaEscCwDAiAoE6WL0GQFAQIC02DHshjAFw9UFnwdAEDEVwQJEXXacwxDopwOWHfU6IAPKRNoVSDTlgJsIIl0MLQJ1DbwWCfMAbhiISp2fZgJJGOIH2kPg/nVPCmBXGDmCqFU%2BIbFo5CCO0XVqZE9zHR4WBdQQELOolpDQ8Q8FKMCQMrbZoAfUsVAGMACgAGp4JgDyXYkjAAzIggiGI7CtPwgiKCo6hg7oTEGEYKDWNY%2Bh4JEVyQEsqCJHpsNXtGxamGllhcGqBxXpdZhJaTEJYMroZtB06QuA6YwtKQQQzMUpR6MkqR6Y7Ht5HpfRu/MNt3TUUw%2B0xlTVF0UwBwMZTDD04cJw0sdzGUSyUqs6wSNFsWdWDPUHKolX1Ve9WSNK0vAE29VPBodcHBAuCECQaY1QsvCDcNSwIJgTBYLE1ttR1pDOnEuYJSjPV9SAA35SN40QEgKwXPi5CUAtdAxGErAbMXpfl5XK013Xde8O6LcW3owvCKI4hC7IotqF1kukA89yJADuccHFpCT0lnBLr4kSPiA4qAqBFxLmXCuy0jAn3rhoRuHgWCLWIG3LgHdcrzyKiASQtcmqSDMFwEuGg4iNVKmtfQnAR5jwnl1aethZ5YLpjgswlUnhsKIfVSqcQDZbA0JVRqeCqEcC2PnKenBO7YJEabP%2B9DJHMO7iTHadtJBAA%3D%3D%3D) ]
 ```cpp
 using namespace utl;
 
-random::seed_with_time();
+random::seed_with_random_device();
 std::cout
 	<< "rand_int(0, 100) = "                << random::rand_int(0, 100)                << "\n"
 	<< "rand_double() = "                   << random::rand_double()                   << "\n"
@@ -126,12 +127,12 @@ std::cout
 
 Output:
 ```
-rand_int(0, 100) = 40
-rand_double() = 0.398804
-rand_double(-5, 5) = -3.53699
+rand_int(0, 100) = 82
+rand_double() = 0.419907
+rand_double(-5, 5) = -4.32745
 rand_bool() = 0
 rand_choise({1, 2, 3}) = 1
-rand_linear_combination(2., 3.) = 2.85376
+rand_linear_combination(2., 3.) = 2.12557
 ```
 
 ## Example 2 (using XorShift64&ast; with &lt;random&gt;)

@@ -20,9 +20,9 @@ std::vector<std::string_view> get_command_line_args(int argc, char** argv);
 
 // Command line utils
 struct CommandResult {
-	int status;
-	std::string stdout_output;
-	std::string stderr_output;
+    int status;
+    std::string stdout_output;
+    std::string stderr_output;
 };
 
 CommandResult run_command(const std::string &command);
@@ -48,7 +48,7 @@ Internally module keeps track of all created temporary files so they can be late
 > shell::clear_temp_files();
 > ```
 
-Deletes all temporary files created with `generate_temp_file()` during current runtime. **Called automatically when exiting the program.**
+Deletes all temporary files created with `generate_temp_file()` during current runtime. **Called automatically when exiting the program if any files were created.**
 
 **Note:** "Exiting" happens when program returns from `main()` or calls `std::exit()`.
 
@@ -64,7 +64,7 @@ Deletes a single temporary file. Used to make methods that can clean up internal
 
 Parses program executable path from `argv` as `std::string_view`.
 
-`argc == 1` is a reasonable assumption since the only way to achieve such launch is to run executable through a null `execv()`, most command-line programs assume such scenario to be either impossible or an error on user side.
+`argc != 0` is a reasonable assumption since the only way to achieve such launch is to run executable through a null `execv()`, most command-line programs assume such scenario to be either impossible or an error on user side.
 
 > ```cpp
 > std::vector<std::string_view> shell::get_command_line_args(int argc, char** argv);
@@ -113,7 +113,7 @@ std::cout << "Exe path:\n" << shell::get_exe_path(argv) << "\n\n";
 
 std::cout << "Command line arguments (if present):\n";
 for (const auto &arg : shell::get_command_line_args(argc, argv))
-	std::cout << arg << "\n";
+    std::cout << arg << "\n";
 ```
 
 Output:
@@ -127,24 +127,24 @@ Command line arguments (if present):
 
 ## Example 3 (running console command)
 
-[ [Run this code](https://godbolt.org/#g:!((g:!((g:!((h:codeEditor,i:(filename:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,selection:(endColumn:53,endLineNumber:9,positionColumn:53,positionLineNumber:9,selectionStartColumn:53,selectionStartLineNumber:9,startColumn:53,startLineNumber:9),source:'%23include+%3Chttps://raw.githubusercontent.com/DmitriBogdanov/prototyping_utils/master/source/proto_utils.hpp%3E%0A%0Aint+main(int+argc,+char+**argv)+%7B%0A++++using+namespace+utl%3B%0A%0A++++//+Create+temp.+file+and+fill+it+with+text%0A++++const+auto+temp_file_path+%3D+shell::generate_temp_file()%3B%0A++++const+auto+temp_file_text+%3D+%22~~~FILE+CONTENTS~~~%22%3B%0A++++std::ofstream(temp_file_path)+%3C%3C+temp_file_text%3B%0A%0A++++//+Run+command+to+show+file+contents+(does+not+work+in+godbolt)%0A++++const+auto+command+%3D+%22cat+%22+%2B+temp_file_path%3B%0A++++const+auto+command_result+%3D+shell::run_command(command)%3B%0A%0A++++std::cout%0A++++++++%3C%3C+%22shell::run_command(%22+%3C%3C+command+%3C%3C+%22):%5Cn%22%0A++++++++%3C%3C+%22command_result.status+%3D+%22+%3C%3C+command_result.status+%3C%3C+%22%5Cn%22%0A++++++++%3C%3C+%22command_result.stdout_output+%3D+%22+%3C%3C+command_result.stdout_output+%3C%3C+%22%5Cn%22%0A++++++++%3C%3C+%22command_result.stderr_output+%3D+%22+%3C%3C+command_result.stderr_output+%3C%3C+%22%5Cn%22%3B%0A%0A++++shell::clear_temp_files()%3B%0A%0A++++return+0%3B%0A%7D%0A'),l:'5',n:'0',o:'C%2B%2B+source+%231',t:'0')),k:71.71783148269105,l:'4',n:'0',o:'',s:0,t:'0'),(g:!((g:!((h:compiler,i:(compiler:clang1600,filters:(b:'0',binary:'1',binaryObject:'1',commentOnly:'0',debugCalls:'1',demangle:'0',directives:'0',execute:'0',intel:'0',libraryCode:'0',trim:'1'),flagsViewOpen:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,libs:!(),options:'-std%3Dc%2B%2B17+-O2',overrides:!(),selection:(endColumn:1,endLineNumber:1,positionColumn:1,positionLineNumber:1,selectionStartColumn:1,selectionStartLineNumber:1,startColumn:1,startLineNumber:1),source:1),l:'5',n:'0',o:'+x86-64+clang+16.0.0+(Editor+%231)',t:'0')),header:(),l:'4',m:50,n:'0',o:'',s:0,t:'0'),(g:!((h:output,i:(compilerName:'x86-64+clang+16.0.0',editorid:1,fontScale:14,fontUsePx:'0',j:1,wrap:'1'),l:'5',n:'0',o:'Output+of+x86-64+clang+16.0.0+(Compiler+%231)',t:'0')),k:46.69421860597116,l:'4',m:50,n:'0',o:'',s:0,t:'0')),k:28.282168517308946,l:'3',n:'0',o:'',t:'0')),l:'2',n:'0',o:'',t:'0')),version:4) ] (std::system might not work with Godbolt)
+[ [Run this code](https://godbolt.org/#g:!((g:!((g:!((h:codeEditor,i:(filename:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,selection:(endColumn:50,endLineNumber:12,positionColumn:50,positionLineNumber:12,selectionStartColumn:50,selectionStartLineNumber:12,startColumn:50,startLineNumber:12),source:'%23include+%3Chttps://raw.githubusercontent.com/DmitriBogdanov/prototyping_utils/master/source/proto_utils.hpp%3E%0A%0Aint+main(int+argc,+char+**argv)+%7B%0A++++using+namespace+utl%3B%0A%0A++++//+Create+temp.+file+and+fill+it+with+text%0A++++const+auto+temp_file_path+%3D+shell::generate_temp_file()%3B%0A++++const+auto+temp_file_text+%3D+%22~~~FILE+CONTENTS~~~%22%3B%0A++++std::ofstream(temp_file_path,+std::ios_base::app)+%3C%3C+temp_file_text%3B%0A%0A++++//+Run+command+to+show+file+contents+(does+not+work+in+godbolt)%0A++++const+auto+command+%3D+%22cat+%22+%2B+temp_file_path%3B%0A++++const+auto+command_result+%3D+shell::run_command(command)%3B%0A%0A++++std::cout%0A++++++++%3C%3C+%22shell::run_command(%22+%3C%3C+command+%3C%3C+%22):%5Cn%22%0A++++++++%3C%3C+%22command_result.status+%3D+%22+%3C%3C+command_result.status+%3C%3C+%22%5Cn%22%0A++++++++%3C%3C+%22command_result.stdout_output+%3D+%22+%3C%3C+command_result.stdout_output+%3C%3C+%22%5Cn%22%0A++++++++%3C%3C+%22command_result.stderr_output+%3D+%22+%3C%3C+command_result.stderr_output+%3C%3C+%22%5Cn%22%3B%0A%0A++++shell::clear_temp_files()%3B%0A%0A++++return+0%3B%0A%7D%0A'),l:'5',n:'1',o:'C%2B%2B+source+%231',t:'0')),k:71.71783148269105,l:'4',n:'0',o:'',s:0,t:'0'),(g:!((g:!((h:compiler,i:(compiler:clang1600,filters:(b:'0',binary:'1',binaryObject:'1',commentOnly:'0',debugCalls:'1',demangle:'0',directives:'0',execute:'0',intel:'0',libraryCode:'0',trim:'1',verboseDemangling:'0'),flagsViewOpen:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,libs:!(),options:'-std%3Dc%2B%2B17+-O2',overrides:!(),selection:(endColumn:1,endLineNumber:1,positionColumn:1,positionLineNumber:1,selectionStartColumn:1,selectionStartLineNumber:1,startColumn:1,startLineNumber:1),source:1),l:'5',n:'0',o:'+x86-64+clang+16.0.0+(Editor+%231)',t:'0')),header:(),l:'4',m:50,n:'0',o:'',s:0,t:'0'),(g:!((h:output,i:(compilerName:'x86-64+clang+16.0.0',editorid:1,fontScale:14,fontUsePx:'0',j:1,wrap:'1'),l:'5',n:'0',o:'Output+of+x86-64+clang+16.0.0+(Compiler+%231)',t:'0')),k:46.69421860597116,l:'4',m:50,n:'0',o:'',s:0,t:'0')),k:28.282168517308946,l:'3',n:'0',o:'',t:'0')),l:'2',n:'0',o:'',t:'0')),version:4) ] (std::system might not work with Godbolt)
 ```cpp
 using namespace utl;
 
 // Create temp. file and fill it with text
 const auto temp_file_path = shell::generate_temp_file();
 const auto temp_file_text = "~~~FILE CONTENTS~~~";
-std::ofstream(temp_file_path) << temp_file_text;
+std::ofstream(temp_file_path, std::ios_base::app) << temp_file_text;
 
-// Run command to show file contents (windows-specific command in this example)
-const auto command = "type " + temp_file_path;
+// Run command to show file contents (bash command in this example)
+const auto command = "cat " + temp_file_path;
 const auto command_result = shell::run_command(command);
 
 std::cout
-	<< "shell::run_command(" << command << "):\n"
-	<< "command_result.status = " << command_result.status << "\n"
-	<< "command_result.stdout_output = " << command_result.stdout_output << "\n"
-	<< "command_result.stderr_output = " << command_result.stderr_output << "\n";
+    << "shell::run_command(" << command << "):\n"
+    << "command_result.status = " << command_result.status << "\n"
+    << "command_result.stdout_output = " << command_result.stdout_output << "\n"
+    << "command_result.stderr_output = " << command_result.stderr_output << "\n";
 
 shell::clear_temp_files();
 ```

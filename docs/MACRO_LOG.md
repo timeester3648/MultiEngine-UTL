@@ -2,7 +2,7 @@
 
 [<- back to README.md](https://github.com/DmitriBogdanov/prototyping_utils/tree/master)
 
-**URL_PROFILER** module contains macros for simple debug/release logging that uses boilerplate than standard streams and automatically formats info about the call site.
+**URL_PROFILER** module contains macros for simple debug/release logging that uses less boilerplate than standard streams and automatically formats info about the call site.
 
 ## Definitions
 
@@ -25,7 +25,7 @@ Sets [std::ostream](https://en.cppreference.com/w/cpp/io/basic_ostream) used by 
 > UTL_LOG_DEBUG(...)
 > ```
 
-Prints `[<filename>:<line> (<function>)] <message>` to currently selected `std::ostream`. Multiple arguments can be passed, as long as they have a defined `operator<<` all arguments get concatenated into `<message>`.
+Prints `[<filename>:<line> (<function>)] <message>` to currently selected `std::ostream`. Multiple arguments can be passed, as long as they have a defined `operator<<` all arguments get concatenated into a `<message>`.
 
 Debug version of the macro only prints in debug mode, compiling to nothing otherwise.
 

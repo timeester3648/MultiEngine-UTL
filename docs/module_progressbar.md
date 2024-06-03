@@ -79,7 +79,7 @@ Construct progress bar object with following options:
 > progressbar::Percentage::finish();
 > ```
 
-Start, update & finish progress bar display. Percentage is a value in $[0, 1]$ range, corresponding to a porting of total progress.
+Start, update & finish progress bar display. Percentage is a value in $[0, 1]$ range, corresponding to a portion of total progress.
 
 > ```cpp
 > progressbar::Ruler::Ruler(
@@ -97,7 +97,7 @@ Construct progress bar object with following options:
 > progressbar::Ruler::finish();
 > ```
 
-Start, update & finish progress bar display. Percentage is a value in $[0, 1]$ range, corresponding to a porting of total progress.
+Start, update & finish progress bar display. Percentage is a value in $[0, 1]$ range, corresponding to a portion of total progress.
 
 
 

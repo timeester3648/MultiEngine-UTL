@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <fstream>
 #include <initializer_list>
+#include <ios>
 #include <iostream>
 #include <numeric>
 #include <random>
@@ -199,13 +200,13 @@ int main(int argc, char* argv[]) {
 	// Create temp file
 	const auto temp_file_path = shell::generate_temp_file();
 	const auto temp_file_text = "~~~FILE CONTENTS~~~";
-	std::ofstream(temp_file_path) << temp_file_text;
+	std::ofstream(temp_file_path, std::ios_base::app) << temp_file_text;
 
 	std::cout << "Temp. file path: " << temp_file_path << "\n";
 	std::cout << "Temp. file text: " << temp_file_text << "\n";
 	
-	// Run command to show file contents (windows-specific command in this example)
-	const auto command = "type " + temp_file_path;
+	// Run command to show file contents (bash command in this example)
+	const auto command = "cat " + temp_file_path;
 	const auto command_result = shell::run_command(command);
 
 	std::cout

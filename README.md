@@ -19,7 +19,7 @@ Math-related utilities.
 
 > [**utl::progressbar**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_progressbar.md)
 
-Configurable progress bars for console appls.
+Configurable progress bars for console apps.
 
 > [**utl::random**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_random.md)
 

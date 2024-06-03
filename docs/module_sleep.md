@@ -7,9 +7,9 @@
 ## Definitions
 
 ```cpp
+void system(double ms);   // imprecise, uses CPU   0% of time, expected error ~0.1-5 ms
 void spinlock(double ms); //   precise, uses CPU 100% of time, expected error ~0.01 ms
 void hybrid(double ms);   //   precise, uses CPU  ~5% of time, expected error ~0.01 ms
-void system(double ms);   // imprecise, uses CPU   0% of time, expected error ~0.1-5 ms
 ```
 
 ## Methods

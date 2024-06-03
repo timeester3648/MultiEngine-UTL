@@ -20,7 +20,7 @@ std::tuple<std::string_view, T> entry(std::string_view key, T value);
 > config::export_json(std::string_view path, const Types... entries);
 > ```
 
-Creates JSON at `path` with given `entries`. Entries can be specified using `config::entry(key, value)`. Corresponding to the JSON standard, `value` can be an **integer**, **float**, **string** or **bool** (or any of the similar types). Arrays and nested array are also supported as long as their types are homogenous.
+Creates JSON at `path` with given `entries`. Entries can be specified using `config::entry(key, value)`. Corresponding to the JSON standard, `value` can be an **integer**, **float**, **string** or **bool** (or any of the similar types). Arrays and nested arrays are also supported as long as their types are homogenous.
 
 > ```cpp
 > std::tuple<std::string_view, T> config::entry(std::string_view key, T value);

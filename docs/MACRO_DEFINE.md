@@ -39,6 +39,8 @@ Used mainly to detect presence of platform- or library-specific functions, which
 
 Declares namespace `enum_name` that contains enumeration `enum_name` with members `...` and methods `enum_name::to_string()`, `enum_name::from_string()` that convert enum values to corresponding `std::string` and back.
 
+If no valid convertion to enum exists for `arg`, `enum_name::from_string(arg)` returns `enum_name::_count`.
+
 > ```cpp
 > UTL_DEFINE_VA_ARGS_COUNT(...)
 > ```
@@ -80,7 +82,7 @@ Prints call site & message to  `std::cerr` and calls `std::exit()` with a given 
 // Outside of function
 UTL_DEFINE_ENUM_WITH_STRING_CONVERSION(Sides, LEFT, RIGHT, TOP, BOTTOM)
 
-// Inside function
+// Inside the function
 std::cout
 	<< "(enum -> string) conversion:\n"
 	<< Sides::BOTTOM << " -> " << Sides::to_string(Sides::BOTTOM) << "\n"
@@ -111,8 +113,8 @@ constexpr bool exists_localtime_r = is_function_present_localtime_r::value;
 
 std::cout
 	<< std::boolalpha
-	<< "Windows 'localtime_s()' present: " << exists_localtime_s << "\n"
-	<< "Linux   'localtime_r()' present: " << exists_localtime_r << "\n";
+	<< "Windows localtime_s() present: " << exists_localtime_s << "\n"
+	<< "Linux   localtime_r() present: " << exists_localtime_r << "\n";
 
 // Do some specific logic based on existing function
 if constexpr (exists_localtime_s) {
@@ -125,10 +127,10 @@ if constexpr (exists_localtime_r) {
 
 Output:
 ```
-Windows 'localtime_s()' present: false
-Linux   'localtime_r()' present: true
+Windows localtime_s() present: false
+Linux   localtime_r() present: true
 
-~ Some localtime_s()-specific logic ~
+~ Some localtime_r()-specific logic ~
 ```
 
 ## Example 3 (getting the size of `__VA_ARGS__`)

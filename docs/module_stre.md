@@ -203,19 +203,19 @@ Value 3.14 is smaller than 6.28
 
 ## Example 4 (other utilities)
 
-[ [Run this code](https://godbolt.org/#g:!((g:!((g:!((h:codeEditor,i:(filename:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,selection:(endColumn:77,endLineNumber:9,positionColumn:77,positionLineNumber:9,selectionStartColumn:77,selectionStartLineNumber:9,startColumn:77,startLineNumber:9),source:'%23include+%3Chttps://raw.githubusercontent.com/DmitriBogdanov/prototyping_utils/master/source/proto_utils.hpp%3E%0A%0Aint+main()+%7B%0A++++using+namespace+utl%3B%0A%0A++++std::cout%0A%09%09%3C%3C+%22repeat_symbol(!'h!',++7)+%3D+%22+++%3C%3C+stre::repeat_symbol(!'h!',+++7)+%3C%3C+%22%5Cn%22%0A%09%09%3C%3C+%22repeat_string(%5C%22xo%5C%22,+5)+%3D+%22+%3C%3C+stre::repeat_string(%22xo-%22,+5)+%3C%3C+%22%5Cn%22%0A%09%09%3C%3C+%22pad_with_zeroes(15)+%3D+%22++++++%3C%3C+stre::pad_with_zeroes(15)+++++%3C%3C+%22%5Cn%22%3B%0A%0A++++return+0%3B%0A%7D%0A'),l:'5',n:'0',o:'C%2B%2B+source+%231',t:'0')),k:71.71783148269105,l:'4',n:'0',o:'',s:0,t:'0'),(g:!((g:!((h:compiler,i:(compiler:clang1600,filters:(b:'0',binary:'1',binaryObject:'1',commentOnly:'0',debugCalls:'1',demangle:'0',directives:'0',execute:'0',intel:'0',libraryCode:'0',trim:'1',verboseDemangling:'0'),flagsViewOpen:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,libs:!(),options:'-std%3Dc%2B%2B17+-O2',overrides:!(),selection:(endColumn:1,endLineNumber:1,positionColumn:1,positionLineNumber:1,selectionStartColumn:1,selectionStartLineNumber:1,startColumn:1,startLineNumber:1),source:1),l:'5',n:'0',o:'+x86-64+clang+16.0.0+(Editor+%231)',t:'0')),header:(),l:'4',m:50,n:'0',o:'',s:0,t:'0'),(g:!((h:output,i:(compilerName:'x86-64+clang+16.0.0',editorid:1,fontScale:14,fontUsePx:'0',j:1,wrap:'1'),l:'5',n:'0',o:'Output+of+x86-64+clang+16.0.0+(Compiler+%231)',t:'0')),k:46.69421860597116,l:'4',m:50,n:'0',o:'',s:0,t:'0')),k:28.282168517308946,l:'3',n:'0',o:'',t:'0')),l:'2',n:'0',o:'',t:'0')),version:4) ]
+[ [Run this code](https://godbolt.org/#g:!((g:!((g:!((h:codeEditor,i:(filename:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,selection:(endColumn:1,endLineNumber:13,positionColumn:1,positionLineNumber:13,selectionStartColumn:1,selectionStartLineNumber:1,startColumn:1,startLineNumber:1),source:'%23include+%3Chttps://raw.githubusercontent.com/DmitriBogdanov/prototyping_utils/master/source/proto_utils.hpp%3E%0A%0Aint+main()+%7B%0A++++using+namespace+utl%3B%0A%0A++++std::cout%0A%09%09%3C%3C+%22repeat_symbol(!'h!',++7)+%3D+%22+++%3C%3C+stre::repeat_symbol(!'h!',+++7)+%3C%3C+%22%5Cn%22%0A%09%09%3C%3C+%22repeat_string(%5C%22xo-%5C%22,+5)+%3D+%22+%3C%3C+stre::repeat_string(%22xo-%22,+5)+%3C%3C+%22%5Cn%22%0A%09%09%3C%3C+%22pad_with_zeroes(15)+%3D+%22++++++%3C%3C+stre::pad_with_zeroes(15)+++++%3C%3C+%22%5Cn%22%3B%0A%0A++++return+0%3B%0A%7D%0A'),l:'5',n:'1',o:'C%2B%2B+source+%231',t:'0')),k:71.71783148269105,l:'4',n:'0',o:'',s:0,t:'0'),(g:!((g:!((h:compiler,i:(compiler:clang1600,filters:(b:'0',binary:'1',binaryObject:'1',commentOnly:'0',debugCalls:'1',demangle:'0',directives:'0',execute:'0',intel:'0',libraryCode:'0',trim:'1',verboseDemangling:'0'),flagsViewOpen:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,libs:!(),options:'-std%3Dc%2B%2B17+-O2',overrides:!(),selection:(endColumn:1,endLineNumber:1,positionColumn:1,positionLineNumber:1,selectionStartColumn:1,selectionStartLineNumber:1,startColumn:1,startLineNumber:1),source:1),l:'5',n:'0',o:'+x86-64+clang+16.0.0+(Editor+%231)',t:'0')),header:(),l:'4',m:50,n:'0',o:'',s:0,t:'0'),(g:!((h:output,i:(compilerName:'x86-64+clang+16.0.0',editorid:1,fontScale:14,fontUsePx:'0',j:1,wrap:'1'),l:'5',n:'0',o:'Output+of+x86-64+clang+16.0.0+(Compiler+%231)',t:'0')),k:46.69421860597116,l:'4',m:50,n:'0',o:'',s:0,t:'0')),k:28.282168517308946,l:'3',n:'0',o:'',t:'0')),l:'2',n:'0',o:'',t:'0')),version:4) ]
 ```cpp
 using namespace utl;
 
 std::cout
 	<< "repeat_symbol('h',  7) = "   << stre::repeat_symbol('h',   7) << "\n"
-	<< "repeat_string(\"xo\", 5) = " << stre::repeat_string("xo-", 5) << "\n"
+	<< "repeat_string(\"xo-\", 5) = " << stre::repeat_string("xo-", 5) << "\n"
 	<< "pad_with_zeroes(15) = "      << stre::pad_with_zeroes(15)     << "\n";
 ```
 
 Output:
 ```
 repeat_symbol('h',  7) = hhhhhhh
-repeat_string("xo", 5) = xo-xo-xo-xo-xo-
+repeat_string("xo-", 5) = xo-xo-xo-xo-xo-
 pad_with_zeroes(15) = 0000000015
 ```

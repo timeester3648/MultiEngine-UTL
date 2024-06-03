@@ -7,7 +7,7 @@
 ## Definitions
 
 ```cpp
-void start() // start measurement
+void start(); // start measurement
 
 // Elapsed time as double
 double elapsed_ms();
@@ -31,7 +31,7 @@ std::string datetime_string_id(); // format "%y-%m-%d-%H-%M-%S", works in filena
 ## Methods
 
 > ```cpp
-> timer::start()
+> timer::start();
 > ```
 
 Sets internal start timepoint for elapsed measurements.
@@ -40,7 +40,7 @@ Sets internal start timepoint for elapsed measurements.
 > double timer::elapsed_ms();
 > double timer::elapsed_sec();
 > double timer::elapsed_min();
-> double timer::elapsed_hours()
+> double timer::elapsed_hours();
 > ```
 
 Returns elapsed time as `double`. Internally time is measured in nanoseconds.
