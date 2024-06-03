@@ -53,7 +53,7 @@ std::vector<FloatType> linspace(FloatType min, FloatType max, size_t N);
 
 template<typename SizedContainer>
 int ssize(const SizedContainer& container);
-		
+        
 // Branchless ternary
 template<typename Type>
 Type ternary_branchless(bool condition, Type return_if_true, Type return_if_false);
@@ -147,9 +147,9 @@ Faster implementation of `ternary_branchless()` for integers. When second return
 using namespace utl;
 
 std::cout
-	<< std::boolalpha
-	<< "are doubles addable?    -> " << math::is_addable_with_itself<double>::value << "\n"
-	<< "are std::pairs addable? -> " << math::is_addable_with_itself<std::pair<int, int>>::value << "\n";
+    << std::boolalpha
+    << "are doubles addable?    -> " << math::is_addable_with_itself<double>::value << "\n"
+    << "are std::pairs addable? -> " << math::is_addable_with_itself<std::pair<int, int>>::value << "\n";
 ```
 
 Output:
@@ -165,19 +165,19 @@ are std::pairs addable? -> false
 using namespace utl;
 
 std::cout
-	<< "All methods below are constexpr and type agnostic:\n"
-	<< "abs(-4) = "                               << math::abs(-4)                               << "\n"
-	<< "sign(-4) = "                              << math::sign(-4)                              << "\n"
-	<< "sqr(-4) = "                               << math::sqr(-4)                               << "\n"
-	<< "cube(-4) = "                              << math::cube(-4)                              << "\n"
-	<< "deg_to_rad(180.) = "                      << math::deg_to_rad(180.)                      << "\n"
-	<< "rad_to_deg(PI) = "                        << math::rad_to_deg(math::PI)                  << "\n"
-	<< "\n"
-	<< "uint_difference(5u, 17u) = "              << math::uint_difference(5u, 17u)              << "\n"
-	<< "\n"
-	<< "ternary_branchless(true, 3.12, -4.17) = " << math::ternary_branchless(true, 3.12, -4.17) << "\n"
-	<< "ternary_bitselect(true, 15, -5) = "       << math::ternary_bitselect(true, 15, -5)       << "\n"
-	<< "ternary_bitselect(false, 15) = "          << math::ternary_bitselect(false, 15)          << "\n";
+    << "All methods below are constexpr and type agnostic:\n"
+    << "abs(-4) = "                               << math::abs(-4)                               << "\n"
+    << "sign(-4) = "                              << math::sign(-4)                              << "\n"
+    << "sqr(-4) = "                               << math::sqr(-4)                               << "\n"
+    << "cube(-4) = "                              << math::cube(-4)                              << "\n"
+    << "deg_to_rad(180.) = "                      << math::deg_to_rad(180.)                      << "\n"
+    << "rad_to_deg(PI) = "                        << math::rad_to_deg(math::PI)                  << "\n"
+    << "\n"
+    << "uint_difference(5u, 17u) = "              << math::uint_difference(5u, 17u)              << "\n"
+    << "\n"
+    << "ternary_branchless(true, 3.12, -4.17) = " << math::ternary_branchless(true, 3.12, -4.17) << "\n"
+    << "ternary_bitselect(true, 15, -5) = "       << math::ternary_bitselect(true, 15, -5)       << "\n"
+    << "ternary_bitselect(false, 15) = "          << math::ternary_bitselect(false, 15)          << "\n";
 ```
 
 Output:

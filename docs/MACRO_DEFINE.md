@@ -84,10 +84,10 @@ UTL_DEFINE_ENUM_WITH_STRING_CONVERSION(Sides, LEFT, RIGHT, TOP, BOTTOM)
 
 // Inside the function
 std::cout
-	<< "(enum -> string) conversion:\n"
-	<< Sides::BOTTOM << " -> " << Sides::to_string(Sides::BOTTOM) << "\n"
-	<< "(string -> enum) conversion:\n"
-	<< "BOTTOM" << " -> " << Sides::from_string("BOTTOM") << "\n";
+    << "(enum -> string) conversion:\n"
+    << Sides::BOTTOM << " -> " << Sides::to_string(Sides::BOTTOM) << "\n"
+    << "(string -> enum) conversion:\n"
+    << "BOTTOM" << " -> " << Sides::from_string("BOTTOM") << "\n";
 ```
 
 Output:
@@ -112,16 +112,16 @@ constexpr bool exists_localtime_s = is_function_present_localtime_s::value;
 constexpr bool exists_localtime_r = is_function_present_localtime_r::value;
 
 std::cout
-	<< std::boolalpha
-	<< "Windows localtime_s() present: " << exists_localtime_s << "\n"
-	<< "Linux   localtime_r() present: " << exists_localtime_r << "\n";
+    << std::boolalpha
+    << "Windows localtime_s() present: " << exists_localtime_s << "\n"
+    << "Linux   localtime_r() present: " << exists_localtime_r << "\n";
 
 // Do some specific logic based on existing function
 if constexpr (exists_localtime_s) {
-	std::cout << "\n~ Some localtime_s()-specific logic ~";
+    std::cout << "\n~ Some localtime_s()-specific logic ~";
 }
 if constexpr (exists_localtime_r) {
-	std::cout << "\n~ Some localtime_r()-specific logic ~";
+    std::cout << "\n~ Some localtime_r()-specific logic ~";
 }
 ```
 
@@ -154,8 +154,8 @@ Size of __VA_ARGS__: 7
 [ [Run this code](https://godbolt.org/#g:!((g:!((g:!((h:codeEditor,i:(filename:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,selection:(endColumn:66,endLineNumber:6,positionColumn:66,positionLineNumber:6,selectionStartColumn:66,selectionStartLineNumber:6,startColumn:66,startLineNumber:6),source:'%23include+%3Chttps://raw.githubusercontent.com/DmitriBogdanov/prototyping_utils/master/source/proto_utils.hpp%3E%0A%0Aint+main(int+argc,+char+**argv)+%7B%0A%0A++++std::cout%0A%09%09%3C%3C+%22Current+platform:+%22+%3C%3C+UTL_DEFINE_CURRENT_OS_STRING+%3C%3C+%22%5Cn%22%0A%09%09%3C%3C+%22Compilation+mode:+%22+%3C%3C+(UTL_DEFINE_IS_DEBUG+%3F+%22Debug%22+:+%22Release%22)+%3C%3C+%22%5Cn%22%3B%0A%0A++++return+0%3B%0A%7D%0A'),l:'5',n:'0',o:'C%2B%2B+source+%231',t:'0')),k:71.71783148269105,l:'4',n:'0',o:'',s:0,t:'0'),(g:!((g:!((h:compiler,i:(compiler:clang1600,filters:(b:'0',binary:'1',binaryObject:'1',commentOnly:'0',debugCalls:'1',demangle:'0',directives:'0',execute:'0',intel:'0',libraryCode:'0',trim:'1',verboseDemangling:'0'),flagsViewOpen:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,libs:!(),options:'-std%3Dc%2B%2B17+-O2',overrides:!(),selection:(endColumn:1,endLineNumber:1,positionColumn:1,positionLineNumber:1,selectionStartColumn:1,selectionStartLineNumber:1,startColumn:1,startLineNumber:1),source:1),l:'5',n:'0',o:'+x86-64+clang+16.0.0+(Editor+%231)',t:'0')),header:(),l:'4',m:50,n:'0',o:'',s:0,t:'0'),(g:!((h:output,i:(compilerName:'x86-64+clang+16.0.0',editorid:1,fontScale:14,fontUsePx:'0',j:1,wrap:'1'),l:'5',n:'0',o:'Output+of+x86-64+clang+16.0.0+(Compiler+%231)',t:'0')),k:46.69421860597116,l:'4',m:50,n:'0',o:'',s:0,t:'0')),k:28.282168517308946,l:'3',n:'0',o:'',t:'0')),l:'2',n:'0',o:'',t:'0')),version:4) ]
 ```cpp
 std::cout
-		<< "Current platform: " << UTL_DEFINE_CURRENT_OS_STRING << "\n"
-		<< "Compilation mode: " << (UTL_DEFINE_IS_DEBUG ? "Debug" : "Release") << "\n";
+        << "Current platform: " << UTL_DEFINE_CURRENT_OS_STRING << "\n"
+        << "Compilation mode: " << (UTL_DEFINE_IS_DEBUG ? "Debug" : "Release") << "\n";
 ```
 
 Output:

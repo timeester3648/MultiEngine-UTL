@@ -45,32 +45,32 @@ std::cout << "Sleeping for " << sleep_duration_ms << " ms.\n";
 
 std::cout << "\nsleep::spinlock():\n";
 for (int i = 0; i < repeats; ++i) {
-	auto start = std::chrono::steady_clock::now();
+    auto start = std::chrono::steady_clock::now();
 
-	sleep::spinlock(sleep_duration_ms);
+    sleep::spinlock(sleep_duration_ms);
 
-	auto end = std::chrono::steady_clock::now();
-	std::cout << std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count() / 1e6 << " ms\n";
+    auto end = std::chrono::steady_clock::now();
+    std::cout << std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count() / 1e6 << " ms\n";
 }
 
 std::cout << "\nsleep::hybrid():\n";
 for (int i = 0; i < repeats; ++i) {
-	auto start = std::chrono::steady_clock::now();
+    auto start = std::chrono::steady_clock::now();
 
-	sleep::hybrid(sleep_duration_ms);
+    sleep::hybrid(sleep_duration_ms);
 
-	auto end = std::chrono::steady_clock::now();
-	std::cout << std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count() / 1e6 << " ms\n";
+    auto end = std::chrono::steady_clock::now();
+    std::cout << std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count() / 1e6 << " ms\n";
 }
 
 std::cout << "\nsleep::system():\n";
 for (int i = 0; i < repeats; ++i) {
-	auto start = std::chrono::steady_clock::now();
+    auto start = std::chrono::steady_clock::now();
 
-	sleep::system(sleep_duration_ms);
+    sleep::system(sleep_duration_ms);
 
-	auto end = std::chrono::steady_clock::now();
-	std::cout << std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count() / 1e6 << " ms\n";
+    auto end = std::chrono::steady_clock::now();
+    std::cout << std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count() / 1e6 << " ms\n";
 }
 ```
 

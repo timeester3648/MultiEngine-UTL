@@ -15,17 +15,17 @@ void set_ostream(std::ostream &new_ostream);
 // > sequence (\r) to render new states in the same spot
 class Percentage {
 public:
-	Percentage(
-		char done_char = '#',
-		char not_done_char = '.',
-		size_t bar_length = 30,
-		double update_rate = 1e-2,
-		bool show_time_estimate = true
-	);
-	
-	start();
-	set_progress(double percentage);
-	finish();
+    Percentage(
+        char done_char = '#',
+        char not_done_char = '.',
+        size_t bar_length = 30,
+        double update_rate = 1e-2,
+        bool show_time_estimate = true
+    );
+    
+    start();
+    set_progress(double percentage);
+    finish();
 };
 
 // 'Ruler' progressbar
@@ -33,13 +33,13 @@ public:
 // > terminal has no proper support for escape sequences
 class Ruler {
 public:
-	Percentage(
-		char done_char = '#'
-	);
-	
-	start();
-	set_progress(double percentage);
-	finish();
+    Percentage(
+        char done_char = '#'
+    );
+    
+    start();
+    set_progress(double percentage);
+    finish();
 };
 ```
 
@@ -119,10 +119,10 @@ std::cout << "\n- progressbar::Percentage -";
 
 bar.start();
 for (ms t(0); t <= time; t += tau) {
-	std::this_thread::sleep_for(tau); // simulate some work
-	const double percentage = double(t.count()) / time.count();
+    std::this_thread::sleep_for(tau); // simulate some work
+    const double percentage = double(t.count()) / time.count();
 
-	bar.set_progress(percentage);
+    bar.set_progress(percentage);
 }
 bar.finish();
 ```
@@ -148,10 +148,10 @@ auto ruler = progressbar::Ruler('#');
 
 ruler.start();
 for (ms t(0); t <= time; t += tau) {
-	std::this_thread::sleep_for(tau); // simulate some work
-	const double percentage = double(t.count()) / time.count();
+    std::this_thread::sleep_for(tau); // simulate some work
+    const double percentage = double(t.count()) / time.count();
 
-	ruler.set_progress(percentage);
+    ruler.set_progress(percentage);
 }
 ruler.finish();
 ```

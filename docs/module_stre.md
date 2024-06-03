@@ -33,10 +33,10 @@ std::string to_str(const Type &value);
 // Inline stringstream
 class InlineStream {
 public:
-	template<typename Type>
-	InlineStream& operator<<(const Type &arg);
-	
-	operator std::string() const;
+    template<typename Type>
+    InlineStream& operator<<(const Type &arg);
+    
+    operator std::string() const;
 }
 
 // Utils
@@ -133,12 +133,12 @@ Pads given integer with zeroes until total length reaches `total_size`. Usefull 
 using namespace utl;
 
 std::cout
-	<< std::boolalpha
-	<< "is_printable< int >                    = " << stre::is_printable<int>::value                    << "\n"
-	<< "is_iterable_through< std::list<int> >  = " << stre::is_iterable_through<std::list<int>>::value  << "\n"
-	<< "is_tuple_like< std::string >           = " << stre::is_tuple_like<std::string>::value           << "\n"
-	<< "is_string< const char* >               = " << stre::is_string<const char*>::value               << "\n"
-	<< "is_to_str_convertible< std::set<int> > = " << stre::is_to_str_convertible<std::set<int>>::value << "\n";
+    << std::boolalpha
+    << "is_printable< int >                    = " << stre::is_printable<int>::value                    << "\n"
+    << "is_iterable_through< std::list<int> >  = " << stre::is_iterable_through<std::list<int>>::value  << "\n"
+    << "is_tuple_like< std::string >           = " << stre::is_tuple_like<std::string>::value           << "\n"
+    << "is_string< const char* >               = " << stre::is_string<const char*>::value               << "\n"
+    << "is_to_str_convertible< std::set<int> > = " << stre::is_to_str_convertible<std::set<int>>::value << "\n";
 ```
 
 Output:
@@ -161,14 +161,14 @@ std::tuple<int, double, std::string> tup = { 2, 3.14, "text" };
 std::vector<std::vector<int>> vec_of_vecs = { {1, 2, 3}, {4, 5, 6}, {7, 8, 9} };
 std::unordered_map<std::string, int> map = { {"key_1", 1}, {"key_2", 2} };
 std::tuple<std::vector<bool>, std::vector<std::string>, std::vector<std::pair<int, int>>> tup_of_vecs =
-		{ { true, false, true }, { "text_1", "text_2" }, { {4, 5}, {7, 8} } };
+        { { true, false, true }, { "text_1", "text_2" }, { {4, 5}, {7, 8} } };
 
 // Print objects
 std::cout
-	<< "to_str(tuple):\n" << stre::to_str(tup) << "\n\n"
-	<< "to_str(vector of vectors):\n" << stre::to_str(vec_of_vecs) << "\n\n"
-	<< "to_str(unordered_map):\n" << stre::to_str(map) << "\n\n"
-	<< "to_str(tuple of vectors with bools, strings and pairs):\n" << stre::to_str(tup_of_vecs) << "\n";
+    << "to_str(tuple):\n" << stre::to_str(tup) << "\n\n"
+    << "to_str(vector of vectors):\n" << stre::to_str(vec_of_vecs) << "\n\n"
+    << "to_str(unordered_map):\n" << stre::to_str(map) << "\n\n"
+    << "to_str(tuple of vectors with bools, strings and pairs):\n" << stre::to_str(tup_of_vecs) << "\n";
 ```
 
 Output:
@@ -208,9 +208,9 @@ Value 3.14 is smaller than 6.28
 using namespace utl;
 
 std::cout
-	<< "repeat_symbol('h',  7) = "   << stre::repeat_symbol('h',   7) << "\n"
-	<< "repeat_string(\"xo-\", 5) = " << stre::repeat_string("xo-", 5) << "\n"
-	<< "pad_with_zeroes(15) = "      << stre::pad_with_zeroes(15)     << "\n";
+    << "repeat_symbol('h',  7) = "   << stre::repeat_symbol('h',   7) << "\n"
+    << "repeat_string(\"xo-\", 5) = " << stre::repeat_string("xo-", 5) << "\n"
+    << "pad_with_zeroes(15) = "      << stre::pad_with_zeroes(15)     << "\n";
 ```
 
 Output:

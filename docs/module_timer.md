@@ -78,9 +78,9 @@ timer::start();
 std::this_thread::sleep_for(std::chrono::milliseconds(3700));
 
 std::cout
-	<< "Time elapsed during sleep_for(3700 ms):\n"
-	<< timer::elapsed_string_sec() << "\n"
-	<< timer::elapsed_string_fullform() << "\n";
+    << "Time elapsed during sleep_for(3700 ms):\n"
+    << timer::elapsed_string_sec() << "\n"
+    << timer::elapsed_string_fullform() << "\n";
 ```
 
 Output:
