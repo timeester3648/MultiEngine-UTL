@@ -38,9 +38,10 @@ TEST_CASE("Matrix constructors & methods derived from storage::AbstractIndexable
     SUBCASE("Matrix 1D indexation") {
         constexpr std::size_t rows = 3, cols = 2, size = rows * cols;
         utl::storage::Matrix<int> matrix(rows, cols, 1);
+        const auto &cref = matrix;
         // Reading
         int sum = 0;
-        for (std::size_t idx = 0; idx < size; ++idx) sum += matrix[idx];
+        for (std::size_t idx = 0; idx < size; ++idx) sum += cref[idx];
         CHECK(sum == size);
         // Writing
         sum = 0;
@@ -52,11 +53,12 @@ TEST_CASE("Matrix constructors & methods derived from storage::AbstractIndexable
     SUBCASE("Matrix 2D indexation") {
         constexpr std::size_t rows = 3, cols = 4, size = rows * cols;
         utl::storage::Matrix<float> matrix(rows, cols, 0.5f);
+        const auto &cref = matrix;
         // Reading
         decltype(matrix)::value_type sum = 0.0f; // also tests the types
         for (std::size_t i = 0; i < rows; ++i)
             for (std::size_t j = 0; j < cols; ++j)
-                sum += matrix(i, j);
+                sum += cref(i, j);
         CHECK(sum == doctest::Approx(size * 0.5f));
         // Writing
         sum = 0.0f;
@@ -125,6 +127,15 @@ TEST_CASE("Matrix constructors & methods derived from storage::AbstractIndexable
             INFO("Caught exception: ", ex.what(), "\n");
         }
         CHECK(caught_appropriate_exception);
+    }
+    
+    SUBCASE("Matrix const & non-const overloads test") {
+        utl::storage::Matrix<int> matrix = { { 1, 2 }, { 3, 4 }, { 5, 6 } };
+        const auto &cref = matrix;
+        CHECK(matrix[0] == cref[0]);
+        CHECK(matrix(0, 1) == cref(0, 1));
+        CHECK(matrix.front() == cref.front());
+        CHECK(matrix.back() == cref.back());
     }
 }
 
@@ -368,5 +379,23 @@ TEST_CASE("Iterators behave as expected") {
         // Iterate in reverse
         matrix.for_each([&](int &element, std::size_t idx) { element = matrix.size() - 1 - idx; }); // [ N-1 .. 0 ]
         for (auto it = matrix.rbegin(); it != matrix.rend(); ++it) CHECK(it - matrix.rbegin() == *it); // true for how we filled matrix
+    }
+}
+
+
+TEST_CASE("Col-major ordering and transposition behave as expected") {
+    
+    SUBCASE("matrix.transposed() behaves as expected") {
+        utl::storage::Matrix<int> matrix(3, 5, 0);
+        matrix.for_each([](int& element, std::size_t i, std::size_t j) { element = 1000 * i + j; });
+        // Transpose
+        auto matrixT = matrix.transposed();
+        // Check sizes
+        CHECK(matrix.rows() == matrixT.cols());
+        CHECK(matrix.cols() == matrixT.rows());
+        // Check contents
+        for (std::size_t i = 0; i < matrix.rows(); ++i)
+            for (std::size_t j = 0; j < matrix.cols(); ++j)
+                CHECK(matrix(i, j) == matrixT(j, i));
     }
 }

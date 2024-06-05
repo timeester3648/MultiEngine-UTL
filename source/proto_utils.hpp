@@ -451,37 +451,37 @@ namespace utl::progressbar {
         char done_char;
         char not_done_char;
         bool show_time_estimate;
-
+        
         std::size_t length_total;   // full   bar length
         std::size_t length_current; // filled bar length
-
+        
         double last_update_percentage;
         double update_rate;
-
+        
         using Clock = std::chrono::steady_clock;
         using TimePoint = std::chrono::time_point<Clock>;
-
+        
         TimePoint timepoint_start; // used to estimate remaining time
         TimePoint timepoint_current;
-
+        
         int previous_string_length; // used to properly return the carriage when dealing with changed string size
-
+        
         void draw_progressbar(double percentage) {
             const auto displayed_percentage = this->update_rate * std::floor(percentage / this->update_rate);
                 // floor percentage to a closest multiple of 'update_rate' for nicer display
                 // since actual updates are only required to happen no more ofter than 'update_rate'
                 // and don't have to correspond to exact multiples of it
-
+            
             // Estimate remaining time (linearly) and format it min + sec
             const auto time_elapsed = this->timepoint_current - this->timepoint_start;
             const auto estimate_full = time_elapsed / percentage;
             const auto estimate_remaining = estimate_full - time_elapsed;
-
+                
             const auto estimate_remaining_sec = std::chrono::duration_cast<std::chrono::seconds>(estimate_remaining);
             
             const auto displayed_min = (estimate_remaining_sec / 60ll).count();
             const auto displayed_sec = (estimate_remaining_sec % 60ll).count();
-
+            
             const bool show_min = (displayed_min != 0);
             const bool show_sec = (displayed_sec != 0) && !show_min;
             const bool show_time = (estimate_remaining_sec.count() > 0);
@@ -493,10 +493,10 @@ namespace utl::progressbar {
             std::fill_n(std::ostreambuf_iterator<char>(ss), this->length_current, this->done_char);
             std::fill_n(std::ostreambuf_iterator<char>(ss), this->length_total - this->length_current, this->not_done_char);
             ss << "]";
-                
+            
             // Print percentage
             ss << " " << std::fixed << std::setprecision(2) << 100. * displayed_percentage << "%";
-
+            
             // Print time estimate
             if (this->show_time_estimate && show_time) {
                 ss << " (remaining:";
@@ -504,17 +504,17 @@ namespace utl::progressbar {
                 if (show_sec) ss << " " << displayed_sec << " sec";
                 ss << ")";
             }
-
+            
             const std::string bar_string = ss.str();
-
+            
             // Add spaces at the end to overwrite the previous string if it was longer that current
             const int current_string_length = static_cast<int>(bar_string.length());
             const int string_length_diff = this->previous_string_length - current_string_length;
-
+            
             if (string_length_diff > 0) {
                 std::fill_n(std::ostreambuf_iterator<char>(ss), string_length_diff, ' ');
             }
-
+            
             this->previous_string_length = current_string_length;
             
             // Return the carriage
@@ -525,7 +525,7 @@ namespace utl::progressbar {
                 // render render new lines over the last one. Otherwise every update produces a 
                 // bar on a new line, which looks worse but isn't critical for the purpose.
         }
-
+        
     public:
         Percentage(
             char done_char = '#',
@@ -544,14 +544,14 @@ namespace utl::progressbar {
             timepoint_start(Clock::now()),
             previous_string_length(static_cast<int>(bar_length) + sizeof("[] 100.00%"))
         {}
-
+        
         void start() {
             this->last_update_percentage = 0.;
             this->length_current = 0;
             this->timepoint_start = Clock::now();
             (*_output_stream) << "\n";
         }
-
+        
         void set_progress(double percentage) {
             if (percentage - this->last_update_percentage <= this->update_rate) return;
 
@@ -560,7 +560,7 @@ namespace utl::progressbar {
             this->timepoint_current = Clock::now();
             this->draw_progressbar(percentage);
         }
-
+        
         void finish() {
             this->last_update_percentage = 1.;
             this->length_current = this->length_total;
@@ -1253,8 +1253,8 @@ namespace utl::storage {
         _utl_storage_define_types
     public:
         // - Defining methods -
-        const_reference operator[](size_type) const;
-        size_type size() const;
+        // REQUIRED IN DERIVED: const_reference operator[](size_type) const;
+        // REQUIRED IN DERIVED: size_type size() const;
         
         // - Derived methods -
         const_reference front() const { return _final_this()->operator[](0); }
@@ -1300,10 +1300,18 @@ namespace utl::storage {
     template<_utl_storage_define_crtp_args>
     class _mutable_indexable_object : public _const_indexable_object<_mutable_indexable_object<Derived, Final, Types>, Final, Types> {
         _utl_storage_define_crtp_stuff
-        _utl_storage_define_types	
+        _utl_storage_define_types
+    private:
+        using _base_type  = _const_indexable_object<_mutable_indexable_object<Derived, Final, Types>, Final, Types>;
     public:
+        // Bring in shadowed const methods
+        // NOTE: non-const overload in derived shadows inherited const unless specified with 'using'
+        using _base_type::front;
+        using _base_type::back;
+        using _base_type::for_each;
+        
         // - Defining methods -
-        reference operator[](size_type);
+        // REQUIRED IN DERIVED: reference operator[](size_type);
         
         // - Derived methods -
         reference front() { return _final_this()->operator[](0); }
@@ -1360,6 +1368,9 @@ namespace utl::storage {
         }
         
     public:
+        // Bring in shadowed by name methods
+        using _base_type::for_each; // required so we don't override existing definitions with a new overload
+        
         // - Getters -
         size_type rows() const noexcept { return _final_this()->_rows; }
         size_type cols() const noexcept { return _final_this()->_cols; }
@@ -1384,8 +1395,6 @@ namespace utl::storage {
         }
         
         // - Methods -	
-        using _base_type::for_each; // Required so we don't override existing definitions with a new overload
-        
         template<class FuncType, _enable_if_signature<FuncType, void(const value_type&, std::size_t, std::size_t)> = true>
         const Final& for_each(FuncType func, _for_each_ij_tag = _for_each_ij_tag::DUMMY) const {
             // A "hack" with a dummy argument that prevents name based lookup of this function from shadowing base class methods.
@@ -1409,21 +1418,18 @@ namespace utl::storage {
         using _main_base_type  = _const_matrixlike_object<_mutable_matrixlike_object<Derived, Final, Types, bound_checks>, Final, Types, bound_checks>;
         using _other_base_type = _mutable_indexable_object<_mutable_matrixlike_object<Derived, Final, Types, bound_checks>, Final, Types>;
     public:
-        // Resolve ambiguous .size() (provided by both base classes, we want the matrix one)
-        using _main_base_type::size;
-        
-        // Const & non-const functions with the same name have to be explicitly brought into the class,
-        // otherwise compiler considers them ambiguous during multiple inheritance
-        using _main_base_type::front;
-        using _other_base_type::front;
-        using _main_base_type::back;
-        using _other_base_type::back;
+        // Bring in shadowed const methods
         using _main_base_type::operator[];
-        using _other_base_type::operator[];
-        using _main_base_type::for_each;
-        using _other_base_type::for_each;
+        using _main_base_type::operator();
         using _main_base_type::data;
-        // mutable .data() is declared here
+        using _main_base_type::for_each;
+        
+        // Bring in shadowed by name methods
+        using _other_base_type::for_each;
+        
+        // Resolve ambiguous .front(), .back() (provided by both base classes, we want the mutable indexable versions)
+        using _other_base_type::front;
+        using _other_base_type::back;
         
         // Resolve ambiguous methods that are same in both base classes, but compiler isn't smart enough to realize that
         using _main_base_type::to_std_vector;
@@ -1493,6 +1499,7 @@ namespace utl::storage {
         using Types = _types<T>;
         _utl_storage_define_types
     public:
+    
         // - Data members -
         _observer_ptr<value_type> _data;
         size_type                 _rows;
@@ -1587,7 +1594,13 @@ namespace utl::storage {
         _mutable_matrix_view<T, true>         get_checked_view()   { return *this; }
         _mutable_matrix_view<T, true>         get_unchecked_view() { return *this; }
         _mutable_matrix_view<T, bound_checks> get_view()           { return *this; } // same bound checking as parent matrix
-            // in generic case users can construct arbitrary view themselves, those are merely shortcuts to reduce boilerplate 
+            // in generic case users can construct arbitrary view themselves, those are merely shortcuts to reduce boilerplate
+            
+        _matrix transposed() const {
+            _matrix res(this->cols(), this->rows());
+            this->for_each([&](const value_type &element, size_type i, size_type j) { res(j, i) = element; });        
+            return res;
+        }
     };
     
     // - BoundChecking enum -
@@ -2050,12 +2063,6 @@ namespace utl::table {
         for (const auto &col : _columns) (*_output_stream) << std::string(static_cast<size_t>(col.width), '-') << "|";
         (*_output_stream) << "\n";
     }
-
-    // NOTE:
-    // Perhaps add method:
-    // template<class Type...>
-    // build_from_data(std::initialize_list<std::string>{ labels }, std::vector<Type> data...)
-
 }
 
 // ========= header guard end =========
