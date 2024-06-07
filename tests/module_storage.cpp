@@ -17,7 +17,6 @@
 // _____________ TEST IMPLEMENTATION _____________
 
 TEST_CASE("Matrix constructors & methods derived from storage::AbstractIndexableObject behave as expected") {
-    
         
     SUBCASE("Matrix default-initialization is correct") {
         utl::storage::Matrix<int> matrix(12, 5);
@@ -293,7 +292,10 @@ TEST_CASE("Matrix views behave as expected") {
         // Create view from const reference
         auto view = cref.get_const_view();
         // Basic assumptions
-        CHECK(view.empty() == false);
+        CHECK(view.rows() == matrix.rows());
+        CHECK(view.cols() == matrix.cols());
+        CHECK(view.size() == matrix.size());
+        CHECK(view.data() == matrix.data());
         // Try abusing function chains
         int sum = 1;
         CHECK(
