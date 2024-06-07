@@ -1231,6 +1231,7 @@ public:                                                                         
                                                                                                                        \
 private:                                                                                                               \
     static_assert(true)
+// static_assert(true) at the end makes macro require ';' without generating any code
 
 // Accepts:
 //    > value_type of the container

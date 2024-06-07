@@ -103,12 +103,18 @@ Secondary design goals also include:
 
 ## Requirements
 
-* Requires **C++17** support;
-* Some modules require POSIX-compliant system (Linux) or Windows.
+* Requires **C++17** support
+* Some modules require POSIX-compliant system (Linux) or Windows
 
-## Dependencies
+## Used third-party tools
 
-* Per-module unit tests depend on [doctest](https://github.com/doctest/doctest) framework, which is embedded in a repo (no additional installation required). **This does not concern distributed implementation**.
+While the library itself consists of a single header, it was built and tested using a number of third-party tools and libraries, some of which are embedded in a repo.
+
+| Tool | Version | Used for |
+| - | - | - |
+| [clang-format](https://clang.llvm.org/docs/ClangFormat.html) | **v.14.0.0** | Automatic code formatting |
+| [CMake](https://cmake.org) | **v.3.2.11** | Build and test automation |
+| [doctest](https://github.com/doctest/doctest) | **v.2.4.11** | Unit testing |
 
 ## License
 

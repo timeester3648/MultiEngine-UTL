@@ -18,3 +18,6 @@
 .cache/
 build/
 temp/
+
+# Ignore benhmarks until they are properly implemented
+benchmarks/

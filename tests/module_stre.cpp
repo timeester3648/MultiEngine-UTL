@@ -3,7 +3,7 @@
 #include <random>
 #include <string>
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
-#include "doctest.h"
+#include "thirdparty/doctest.h"
 
 #define UTL_PICK_MODULES
 #define UTLMODULE_STRE
