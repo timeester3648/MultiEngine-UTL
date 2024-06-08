@@ -1117,6 +1117,9 @@ std::string _stringify(const Args&... args) {
     return ss.str();
 }
 
+enum class BoundChecking { DISABLED, ENABLED };
+enum class Layout { ROW_MAJOR, COL_MAJOR };
+
 // - Iterator template - (reduces code duplication for const & non-const variants)
 // Uses 'operator[]' of 'ParentPointer' for all logic, thus allowing arbitrary containers that
 // don't have to be contiguous or even ordered in memory
@@ -1255,15 +1258,17 @@ private:                                                                        
 // Requires:
 //    > const_reference operator[](size_type idx) const;
 //    > size_type size() const;
-//    > bool bound_checks;  // member or template arg
+//    > BoundChecking checking;  // member or template arg
 #define _utl_mixin_1d_const_indexable                                                                                  \
-public:                                                                                                                \
+private:                                                                                                               \
     void _bound_check_idx(size_type idx) const {                                                                       \
-        const size_type idx_bound = this->_rows * this->_cols;                                                         \
-        if (idx >= idx_bound)                                                                                          \
+        if (idx >= this->size())                                                                                       \
             throw std::out_of_range(                                                                                   \
-                _stringify("idx (which is ", idx, ") >= this->size() (which is ", idx_bound, ")"));                    \
+                _stringify("idx (which is ", idx, ") >= this->size() (which is ", this->size(), ")"));                 \
     }                                                                                                                  \
+                                                                                                                       \
+public:                                                                                                                \
+    static constexpr BoundChecking bound_checking = checking;                                                          \
                                                                                                                        \
     const_reference front() const { return this->operator[](0); }                                                      \
                                                                                                                        \
@@ -1294,8 +1299,14 @@ public:                                                                         
     const_iterator cbegin() const { return const_iterator(this, 0); }                                                  \
     const_iterator cend() const { return const_iterator(this, this->size()); }                                         \
                                                                                                                        \
+    const_iterator begin() const { return this->cbegin(); }                                                            \
+    const_iterator end() const { return this->cend(); }                                                                \
+                                                                                                                       \
     const_reverse_iterator crbegin() const { return const_reverse_iterator(this->cend()); }                            \
     const_reverse_iterator crend() const { return const_reverse_iterator(this->cbegin()); }                            \
+                                                                                                                       \
+    const_reverse_iterator rbegin() const { return this->crbegin(); }                                                  \
+    const_reverse_iterator rend() const { return this->crend(); }                                                      \
                                                                                                                        \
 private:                                                                                                               \
     static_assert(true)
@@ -1340,22 +1351,17 @@ private:                                                                        
 //    > const_reference operator()(size_type i, size_type j) const;
 //    > size_type rows() const;
 //    > size_type cols() const;
-//    > bool bound_checks;  // member or template arg
+//    > BoundChecking checking; // member or template arg
 #define _utl_mixin_2d_const_indexable                                                                                  \
-public:                                                                                                                \
+private:                                                                                                               \
     void _bound_check_ij(size_type i, size_type j) const {                                                             \
-        const size_type i_bound = this->rows(), j_bound = this->cols();                                                \
-        if (i >= i_bound)                                                                                              \
-            throw std::out_of_range(_stringify("i (which is ", i, ") >= this->rows() (which is ", i_bound, ")"));      \
-        if (j >= j_bound)                                                                                              \
-            throw std::out_of_range(_stringify("j (which is ", j, ") >= this->cols() (which is ", j_bound, ")"));      \
+        if (i >= this->rows())                                                                                         \
+            throw std::out_of_range(_stringify("i (which is ", i, ") >= this->rows() (which is ", this->rows(), ")")); \
+        else if (j >= this->cols())                                                                                    \
+            throw std::out_of_range(_stringify("j (which is ", j, ") >= this->cols() (which is ", this->cols(), ")")); \
     }                                                                                                                  \
                                                                                                                        \
-    size_type get_flat_index_of(size_type i, size_type j) const {                                                      \
-        if constexpr (bound_checks) this->_bound_check_ij(i, j);                                                       \
-        return i * this->cols() + j;                                                                                   \
-    }                                                                                                                  \
-                                                                                                                       \
+public:                                                                                                                \
     template <class FuncType,                                                                                          \
               _enable_if_signature<FuncType, void(const value_type&, std::size_t, std::size_t)> = true>                \
     const self& for_each(FuncType func, _for_each_ij_tag = _for_each_ij_tag::DUMMY) const {                            \
@@ -1386,11 +1392,45 @@ public:                                                                         
 private:                                                                                                               \
     static_assert(true)
 
+// Requires:
+//    > const_reference operator()(size_type i, size_type j) const;
+//    > size_type rows() const;
+//    > size_type cols() const;
+//    > BoundChecking checking; // member or template arg
+//    > Layout layout;          // member or template arg
+#define _utl_mixin_2d_contiguous                                                                                       \
+private:                                                                                                               \
+    size_type _unchecked_get_flat_index_of(size_type i, size_type j) const {                                           \
+        if constexpr (layout == Layout::ROW_MAJOR) return i * this->cols() + j;                                        \
+        else return j * this->rows() + i;                                                                              \
+    }                                                                                                                  \
+                                                                                                                       \
+public:                                                                                                                \
+    static constexpr Layout memory_layout = layout;                                                                    \
+                                                                                                                       \
+    size_type get_flat_index_of(size_type i, size_type j) const {                                                      \
+        if constexpr (checking == BoundChecking::ENABLED) this->_bound_check_ij(i, j);                                 \
+        return _unchecked_get_flat_index_of(i, j);                                                                     \
+    }                                                                                                                  \
+                                                                                                                       \
+    size_type extent_major() const noexcept {                                                                          \
+        if constexpr (layout == Layout::ROW_MAJOR) return this->rows();                                                \
+        else return this->cols();                                                                                      \
+    }                                                                                                                  \
+                                                                                                                       \
+    size_type extent_minor() const noexcept {                                                                          \
+        if constexpr (layout == Layout::ROW_MAJOR) return this->cols();                                                \
+        else return this->rows();                                                                                      \
+    }                                                                                                                  \
+                                                                                                                       \
+private:                                                                                                               \
+    static_assert(true)
+
 // - Const Matrix View impl -
-template <class T, bool bound_checks>
+template <class T, BoundChecking checking, Layout layout>
 class _matrix_impl;
 
-template <class T, bool bound_checks>
+template <class T, BoundChecking checking, Layout layout>
 class _matrix_const_view_impl {
     _utl_define_prerequisites(_matrix_const_view_impl);
     _utl_define_types(T);
@@ -1399,6 +1439,7 @@ class _matrix_const_view_impl {
     _utl_mixin_1d_mutable_indexable;
     _utl_mixin_2d_const_indexable;
     _utl_mixin_2d_mutable_indexable;
+    _utl_mixin_2d_contiguous;
 
 public:
     // - Data members -
@@ -1409,9 +1450,9 @@ public:
 public:
     // - Constructors -
     // From matrix ctor
-    template <bool arg_bound_checks>
-    _matrix_const_view_impl(const _matrix_impl<T, arg_bound_checks>& matrix)
-        : _data(matrix.data()), _rows(matrix._rows), _cols(matrix._cols) {}
+    template <BoundChecking arg_checking>
+    _matrix_const_view_impl(const _matrix_impl<T, arg_checking, layout>& matrix)
+        : _data(matrix.data()), _rows(matrix.rows()), _cols(matrix.cols()) {}
 
     // From raw data ctor
     _matrix_const_view_impl(size_type rows, size_type cols, const_pointer data_ptr)
@@ -1425,18 +1466,18 @@ public:
 
     // - Element access -
     const_reference operator[](size_type idx) const {
-        if constexpr (bound_checks) this->_bound_check_idx(idx);
+        if constexpr (checking == BoundChecking::ENABLED) this->_bound_check_idx(idx);
         return this->data()[idx];
     }
 
     const_reference operator()(size_type i, size_type j) const {
-        if constexpr (bound_checks) this->_bound_check_ij(i, j);
+        if constexpr (checking == BoundChecking::ENABLED) this->_bound_check_ij(i, j);
         return this->operator[](this->get_flat_index_of(i, j));
     }
 };
 
 // - Matrix View impl -
-template <class T, bool bound_checks>
+template <class T, BoundChecking checking, Layout layout>
 class _matrix_view_impl {
     _utl_define_prerequisites(_matrix_view_impl);
     _utl_define_types(T);
@@ -1445,6 +1486,7 @@ class _matrix_view_impl {
     _utl_mixin_1d_mutable_indexable;
     _utl_mixin_2d_const_indexable;
     _utl_mixin_2d_mutable_indexable;
+    _utl_mixin_2d_contiguous;
 
 public:
     // - Data members -
@@ -1455,9 +1497,9 @@ public:
 public:
     // - Constructors -
     // From matrix ctor
-    template <bool arg_bound_checks>
-    _matrix_view_impl(_matrix_impl<T, arg_bound_checks>& matrix)
-        : _data(matrix.data()), _rows(matrix._rows), _cols(matrix._cols) {}
+    template <BoundChecking arg_checking>
+    _matrix_view_impl(_matrix_impl<T, arg_checking, layout>& matrix)
+        : _data(matrix.data()), _rows(matrix.rows()), _cols(matrix.cols()) {}
 
     // From raw data ctor
     _matrix_view_impl(size_type rows, size_type cols, pointer data_ptr) : _data(data_ptr), _rows(rows), _cols(cols) {}
@@ -1471,28 +1513,28 @@ public:
 
     // - Element access -
     const_reference operator[](size_type idx) const {
-        if constexpr (bound_checks) this->_bound_check_idx(idx);
+        if constexpr (checking == BoundChecking::ENABLED) this->_bound_check_idx(idx);
         return this->data()[idx];
     }
 
     reference operator[](size_type idx) {
-        if constexpr (bound_checks) this->_bound_check_idx(idx);
+        if constexpr (checking == BoundChecking::ENABLED) this->_bound_check_idx(idx);
         return this->data()[idx];
     }
 
     const_reference operator()(size_type i, size_type j) const {
-        if constexpr (bound_checks) this->_bound_check_ij(i, j);
-        return this->operator[](this->get_flat_index_of(i, j));
+        if constexpr (checking == BoundChecking::ENABLED) this->_bound_check_ij(i, j);
+        return this->data()[this->get_flat_index_of(i, j)];
     }
 
     reference operator()(size_type i, size_type j) {
-        if constexpr (bound_checks) this->_bound_check_ij(i, j);
-        return this->operator[](this->get_flat_index_of(i, j));
+        if constexpr (checking == BoundChecking::ENABLED) this->_bound_check_ij(i, j);
+        return this->data()[this->get_flat_index_of(i, j)];
     }
 };
 
 // - Matrix impl -
-template <class T, bool bound_checks>
+template <class T, BoundChecking checking, Layout layout>
 class _matrix_impl {
     _utl_define_prerequisites(_matrix_impl);
     _utl_define_types(T);
@@ -1501,15 +1543,23 @@ class _matrix_impl {
     _utl_mixin_1d_mutable_indexable;
     _utl_mixin_2d_const_indexable;
     _utl_mixin_2d_mutable_indexable;
-
-    template <class other_T, bool other_bound_checks>
-    friend class _matrix_impl;
+    _utl_mixin_2d_contiguous;
 
 public: // NOTE: Ideally should be private with other configs of the same class being friends
     // - Data members -
     std::unique_ptr<value_type[]> _data; // = nullprt by default
     size_type                     _rows = 0;
     size_type                     _cols = 0;
+
+    // TEMP:
+    std::string dump() const {
+        std::stringstream ss;
+        for (size_type i = 0; i < this->rows(); ++i)
+            for (size_type j = 0; j < this->cols(); ++j)
+                ss << "(" << i << ", " << j << ") ~ [" << this->get_flat_index_of(i, j) << "] = " << this->operator()(i, j) << "\n";
+        return ss.str();
+    }
+    // TEMP:
 
 public:
     // - Constructors -
@@ -1518,31 +1568,38 @@ public:
 
     // Copy ctor
     _matrix_impl(const _matrix_impl& other) noexcept : _rows(other.rows()), _cols(other.cols()) {
-        for (size_type idx = 0; idx < this->size(); ++idx) this->_data[idx] = other._data[idx];
+        for (size_type idx = 0; idx < this->size(); ++idx) this->operator[](idx) = other[idx];
     }
 
-    template <bool arg_bound_checks>
-    explicit _matrix_impl(
-        const _matrix_impl<T, arg_bound_checks>& other) noexcept // conversion over config boundaries has to be explicit
+    template <BoundChecking arg_checking, Layout arg_layout>
+    explicit _matrix_impl(const _matrix_impl<T, arg_checking, arg_layout>&
+                              other) noexcept
         : _rows(other.rows()), _cols(other.cols()) {
-        for (size_type idx = 0; idx < this->size(); ++idx) this->_data[idx] = other._data[idx];
+        this->_data = make_unique_ptr_array<value_type>(this->size());
+        for (size_type i = 0; i < this->rows(); ++i)
+            for (size_type j = 0; j < this->cols(); ++j)
+                this->operator()(i, j) = other(i, j);
+        // conversion over config boundaries has to be explicit
+        // different layout of another matrix is handled by 'operator()'
     }
 
     // Move ctor
     _matrix_impl(_matrix_impl&& other) noexcept = default;
 
-    template <bool arg_bound_checks>
+    template <BoundChecking arg_checking>
     explicit _matrix_impl(
-        _matrix_impl<T, arg_bound_checks>&& other) noexcept // conversion over config boundaries has to be explicit
+        _matrix_impl<T, arg_checking, layout>&& other) noexcept
         : _rows(other.rows()), _cols(other.cols()) {
         this->_data = std::move(other._data);
+        // conversion over config boundaries has to be explicit
+        // matrix with a different layout can't be properly moved
     }
 
     // Init-with-size ctor
     explicit _matrix_impl(size_type rows, size_type cols, const_reference value = T()) noexcept
         : _rows(rows), _cols(cols) {
         this->_data = make_unique_ptr_array<value_type>(this->size());
-        for (size_type idx = 0; idx < this->size(); ++idx) this->_data[idx] = value;
+        for (size_type idx = 0; idx < this->size(); ++idx) this->operator[](idx) = value;
     }
 
     // Init-list ctor
@@ -1551,15 +1608,14 @@ public:
         this->_cols = (*init.begin()).size();
         this->_data = make_unique_ptr_array<value_type>(this->size());
 
-        std::size_t idx = 0;
-        for (auto i = init.begin(); i < init.end(); ++i) {
-            auto row_begin = (*i).begin();
-            auto row_end   = (*i).end();
-            // Throw if argument dimensions are inappropriate (cols have different dimensions)
-            if (row_end - row_begin != this->_cols)
+        // Check dimensions (throw if cols have different dimensions)
+        for (auto row_it = init.begin(); row_it < init.end(); ++row_it)
+            if ((*row_it).end() - (*row_it).begin() != this->_cols)
                 throw std::invalid_argument("Initializer list dimensions don't match.");
-            for (auto j = row_begin; j < row_end; ++j) this->_data[idx++] = *j;
-        }
+
+        // Copy elements
+        for (size_type i = 0; i < this->rows(); ++i)
+            for (size_type j = 0; j < this->cols(); ++j) this->operator()(i, j) = (init.begin()[i]).begin()[j];
     }
 
     // - Assignment -
@@ -1576,35 +1632,35 @@ public:
 
     // - Element access -
     const_reference operator[](size_type idx) const {
-        if constexpr (bound_checks) this->_bound_check_idx(idx);
+        if constexpr (checking == BoundChecking::ENABLED) this->_bound_check_idx(idx);
         return this->data()[idx];
     }
 
     reference operator[](size_type idx) {
-        if constexpr (bound_checks) this->_bound_check_idx(idx);
+        if constexpr (checking == BoundChecking::ENABLED) this->_bound_check_idx(idx);
         return this->data()[idx];
     }
 
     const_reference operator()(size_type i, size_type j) const {
-        if constexpr (bound_checks) this->_bound_check_ij(i, j);
-        return this->operator[](this->get_flat_index_of(i, j));
+        if constexpr (checking == BoundChecking::ENABLED) this->_bound_check_ij(i, j);
+        return this->data()[this->get_flat_index_of(i, j)]; // NOTE: Use unchecked flat index
     }
 
     reference operator()(size_type i, size_type j) {
-        if constexpr (bound_checks) this->_bound_check_ij(i, j);
-        return this->operator[](this->get_flat_index_of(i, j));
+        if constexpr (checking == BoundChecking::ENABLED) this->_bound_check_ij(i, j);
+        return this->data()[this->get_flat_index_of(i, j)]; // NOTE: Use unchecked flat index
     }
 
     // - View getters -
-    _matrix_const_view_impl<T, true>         get_const_checked_view() const { return *this; }
-    _matrix_const_view_impl<T, false>        get_const_unchecked_view() const { return *this; }
-    _matrix_const_view_impl<T, bound_checks> get_const_view() const {
+    _matrix_const_view_impl<T, BoundChecking::ENABLED, layout>  get_const_checked_view() const { return *this; }
+    _matrix_const_view_impl<T, BoundChecking::DISABLED, layout> get_const_unchecked_view() const { return *this; }
+    _matrix_const_view_impl<T, checking, layout>                get_const_view() const {
         return *this;
     } // same bound checking as parent matrix
 
-    _matrix_view_impl<T, true>         get_checked_view() { return *this; }
-    _matrix_view_impl<T, true>         get_unchecked_view() { return *this; }
-    _matrix_view_impl<T, bound_checks> get_view() { return *this; } // same bound checking as parent matrix
+    _matrix_view_impl<T, BoundChecking::ENABLED, layout>  get_checked_view() { return *this; }
+    _matrix_view_impl<T, BoundChecking::DISABLED, layout> get_unchecked_view() { return *this; }
+    _matrix_view_impl<T, checking, layout> get_view() { return *this; } // same bound checking as parent matrix
     // in generic case users can construct arbitrary view themselves, those are merely shortcuts to reduce boilerplate
 
     _matrix_impl transposed() const {
@@ -1615,18 +1671,14 @@ public:
 };
 
 // - Implementation wrappers -
-enum class BoundChecking { DISABLED, ENABLED };
+template <class T, BoundChecking bound_checking = BoundChecking::DISABLED, Layout memory_layout = Layout::ROW_MAJOR>
+using ConstMatrixView = _matrix_const_view_impl<T, bound_checking, memory_layout>;
 
-template <class T, BoundChecking bound_checking_config = BoundChecking::DISABLED>
-using ConstMatrixView = const _matrix_const_view_impl<T, (bound_checking_config == BoundChecking::ENABLED)>;
-// by accepting enum as an argument we ensure proper type safety while forwarding
-// a bool that is less verbose to handle inside the implementation
+template <class T, BoundChecking bound_checking = BoundChecking::DISABLED, Layout memory_layout = Layout::ROW_MAJOR>
+using MatrixView = _matrix_view_impl<T, bound_checking, memory_layout>;
 
-template <class T, BoundChecking bound_checking_config = BoundChecking::DISABLED>
-using MatrixView = _matrix_view_impl<T, (bound_checking_config == BoundChecking::ENABLED)>;
-
-template <class T, BoundChecking bound_checking_config = BoundChecking::DISABLED>
-using Matrix = _matrix_impl<T, (bound_checking_config == BoundChecking::ENABLED)>;
+template <class T, BoundChecking bound_checking = BoundChecking::DISABLED, Layout memory_layout = Layout::ROW_MAJOR>
+using Matrix = _matrix_impl<T, bound_checking, memory_layout>;
 
 // Undef codegen macros
 #undef _utl_define_prerequisites
@@ -1635,6 +1687,7 @@ using Matrix = _matrix_impl<T, (bound_checking_config == BoundChecking::ENABLED)
 #undef _utl_mixin_1d_mutable_indexable
 #undef _utl_mixin_2d_const_indexable
 #undef _utl_mixin_2d_mutable_indexable
+#undef _utl_mixin_2d_contiguous
 
 } // namespace utl::storage
 

@@ -32,8 +32,9 @@ directory_tests="${directory_build}tests/"
 
 path_executable="${directory_build}source/run"
 
-compiler="g++"
+compiler="g++" # clang++-11
 test_flags="--rerun-failed --output-on-failure --timeout 60"
+build_jobs="6"
 
 # -----------------------
 # ------ Functions ------
@@ -63,7 +64,7 @@ cmake_config() {
 
 cmake_build() {
     check_command_exists "cmake"
-    cmake --build $directory_build
+    cmake --build $directory_build --parallel $build_jobs
 }
 
 cmake_test() {
