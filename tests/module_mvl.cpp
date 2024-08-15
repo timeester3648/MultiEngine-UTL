@@ -1,6 +1,8 @@
 // __________ TEST FRAMEWORK & LIBRARY  __________
 
 #include <numeric>
+#include <pstl/glue_execution_defs.h>
+#include <type_traits>
 #include <vector>
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include "thirdparty/doctest.h"
@@ -12,17 +14,80 @@
 // ________________ TEST INCLUDES ________________
 
 #include <algorithm>
+#include <array>
 #include <stdexcept>
+#include <execution>
 
 // _____________ TEST IMPLEMENTATION _____________
 
-namespace st = utl::storage;
+using namespace utl;
+
+TEST_CASE("Strided view sanity test") {
+    std::vector<int> vec = {1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3,
+                                        1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3};
+    
+    constexpr size_t rows = 3;
+    constexpr size_t cols = 4;
+    constexpr size_t size = 12;
+    constexpr size_t chunk = 3; // width of a repeating chink
+    
+    // Unit stride
+    mvl::StridedMatrixView<int> trivial_view(rows, cols * chunk, 0, 1, vec.data());
+    
+    CHECK(trivial_view[0] == 1);
+    CHECK(trivial_view[1] == 2);
+    CHECK(trivial_view[2] == 3);
+    
+    CHECK(trivial_view(0, 0) == 1);
+    CHECK(trivial_view(0, 1) == 2);
+    CHECK(trivial_view(0, 2) == 3);
+    CHECK(trivial_view(2, 0) == 1);
+    CHECK(trivial_view(2, 1) == 2);
+    CHECK(trivial_view(2, 2) == 3);
+    
+    // Non-unit col stride
+    mvl::StridedMatrixView<int> view_plus0(rows, cols, 0, chunk, vec.data() + 0);
+    mvl::StridedMatrixView<int> view_plus1(rows, cols, 0, chunk, vec.data() + 1);
+    mvl::StridedMatrixView<int> view_plus2(rows, cols, 0, chunk, vec.data() + 2);
+    
+    mvl::Matrix<int> expected_2 = {
+        { 3, 3, 3, 3 },
+        { 3, 3, 3, 3 },
+        { 3, 3, 3, 3 }
+    };
+    
+    CHECK(view_plus0.sum() == size * 1);
+    CHECK(view_plus1.sum() == size * 2);
+    CHECK(view_plus2.sum() == size * 3);
+    
+    CHECK(view_plus2.true_for_any([&](const int &e, size_t i, size_t j) { return e == 3; }));
+    CHECK(view_plus2.true_for_all([&](const int &e, size_t i, size_t j) { return e != 2; }));
+    
+    CHECK(view_plus2.compare_contents(expected_2));
+    
+    for (const auto &val : view_plus2.to_std_vector()) { CHECK(val == 3); }
+    
+    CHECK(view_plus2.contains(2) == false);
+    CHECK(view_plus2.contains(3) == true);
+    
+    CHECK(view_plus2.count(2) == 0);
+    CHECK(view_plus2.count(3) == size);
+    
+    // Non-zero row stride
+    mvl::StridedMatrixView<int> view_with_row_stride(2, cols, cols * chunk, chunk, vec.data() + 2);
+    
+    for (const auto &val : view_with_row_stride) { CHECK(val == 3); }
+    
+    struct Val { int x; };
+    mvl::Matrix<Val> mat;
+    mat.stable_sort([](const Val &l, const Val &r) -> bool { return l.x < r.x; });
+}
 
 TEST_CASE("Matrix constructors & methods derived from storage::AbstractIndexableObject behave as expected") {
 
     SUBCASE("Matrix default-initialization is correct") {
-        st::Matrix<int> matrix(12, 5);
-        bool            all_elements_are_zero = true;
+        mvl::Matrix<int> matrix(12, 5);
+        bool             all_elements_are_zero = true;
         matrix.for_each([&](int& element) {
             if (element != 0) all_elements_are_zero = false;
         });
@@ -31,8 +96,8 @@ TEST_CASE("Matrix constructors & methods derived from storage::AbstractIndexable
 
 
     SUBCASE("Matrix value-initialization is correct") {
-        st::Matrix<std::string> matrix(12, 5, "xo");
-        bool                    all_elements_are_correct = true;
+        mvl::Matrix<std::string> matrix(12, 5, "xo");
+        bool                     all_elements_are_correct = true;
         matrix.for_each([&](std::string& element) {
             if (element != "xo") all_elements_are_correct = false;
         });
@@ -42,7 +107,7 @@ TEST_CASE("Matrix constructors & methods derived from storage::AbstractIndexable
 
     SUBCASE("Matrix 1D indexation") {
         constexpr std::size_t rows = 3, cols = 2, size = rows * cols;
-        st::Matrix<int>       matrix(rows, cols, 1);
+        mvl::Matrix<int>      matrix(rows, cols, 1);
         const auto&           cref = matrix;
         // Reading
         int                   sum  = 0;
@@ -57,7 +122,7 @@ TEST_CASE("Matrix constructors & methods derived from storage::AbstractIndexable
 
     SUBCASE("Matrix 2D indexation") {
         constexpr std::size_t        rows = 3, cols = 4, size = rows * cols;
-        st::Matrix<float>            matrix(rows, cols, 0.5f);
+        mvl::Matrix<float>           matrix(rows, cols, 0.5f);
         const auto&                  cref = matrix;
         // Reading
         decltype(matrix)::value_type sum  = 0.0f; // also tests the types
@@ -74,7 +139,7 @@ TEST_CASE("Matrix constructors & methods derived from storage::AbstractIndexable
 
     SUBCASE("Matrix .fill() + .for_each() + .size() test") {
         // .fill() matrix with 1's and check that their .for_each()-computed sum equals .size()
-        auto matrix = std::move(st::Matrix<int>(15, 7).fill(1));
+        auto matrix = std::move(mvl::Matrix<int>(15, 7).fill(1));
         // triggers copy without std::move()
         // By doing this with 'auto' we test .fill() CRTP return type and Matrix move operator=
         int  sum    = 0;
@@ -85,14 +150,14 @@ TEST_CASE("Matrix constructors & methods derived from storage::AbstractIndexable
 
     SUBCASE("Matrix .for_each() (with idx) test") {
         // Fill matrix elements with their corresponding 1D indexes and check that it is correct
-        auto matrix = st::Matrix<int>(3, 5);
+        auto matrix = mvl::Matrix<int>(3, 5);
         matrix.for_each([](int& element, std::size_t idx) { element = idx; });
         for (std::size_t i = 0; i < matrix.size(); ++i) CHECK(matrix[i] == i);
     }
 
     SUBCASE("Matrix .for_each() (with i, j) test") {
         // Fill matrix elements with their corresponding 1D indexes and check that it is correct
-        auto matrix = st::Matrix<int>(3, 5);
+        auto matrix = mvl::Matrix<int>(3, 5);
         matrix.for_each([](int& element, std::size_t i, std::size_t j) { element = 10 * i + j; });
         for (std::size_t i = 0; i < matrix.rows(); ++i)
             for (std::size_t j = 0; j < matrix.cols(); ++j) CHECK(matrix(i, j) == (10 * i + j));
@@ -100,7 +165,7 @@ TEST_CASE("Matrix constructors & methods derived from storage::AbstractIndexable
 
     SUBCASE("Matrix .front() and .back() test") {
         // Fill matrix elements with their corresponding 1D indexes and check that it is correct
-        st::Matrix<char> matrix(4, 13);
+        mvl::Matrix<char> matrix(4, 13);
         matrix.front() = 'F';
         matrix.back()  = 'B';
         CHECK(matrix[0] == matrix.front());
@@ -110,7 +175,7 @@ TEST_CASE("Matrix constructors & methods derived from storage::AbstractIndexable
     }
 
     SUBCASE("Matrix .to_std_vector() + initializer_list constructor test") {
-        st::Matrix<char> matrix = {
+        mvl::Matrix<char> matrix = {
             {'a', 'b'},
             {'c', 'd'}
         };
@@ -122,7 +187,7 @@ TEST_CASE("Matrix constructors & methods derived from storage::AbstractIndexable
     SUBCASE("Matrix initializer_list constructor (throw case) test") {
         bool caught_appropriate_exception = false;
         try {
-            st::Matrix<int> matrix({
+            mvl::Matrix<int> matrix({
                 {1, 2, 3, 4},
                 {5, 6, 7}, // missing an element
                 {8, 9, 10, 11}
@@ -135,7 +200,7 @@ TEST_CASE("Matrix constructors & methods derived from storage::AbstractIndexable
     }
 
     SUBCASE("Matrix const & non-const overloads test") {
-        st::Matrix<int> matrix = {
+        mvl::Matrix<int> matrix = {
             {1, 2},
             {3, 4},
             {5, 6}
@@ -152,9 +217,9 @@ TEST_CASE("Matrix constructors & methods derived from storage::AbstractIndexable
 TEST_CASE("Basic matrix methods behave as expected") {
 
     SUBCASE("Matrix 2D bound-checking test") {
-        st::Matrix<int, st::BoundChecking::ENABLED> matrix(4, 5);
+        mvl::Matrix<int, mvl::Checking::BOUNDS> matrix(4, 5);
         // 1D access
-        auto                                        access_idx_throws = [&](std::size_t idx) -> bool {
+        auto                                    access_idx_throws = [&](std::size_t idx) -> bool {
             try {
                 matrix[idx] = 0;
             } catch (std::out_of_range const& ex) {
@@ -187,18 +252,18 @@ TEST_CASE("Basic matrix methods behave as expected") {
     }
 
     SUBCASE("Matrix CHECKED -> UNCHECKED conversion test") {
-        st::Matrix<int, st::BoundChecking::ENABLED> checked_matrix = {
+        mvl::Matrix<int, mvl::Checking::BOUNDS> checked_matrix = {
             {1, 2},
             {3, 4}
         };
-        st::Matrix<int, st::BoundChecking::DISABLED> unchecked_matrix;
+        mvl::Matrix<int, mvl::Checking::NONE> unchecked_matrix;
 
         // CHECKED -> UNCHECKED move
         CHECK(checked_matrix.empty() == false);
         CHECK(unchecked_matrix.empty() == true);
 
         // unchecked_matrix = checked_matrix; <- will not work, conversion over boundaries has to be explicit!
-        unchecked_matrix = st::Matrix<int, st::BoundChecking::DISABLED>(std::move(checked_matrix));
+        unchecked_matrix = mvl::Matrix<int, mvl::Checking::NONE>(std::move(checked_matrix));
 
         // NOTE: No guarantees about moved-from matrix being empty!
         CHECK(unchecked_matrix.empty() == false);
@@ -215,11 +280,11 @@ TEST_CASE("Matrix views behave as expected") {
 
 
     SUBCASE("Can create const matrix view from matrix and read the contents") {
-        st::Matrix<int> matrix = {
+        mvl::Matrix<int> matrix = {
             {1, 2},
             {3, 4}
         };
-        st::ConstMatrixView<int> view(matrix);
+        mvl::ConstMatrixView<int> view(matrix);
 
         // Indexing a view gives the same values
         CHECK(view(0, 0) == 1);
@@ -237,7 +302,7 @@ TEST_CASE("Matrix views behave as expected") {
         const int*            const_ptr_to_data = original_vector.data();
 
         // Create view to raw data and use it like a matrix
-        st::ConstMatrixView<int> view(rows, cols, const_ptr_to_data);
+        mvl::ConstMatrixView<int> view(rows, cols, const_ptr_to_data);
         // All elements are correct
         for (std::size_t i = rows; i < rows; ++i)
             for (std::size_t j = cols; j < cols; ++j) CHECK(view(i, j) == 17);
@@ -252,12 +317,12 @@ TEST_CASE("Matrix views behave as expected") {
 
 
     SUBCASE("Can create mutable matrix view and change the contents of matrix") {
-        st::Matrix<int> matrix = {
+        mvl::Matrix<int> matrix = {
             {1, 2},
             {3, 4}
         };
 
-        auto view = matrix.get_view();
+        mvl::MatrixView<int> view = matrix;
 
         // Indexing a view gives the same values
         CHECK(view(0, 0) == 1);
@@ -280,13 +345,13 @@ TEST_CASE("Matrix views behave as expected") {
 
 
     SUBCASE("Can create bound-checked view from unchecked matrix") {
-        st::Matrix<int, st::BoundChecking::DISABLED> unchecked_matrix = {
+        mvl::Matrix<int, mvl::Checking::NONE> unchecked_matrix = {
             {1, 2},
             {3, 4}
         };
 
         // Create bound-checked view to matrix
-        auto checked_view = unchecked_matrix.get_checked_view();
+        mvl::MatrixView<int, mvl::Checking::BOUNDS> checked_view = unchecked_matrix;
 
         auto access_ij_throws = [&](std::size_t i, std::size_t j) -> bool {
             try {
@@ -307,14 +372,14 @@ TEST_CASE("Matrix views behave as expected") {
 
 
     SUBCASE("Can create view from const matrix reference and chain functions") {
-        st::Matrix<int> matrix = {
+        mvl::Matrix<int> matrix = {
             {1, 2},
             {3, 4}
         };
         const auto& cref = matrix;
 
         // Create view from const reference
-        auto view = cref.get_const_view();
+        mvl::ConstMatrixView<int> view = cref;
         // Basic assumptions
         CHECK(view.rows() == matrix.rows());
         CHECK(view.cols() == matrix.cols());
@@ -334,7 +399,7 @@ TEST_CASE("Iterators behave as expected") {
 
 
     SUBCASE("Const iterator works") {
-        st::Matrix<int> matrix(4, 5);
+        mvl::Matrix<int> matrix(4, 5);
         matrix.for_each([](int& element, std::size_t idx) { element = idx; });
         const auto& cref = matrix;
         // Check that all filled values are read the same when const-iterating though
@@ -368,7 +433,7 @@ TEST_CASE("Iterators behave as expected") {
 
 
     SUBCASE("Mutable iterator works") {
-        st::Matrix<int> matrix(4, 5);
+        mvl::Matrix<int> matrix(4, 5);
         // Check that range-based for now works (it's a syntactic sugar defined for all containers with
         // defined forward iterators and .begin(), .end() methods) (doesn't call .cbegin() & .cend() even if they exist)
         for (auto& element : matrix) element = 7;
@@ -413,7 +478,7 @@ TEST_CASE("Col-major ordering and transposition behave as expected") {
 
 
     SUBCASE("matrix.transposed() behaves as expected") {
-        st::Matrix<int> matrix(3, 5, 0);
+        mvl::Matrix<int> matrix(3, 5, 0);
         matrix.for_each([](int& element, std::size_t i, std::size_t j) { element = 1000 * i + j; });
         // Transpose
         auto matrixT = matrix.transposed();
@@ -427,21 +492,16 @@ TEST_CASE("Col-major ordering and transposition behave as expected") {
 
 
     SUBCASE("Col-major matrix satisfied basic assumptions") {
-        st::Matrix<int, st::BoundChecking::DISABLED, st::Layout::ROW_MAJOR> row_matrix = {
+        mvl::Matrix<int, mvl::Checking::NONE, mvl::Layout::RC> row_matrix = {
             {0, 1,  2,  3},
             {4, 5,  6,  7},
             {8, 9, 10, 11}
         };
-        st::Matrix<int, st::BoundChecking::DISABLED, st::Layout::COL_MAJOR> col_matrix = {
+        mvl::Matrix<int, mvl::Checking::NONE, mvl::Layout::CR> col_matrix = {
             {0, 1,  2,  3},
             {4, 5,  6,  7},
             {8, 9, 10, 11}
         };
-
-        std::cout << "ROW_MAJOR:\n"
-                  << row_matrix.dump() << "\n\n"
-                  << "COL_MAJOR:\n"
-                  << col_matrix.dump() << "\n\n";
 
         // Basic assumptions
         CHECK(row_matrix.rows() == col_matrix.rows());
@@ -463,21 +523,47 @@ TEST_CASE("Col-major ordering and transposition behave as expected") {
 
 
     SUBCASE("Col-major to row-major conversion test") {
-        st::Matrix<int, st::BoundChecking::DISABLED, st::Layout::COL_MAJOR> initial_col_matrix = {
+        mvl::Matrix<int, mvl::Checking::NONE, mvl::Layout::CR> initial_col_matrix = {
             {0, 1,  2,  3},
             {4, 5,  6,  7},
             {8, 9, 10, 11}
         };
 
         // col-major -> row-major
-        st::Matrix<int, st::BoundChecking::DISABLED, st::Layout::ROW_MAJOR> row_matrix(initial_col_matrix);
+        mvl::Matrix<int, mvl::Checking::NONE, mvl::Layout::RC> row_matrix(initial_col_matrix);
         // row-major -> col-major
-        st::Matrix<int, st::BoundChecking::DISABLED, st::Layout::COL_MAJOR> col_matrix(row_matrix);
+        mvl::Matrix<int, mvl::Checking::NONE, mvl::Layout::CR> col_matrix(row_matrix);
 
         for (std::size_t i = 0; i < col_matrix.rows(); ++i)
             for (std::size_t j = 0; j < col_matrix.rows(); ++j) {
                 CHECK(row_matrix(i, j) == initial_col_matrix(i, j));
                 CHECK(row_matrix(i, j) == col_matrix(i, j));
             }
+    }
+
+
+    SUBCASE("Col-major view") {
+        mvl::Matrix<int> matrix = {
+            {0, 1,  2,  3},
+            {4, 5,  6,  7},
+            {8, 9, 10, 11}
+        };
+
+        mvl::ConstMatrixView<int, mvl::Checking::NONE, mvl::Layout::RC> row_view(matrix.rows(), matrix.cols(),
+                                                                                 matrix.data());
+        mvl::ConstMatrixView<int, mvl::Checking::NONE, mvl::Layout::CR> col_view(matrix.rows(), matrix.cols(),
+                                                                                 matrix.data());
+
+        //std::cout << "row_view:\n" << row_view.dump() << "col_view:\n" << col_view.dump();
+
+        // Check contents
+        CHECK(row_view(0, 0) == 0);
+        CHECK(row_view(0, 1) == 1);
+        CHECK(row_view(0, 2) == 2);
+        CHECK(row_view(0, 3) == 3);
+
+        CHECK(col_view(0, 0) == 0);
+        CHECK(col_view(1, 0) == 1);
+        CHECK(col_view(2, 0) == 2);
     }
 }

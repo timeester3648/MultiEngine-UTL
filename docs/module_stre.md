@@ -2,7 +2,7 @@
 
 [<- back to README.md](https://github.com/DmitriBogdanov/prototyping_utils/tree/master)
 
-**str**ing **e**xpansions module contains various string-related utilities, such as: [&lt;type_traits&gt;](https://en.cppreference.com/w/cpp/header/type_traits) expansions, universal version of [std::to_string](https://en.cppreference.com/w/cpp/string/basic_string/to_string), inline [std::stringstream](https://en.cppreference.com/w/cpp/io/basic_stringstream) and etc.
+**stre** (aka **STR**ing **E**xpansions) module contains various string-related utilities, such as: [&lt;type_traits&gt;](https://en.cppreference.com/w/cpp/header/type_traits) expansions, universal version of [std::to_string](https://en.cppreference.com/w/cpp/string/basic_string/to_string), inline [std::stringstream](https://en.cppreference.com/w/cpp/io/basic_stringstream) and etc.
 
 ## Definitions
 
