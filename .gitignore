@@ -6,13 +6,18 @@
 # Whitelist itself
 !.gitignore
 # Whilelist allowed extensions
+# > Code
 !*.h
 !*.hpp
 !*.c
 !*.cpp
-!*.md
+# > Scripts
 !*.txt
 !*.sh
+# > Docs
+!*.md
+!*.svg
+!*.jpg
 
 # Ignore build & temporary directories regarless of their contents
 .cache/
