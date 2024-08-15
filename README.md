@@ -2,6 +2,10 @@
 [![GitHub license](docs/images/icon_license_mit.svg)](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/LICENSE.md)
 [![Header only](docs/images/icon_header_only.svg)](https://en.wikipedia.org/wiki/Header-only)
 
+[<img src ="docs/images/icon_cpp_std_17.svg">](https://en.wikipedia.org/wiki/C%2B%2B#Standardization)
+[<img src ="docs/images/icon_license_mit.svg">](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/LICENSE.md)
+[<img src ="docs/images/icon_header_only.svg">](https://en.wikipedia.org/wiki/Header-only)
+
 # Prototyping utils
 
 This is a collection of various utilities that aim to provide a set of concise "helpers" that allow prototyping with minimal boilerplate. Most of the following modules were created during my work in gamedev, HPC and math research projects.

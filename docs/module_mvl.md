@@ -38,7 +38,7 @@ This approach provides a generic way of working with matrices that is mostly agn
 
 **Below in an overview of all available arguments, typedefs and defaults:**
 
-![Overview](images/mvl_diagram.jpg)
+<img src ="images/mvl_diagram.jpg">
 
 ## Performance & linear algebra operations
 
