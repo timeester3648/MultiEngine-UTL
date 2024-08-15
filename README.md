@@ -1,9 +1,10 @@
-[![Language](https://img.shields.io/badge/C++-std=17-blue.svg?style=flat&logo=cplusplus)](https://en.wikipedia.org/wiki/C%2B%2B#Standardization)
-[![GitHub license](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/LICENSE.md)
+[![Language](docs/images/icon_cpp_std_17.svg)](https://en.wikipedia.org/wiki/C%2B%2B#Standardization)
+[![GitHub license](docs/images/icon_license_mit.svg)](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/LICENSE.md)
+[![Header only](docs/images/icon_header_only.svg)](https://en.wikipedia.org/wiki/Header-only)
 
 # Prototyping utils
 
-This is a collection of various utilities that aim to provide a set of concise "helpers" that allow prototying with minimal boilerplate. Most of the following modules were created during my work in gamedev, HPC and math research projects.
+This is a collection of various utilities that aim to provide a set of concise "helpers" that allow prototyping with minimal boilerplate. Most of the following modules were created during my work in gamedev, HPC and math research projects.
 
 For ease of integration, this library is distributed in a form of a **single header**, which can be found [here](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/source/proto_utils.hpp).
 
@@ -12,14 +13,15 @@ For ease of integration, this library is distributed in a form of a **single hea
 Implementation of this library sets following design goals:
 
 * **Header only**. Adding library to the project should be as simple as adding a header.
-* **Minimal boilerplate code**. Methods must be concise and require minimal prerequisites.
+* **Minimal boilerplate**. Methods must be concise and require minimal boilerplate on user side.
 * **Platform agnostic**. Implementation should be based around C++ standard and whenever OS-specific methods are unavoidable select appropriate implementation automatically.
-* **Toggleable modules**. Every module should be independent and reside in a separate namespace. Modules together with their STL dependencies should be toggleable through a `#define`.
+* **Fully modular**. Every module should be independent of others and reside in a separate namespace. Modules together with their STL dependencies should be toggleable through a `#define`.
 
 Secondary design goals also include:
 
-* **Modern C++ style**. Usage of modern C++ idioms is prefered.
+* **Modern C++ style**. Usage of modern C++ idioms is preferred.
 * **Usage examples**. Documentation should include usage examples for all major methods.
+* **Test & benchmark coverage.** All modules should have appropriate unit test coverage, performance-focused implementations should be benchmarked against alternative approaches.
 
 ## Modules & documentation
 

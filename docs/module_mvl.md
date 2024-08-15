@@ -61,7 +61,7 @@ mvl::MatrixView<double, Checking::NONE, Layout::CR> view(A.rows(), A.cols(), A.d
 ```cpp
 // Generic template
 // 'requires' tag specifies methods that get conditionally compiled by some specializations
-// 'Callable<Args...>' refers to a template parameter, restricted to callable objects with a specific signature
+// 'Callable<Args...>' refers to a template parameter, restricted to callable objects with specific signature
 template <
     typename    T,
     Dimension   dimension,
