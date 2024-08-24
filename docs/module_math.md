@@ -140,6 +140,18 @@ Returns $|x|$, $\mathrm{sign} (x)$, $x^2$ or $x^3$ of an appropriate type.
 Returns $\dfrac{a + b}{2}$ of an appropriate type. Can be used with vectors or other custom types that have defined `operator+()` and scalar `operator*()`.
 
 > ```cpp
+> int kronecker_delta(IntegerType i, IntegerType j);
+> ```
+
+Computes [Kronecker delta](https://en.wikipedia.org/wiki/Kronecker_delta) symbol: $\delta_{ii} = \begin{cases}1, \quad i = j\\0, \quad i \neq j\end{cases}$.
+
+> ```cpp
+> int power_of_minus_one(IntegerType power);
+> ```
+
+Computes $(-1)^{power}$ efficiently.
+
+> ```cpp
 > FloatType math::deg_to_rad(FloatType degrees);
 > FloatType math::rad_to_deg(FloatType radians);
 > ```
