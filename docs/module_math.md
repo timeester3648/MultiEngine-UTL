@@ -8,10 +8,10 @@
 
 ```cpp
 // Constants
-double PI = 3.14159265358979323846;
-double PI_TWO = 2. * PI;
-double PI_HALF = 0.5 * PI;
-double E = 2.71828182845904523536;
+double PI           = 3.14159265358979323846;
+double PI_TWO       = 2. * PI;
+double PI_HALF      = 0.5 * PI;
+double E            = 2.71828182845904523536;
 double GOLDEN_RATIO = 1.6180339887498948482;
 
 // Unary type traits
@@ -20,6 +20,12 @@ struct is_addable_with_itself;
 
 template<typename Type>
 struct is_multipliable_by_scalar;
+
+template <typename Type>
+struct is_sized;
+
+template <typename FuncType, typename Signature>
+struct is_function_with_signature;
 
 // Standard math functions
 template<typename Type>
@@ -37,6 +43,12 @@ Type cube(Type x); // x^3
 template<typename Type>
 Type midpoint(Type a, Type b); // (a + b) / 2
 
+template<typename IntegerType>
+int kronecker_delta(IntegerType i, IntegerType j); // (i == j) ? 1 : 0
+
+template<typename IntegerType>
+int power_of_minus_one(IntegerType power); // (-1)^power
+
 // Degrees and radians
 template<typename FloatType>
 FloatType deg_to_rad(FloatType degrees);
@@ -44,12 +56,25 @@ FloatType deg_to_rad(FloatType degrees);
 template<typename Type>
 FloatType rad_to_deg(FloatType radians);
 
+// Meshing
+struct Points {
+    explicit Points(std::size_t count);
+};
+
+struct Intervals {
+    explicit Intervals(std::size_t count);
+    Intervals(Points points);
+};
+
+template<typename FloatType>
+std::vector<FloatType> linspace(FloatType L1, FloatType L2, Intervals N);
+
+template<typename FloatType, typename FuncType>
+FloatType integrate_trapezoidal(FuncType f, FloatType L1, FloatType L2, Intervals N);
+
 // Misc helpers
 template<typename UintType>
 UintType uint_difference(UintType a, UintType b);
-
-template<typename FloatType>
-std::vector<FloatType> linspace(FloatType min, FloatType max, size_t N);
 
 template<typename SizedContainer>
 int ssize(const SizedContainer& container);
@@ -86,6 +111,20 @@ Methods that deal with floating-point values require explicitly floating-point i
 `is_multipliable_by_scalar<Type>::value` returns at compile time whether `Type` objects can be multiplied by a floating point scalar with `operator*()`.
 
 > ```cpp
+> math::is_sized
+> ```
+
+`is_sized<Type>::value` returns at compile time whether `Type` objects support `.size()` method.
+
+> ```cpp
+> math::is_function_with_signature<FuncType, Signature>
+> ```
+
+`is_function_with_signature<FuncType, Signature>::value` returns at compile time whether `FuncType` is a callable with signature `Signature`.
+
+Useful when creating functions that accept callable type as a template argument, rather than [std::function](https://en.cppreference.com/w/cpp/utility/functional/function). This is usually done to avoid overhead introduced by `std::function` type erasure, however doing so removes explicit requirements imposed on a callable signature. Using this type trait in combination with [std::enable_if](https://en.cppreference.com/w/cpp/types/enable_if) allows template approach to keep explicit signature restrictions and overload method for multiple callable types.
+
+> ```cpp
 > Type math::abs(Type x);
 > Type math::sign(Type x);
 > Type math::sqr(Type x);
@@ -108,16 +147,37 @@ Returns $\dfrac{a + b}{2}$ of an appropriate type. Can be used with vectors or o
 Converts degrees to radians and back.
 
 > ```cpp
+> struct Points {
+>     explicit Points(std::size_t count);
+> };
+> 
+> struct Intervals {
+>     explicit Intervals(std::size_t count);
+>     Intervals(Points points);
+> };
+> ```
+
+"Strong typedefs" for grid size in 1D meshing operations, which allows caller to express their intent more clearly.
+
+`Points` implicitly converts to `Intervals` ($N + 1$ points corresponds to $N$ intervals), allowing most meshing functions to accept both types as an input.
+
+> ```cpp
+> std::vector<FloatType> linspace(FloatType L1, FloatType L2, Intervals N);
+> ```
+
+Meshes $[L_1, L_2]$ range into a regular 1D grid with $N$ intervals (which corresponds to $N + 1$ grid points). Similar to `linspace()` from [Matlab](https://www.mathworks.com/products/matlab.html) and [numpy](https://numpy.org).
+
+> ```cpp
+> FloatType integrate_trapezoidal(FuncType f, FloatType L1, FloatType L2, Intervals N);
+> ```
+
+Numericaly computes integral $I_h = \int\limits_{L_1}^{L_2} f(x) \mathrm{d} x$ over $N$ integration intervals using [trapezoidal rule](https://en.wikipedia.org/wiki/Trapezoidal_rule).
+
+> ```cpp
 > UintType math::uint_difference(UintType a, UintType b);
 > ```
 
 Returns $|a - b|$ for unsigned types accounting for possible integer overflow. Useful when working with small types in image processing.
-
-> ```cpp
-> std::vector<FloatType> math::linspace(FloatType min, FloatType max, size_t N);
-> ```
-
-Returns $N$ evenly spaced number in $[min, max]$ range.
 
 > ```cpp
 > int math::ssize(const SizedContainer& container);

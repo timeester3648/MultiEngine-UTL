@@ -222,7 +222,9 @@ std::tuple<std::string_view, _il<_il<_il<_il<T>>>>> entry(std::string_view key, 
 
 // ======== header guard start ========
 
+#include <cassert>
 #include <cstdint>
+#include <functional>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -301,6 +303,10 @@ struct is_sized : std::false_type {};
 template <typename Type>
 struct is_sized<Type, std::void_t<decltype(std::declval<Type>().size())>> : std::true_type {};
 
+// --- type trait: is_function_with_signature ---
+template <typename FuncType, typename Signature>
+using is_function_with_signature = std::is_convertible<FuncType, std::function<Signature>>;
+
 // --- Standard math functions ---
 template <typename Type, std::enable_if_t<std::is_scalar<Type>::value, bool> = true>
 constexpr Type abs(Type x) {
@@ -328,6 +334,17 @@ constexpr Type midpoint(Type a, Type b) {
     return (a + b) * 0.5;
 }
 
+template <typename IntegerType, std::enable_if_t<std::is_integral<IntegerType>::value, bool> = true>
+constexpr int kronecker_delta(IntegerType i, IntegerType j) {
+    // 'IntegerType' here is necessary to prevent enforcing static_cast<int>(...) on the callsite
+    return (i == j) ? 1 : 0;
+}
+
+template <typename IntegerType, std::enable_if_t<std::is_integral<IntegerType>::value, bool> = true>
+constexpr int power_of_minus_one(IntegerType power) {
+    return (power % IntegerType(2)) ? 1 : -1; // is there a faster way of doing it?
+}
+
 
 // --- deg/rad conversion ---
 template <typename FloatType, std::enable_if_t<std::is_floating_point<FloatType>::value, bool> = true>
@@ -343,6 +360,57 @@ constexpr FloatType rad_to_deg(FloatType radians) {
 }
 
 
+// --- Meshing ---
+
+// Semantic helpers that allow user to directly pass both interval/point counts for grid subdivision,
+// without thinking about whether function need +1 or -1 to its argument
+struct Points {
+    std::size_t count;
+
+    Points() = delete;
+    explicit Points(std::size_t count) : count(count) {}
+};
+
+struct Intervals {
+    std::size_t count;
+
+    Intervals() = delete;
+    explicit Intervals(std::size_t count) : count(count) {}
+    Intervals(Points points) : count(points.count - 1) {}
+};
+
+template <typename FloatType, std::enable_if_t<std::is_floating_point<FloatType>::value, bool> = true>
+std::vector<FloatType> linspace(FloatType L1, FloatType L2, Intervals N) {
+    assert(L1 < L2);
+    assert(N.count >= 1);
+
+    const FloatType step = (L2 - L1) / N.count;
+
+    std::vector<FloatType> res(N.count + 1);
+
+    res[0] = L1;
+    for (std::size_t i = 1; i < res.size(); ++i) res[i] = res[i - 1] + step;
+
+    return res;
+}
+
+template <typename FloatType, typename FuncType,
+          std::enable_if_t<std::is_floating_point<FloatType>::value, bool>                          = true,
+          std::enable_if_t<is_function_with_signature<FuncType, FloatType(FloatType)>::value, bool> = true>
+FloatType integrate_trapezoidal(FuncType f, FloatType L1, FloatType L2, Intervals N) {
+    assert(L1 < L2);
+    assert(N.count >= 1);
+
+    const FloatType step = (L2 - L1) / N.count;
+
+    FloatType sum = 0;
+    FloatType x   = L1;
+
+    for (std::size_t i = 0; i < N.count; ++i, x += step) sum += f(x) + f(x + step);
+
+    return FloatType(0.5) * sum * step;
+}
+
 // --- Misc helpers ---
 template <typename UintType, std::enable_if_t<std::is_integral<UintType>::value, bool> = true>
 constexpr UintType uint_difference(UintType a, UintType b) {
@@ -350,16 +418,6 @@ constexpr UintType uint_difference(UintType a, UintType b) {
     using WiderIntType = std::conditional_t<(sizeof(UintType) >= sizeof(int)), int64_t, int>;
 
     return static_cast<UintType>(utl::math::abs(static_cast<WiderIntType>(a) - static_cast<WiderIntType>(b)));
-}
-
-template <typename FloatType, std::enable_if_t<std::is_floating_point<FloatType>::value, bool> = true>
-std::vector<FloatType> linspace(FloatType min, FloatType max, std::size_t N) {
-    const FloatType h = (max - min) / N;
-
-    std::vector<FloatType> points(N);
-    for (std::size_t i = 0; i < N; ++i) points[i] = min + h * i;
-
-    return points;
 }
 
 template <typename SizedContainer, std::enable_if_t<utl::math::is_sized<SizedContainer>::value, bool> = true>
@@ -1713,7 +1771,7 @@ public:                                                                         
         return *this;                                                                                                  \
     }                                                                                                                  \
                                                                                                                        \
-    self& fill(const_reference value) {                                                                              \
+    self& fill(const_reference value) {                                                                                \
         for (size_type idx = 0; idx < this->size(); ++idx) this->operator[](idx) = value;                              \
         return *this;                                                                                                  \
     }                                                                                                                  \
