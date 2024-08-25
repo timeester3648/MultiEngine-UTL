@@ -342,7 +342,7 @@ constexpr int kronecker_delta(IntegerType i, IntegerType j) {
 
 template <typename IntegerType, std::enable_if_t<std::is_integral<IntegerType>::value, bool> = true>
 constexpr int power_of_minus_one(IntegerType power) {
-    return (power % IntegerType(2)) ? 1 : -1; // is there a faster way of doing it?
+    return (power % IntegerType(2)) ? -1 : 1; // is there a faster way of doing it?
 }
 
 
@@ -426,8 +426,9 @@ int ssize(const SizedContainer& container) {
 }
 
 // Branchless ternary
-template <typename Type, std::enable_if_t<std::is_arithmetic<Type>::value, bool> = true>
-constexpr Type ternary_branchless(bool condition, Type return_if_true, Type return_if_false) {
+template <typename ArithmeticType, std::enable_if_t<std::is_arithmetic<ArithmeticType>::value, bool> = true>
+constexpr ArithmeticType ternary_branchless(bool condition, ArithmeticType return_if_true,
+                                            ArithmeticType return_if_false) {
     return (condition * return_if_true) + (!condition * return_if_false);
 }
 
@@ -1073,9 +1074,9 @@ inline void system(double ms) { std::this_thread::sleep_for(_chrono_ns(static_ca
 // ----------------------------
 // --------- utl::mvl ---------
 // ----------------------------
-#if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_STORAGE)
-#ifndef UTLHEADERGUARD_STORAGE
-#define UTLHEADERGUARD_STORAGE
+#if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_MVL)
+#ifndef UTLHEADERGUARD_MVL
+#define UTLHEADERGUARD_MVL
 
 // ======== header guard start ========
 

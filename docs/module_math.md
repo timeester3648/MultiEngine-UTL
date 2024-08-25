@@ -81,7 +81,7 @@ int ssize(const SizedContainer& container);
         
 // Branchless ternary
 template<typename Type>
-Type ternary_branchless(bool condition, Type return_if_true, Type return_if_false);
+ArithmeticType ternary_branchless(bool condition, ArithmeticType return_if_true, ArithmeticType return_if_false);
 
 template<typename IntType>
 IntType ternary_bitselect(bool condition, IntType return_if_true, IntType return_if_false);
@@ -200,10 +200,10 @@ Returns `.size()` value of given container casted to `int`.
 Useful to reduce verbosity of `static_cast<int>(container.size())` when working with `int` indexation that gets compared against container size.
 
 > ```cpp
-> Type math::ternary_branchless(bool condition, Type return_if_true, Type return_if_false);
+> ArithmeticType math::ternary_branchless(bool condition, ArithmeticType return_if_true, ArithmeticType return_if_false);
 > ```
 
-Returns `condition ? return_if_true : return_if_false` rewritten in a branchless way. Useful when working with GPU's.
+Returns `condition ? return_if_true : return_if_false` rewritten in a branchless way. Useful when working with GPU's. Requires type to be [arithmetic](https://en.cppreference.com/w/cpp/types/is_arithmetic).
 
 > ```cpp
 > IntType math::ternary_bitselect(bool condition, IntType return_if_true, IntType return_if_false);

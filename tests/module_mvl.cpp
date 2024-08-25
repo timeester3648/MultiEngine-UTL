@@ -8,7 +8,7 @@
 #include "thirdparty/doctest.h"
 
 #define UTL_PICK_MODULES
-#define UTLMODULE_STORAGE
+#define UTLMODULE_MVL
 #include "proto_utils.hpp"
 
 // ________________ TEST INCLUDES ________________

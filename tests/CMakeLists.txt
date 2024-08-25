@@ -10,6 +10,7 @@ endmacro()
 
 # Tests
 doctest(MACRO_LOG)
+doctest(module_math)
 doctest(module_mvl)
 doctest(module_random)
 doctest(module_stre)
