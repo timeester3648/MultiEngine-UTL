@@ -3,6 +3,7 @@
 #include <numeric>
 #include <pstl/glue_execution_defs.h>
 #include <type_traits>
+#include <unordered_map>
 #include <vector>
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include "thirdparty/doctest.h"
@@ -21,6 +22,59 @@
 // _____________ TEST IMPLEMENTATION _____________
 
 using namespace utl;
+
+struct Dummy {
+    std::vector<mvl::SparseEntry2D<double>> _data;
+    
+    int _binary_search_ij(std::size_t i, std::size_t j) const {
+        std::size_t l = 0;
+        std::size_t r = _data.size();
+        
+        while (l <= r) {
+            std::size_t middle = (l + r) / 2;
+            
+            if (_sparse_entry_2d_ordering(_data[l], _data[r]))
+                l = middle + 1; // trim left half
+            else
+                r = middle - 1; // trim right half
+        }
+        
+        return -1;
+    }
+};
+
+
+TEST_CASE("Sparse matrix basic functionality test") {
+    // Build sparse matrix + insert some more
+    mvl::SparseMatrix<int> mat(
+        4, 4,
+        {
+            { 0, 0, 10 }, { 1, 1, 20 }, { 2, 2, 30 }, { 3, 3, 40 }
+        }
+    );
+    
+    mat.insert_triplets({{ 0, 3, 50 }});
+    
+    // Check basic assumptions
+    CHECK(mat.size() == 5);
+    CHECK(mat(0, 0) == 10);
+    CHECK(mat(1, 1) == 20);
+    CHECK(mat(2, 2) == 30);
+    CHECK(mat(3, 3) == 40);
+    CHECK(mat(0, 3) == 50);
+    CHECK(mat.contains_index(0, 3) == true);
+    CHECK(mat.contains_index(0, 2) == false);
+    CHECK(mat.sum() == 10 + 20 + 30 + 40 + 50);
+    
+    // Check after erasing a few triplets
+    mat.erase_triplets({ { 0, 0 }, { 1, 1} });
+    
+    CHECK(mat.size() == 3);
+    CHECK(mat(2, 2) == 30);
+    CHECK(mat(3, 3) == 40);
+    CHECK(mat(0, 3) == 50);
+    CHECK(mat.sum() == 30 + 40 + 50);
+}
 
 TEST_CASE("Strided view sanity test") {
     std::vector<int> vec = {1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3,

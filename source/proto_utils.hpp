@@ -1351,10 +1351,21 @@ struct SparseEntry2D {
     T      value;
 };
 
+template <typename T>
+bool _sparse_entry_2d_ordering(const SparseEntry2D<T>& left, const SparseEntry2D<T>& right) {
+    return (left.i < right.i) && (left.j < right.j);
+}
+
 struct Index2D {
     size_t i;
     size_t j;
+
+    bool operator==(const Index2D& other) const noexcept { return (this->i == other.i) && (this->j == other.j); }
 };
+
+inline bool _index_2d_sparse_ordering(const Index2D& l, const Index2D& r) noexcept {
+    return (l.i < r.i) && (l.j < r.j);
+}
 
 // Shortcut template used to deduce type of '_data' based on ownership inside mixins
 template <typename MatrixType, typename ContainerResult, typename ViewResult, typename ConstViewResult>
@@ -1475,12 +1486,68 @@ private:                                                                        
 //    > NONE
 #define _utl_mixin_data_2d_sparse                                                                                      \
 private:                                                                                                               \
-    using _data_t = _choose_based_on_ownership<self, std::vector<SparseEntry2D<value_type>>,                           \
-                                               std::vector<SparseEntry2D<std::reference_wrapper<value_type>>>,         \
-                                               std::vector<SparseEntry2D<std::reference_wrapper<const value_type>>>>;  \
+    using _triplet_t =                                                                                                 \
+        _choose_based_on_ownership<self, SparseEntry2D<value_type>, SparseEntry2D<std::reference_wrapper<value_type>>, \
+                                   SparseEntry2D<std::reference_wrapper<const value_type>>>;                           \
                                                                                                                        \
 public:                                                                                                                \
-    _data_t _data;                                                                                                     \
+    using triplet_type = _triplet_t;                                                                                   \
+                                                                                                                       \
+    std::vector<triplet_type> _data;                                                                                   \
+                                                                                                                       \
+    self& insert_triplets(const std::vector<triplet_type>& triplets) {                                                 \
+        /* Bulk-insert triplets and sort by index */                                                                   \
+        const auto ordering = [](const triplet_type& l, const triplet_type& r) -> bool {                               \
+            return (l.i < r.i) && (l.j < r.j);                                                                         \
+        };                                                                                                             \
+                                                                                                                       \
+        this->_data.insert(this->_data.end(), triplets.begin(), triplets.end());                                       \
+        std::sort(this->_data.begin(), this->_data.end(), ordering);                                                   \
+                                                                                                                       \
+        return *this;                                                                                                  \
+    }                                                                                                                  \
+                                                                                                                       \
+    self& rewrite_triplets(std::vector<triplet_type>&& triplets) {                                                     \
+        /* Move-construct all triplets at once and sort by index */                                                    \
+        const auto ordering = [](const triplet_type& l, const triplet_type& r) -> bool {                               \
+            return (l.i < r.i) && (l.j < r.j);                                                                         \
+        };                                                                                                             \
+                                                                                                                       \
+        this->_data = std::move(triplets);                                                                             \
+        std::sort(this->_data.begin(), this->_data.end(), ordering);                                                   \
+                                                                                                                       \
+        return *this;                                                                                                  \
+    }                                                                                                                  \
+                                                                                                                       \
+    self& erase_triplets(std::vector<Index2D> indices) {                                                               \
+        /* Erase triplets with {i, j} from 'indices' using the fact that both */                                       \
+        /* 'indices' and triplets are sorted. We can scan through triplets once */                                     \
+        /* while advancing 'cursor' when 'indices[cursor]' gets deleted, which */                                      \
+        /* result in all necessary triplets being marked for erasure in order. */                                      \
+        std::sort(indices.begin(), indices.end(), _index_2d_sparse_ordering);                                          \
+        std::size_t cursor = 0;                                                                                        \
+                                                                                                                       \
+        const auto erase_condition = [&](const triplet_type& triplet) -> bool {                                        \
+            /* Stop erasing once all target indices are handled */                                                     \
+            if (cursor == indices.size()) return false;                                                                \
+            if (indices[cursor].i == triplet.i && indices[cursor].j == triplet.j) {                                    \
+                ++cursor;                                                                                              \
+                return true;                                                                                           \
+            }                                                                                                          \
+            return false;                                                                                              \
+        };                                                                                                             \
+                                                                                                                       \
+        const auto iter = std::remove_if(this->_data.begin(), this->_data.end(), erase_condition);                     \
+        this->_data.erase(iter, this->_data.end());                                                                    \
+                                                                                                                       \
+        /* Re-sort triplets just in case */                                                                            \
+        const auto ordering = [](const triplet_type& l, const triplet_type& r) -> bool {                               \
+            return (l.i < r.i) && (l.j < r.j);                                                                         \
+        };                                                                                                             \
+        std::sort(this->_data.begin(), this->_data.end(), ordering);                                                   \
+                                                                                                                       \
+        return *this;                                                                                                  \
+    }                                                                                                                  \
                                                                                                                        \
 private:                                                                                                               \
     static_assert(true)
@@ -1530,6 +1597,44 @@ public:                                                                         
         if constexpr (self::params::layout == Layout::CR) return this->rows();                                         \
         _unreachable();                                                                                                \
     }                                                                                                                  \
+                                                                                                                       \
+private:                                                                                                               \
+    static_assert(true)
+
+
+// Requirements:
+//    > const_reference operator()(size_type i, size_type j) const;
+//    > size_type size() const;
+//    > Checking checking; // member or template arg
+#define _utl_mixin_conversions_2d_sparse                                                                               \
+private:                                                                                                               \
+    size_type _search_ij(size_type i, size_type j) const noexcept {                                                    \
+        /* Returns this->size() if {i, j} wasn't found. */                                                             \
+        /* linear search for small .size() (more efficient fue to prediction and cache locality) */                    \
+        if (true) {                                                                                                    \
+            for (size_type idx = 0; idx < this->size(); ++idx)                                                         \
+                if (this->_data[idx].i == i && this->_data[idx].j == j) return idx;                                    \
+            return this->size();                                                                                       \
+        }                                                                                                              \
+        /* binary search for larger .size() (N(log2(size)) instead of N(size) asymptotically) */                       \
+    }                                                                                                                  \
+                                                                                                                       \
+public:                                                                                                                \
+    size_type get_idx_of_ij(size_type i, size_type j) const {                                                          \
+        const size_type idx = this->_search_ij(i, j);                                                                  \
+        /* Return this->size() if {i, j} wasn't found. Throw with bound checking. */                                   \
+        if constexpr (self::params::checking == Checking::BOUNDS)                                                      \
+            if (idx == this->size())                                                                                   \
+                throw std::out_of_range(_stringify("Index { ", i, ", ", j, "} in not a part of sparse matrix"));       \
+        return idx;                                                                                                    \
+    }                                                                                                                  \
+                                                                                                                       \
+    Index2D get_ij_of_idx(size_type idx) const {                                                                       \
+        if constexpr (self::params::checking == Checking::BOUNDS) this->_bound_check_idx(idx);                         \
+        return Index2D{this->_data[idx].i, this->_data[idx].j};                                                        \
+    }                                                                                                                  \
+                                                                                                                       \
+    bool contains_index(size_type i, size_type j) const noexcept { return this->_search_ij(i, j) != this->size(); }    \
                                                                                                                        \
 private:                                                                                                               \
     static_assert(true)
@@ -1638,6 +1743,48 @@ public:                                                                         
     reference operator[](size_type idx) { return this->data()[this->get_memory_offset_of_idx(idx)]; }                  \
                                                                                                                        \
     reference operator()(size_type i, size_type j) { return this->data()[this->get_memory_offset_of_ij(i, j)]; }       \
+                                                                                                                       \
+private:                                                                                                               \
+    static_assert(true)
+
+
+// Requirements:
+//    > _data.operator[]                                    ~ provided by '_utl_mixin_data_2d_sparse'
+//    > get_ij_of_idx(idx)                                  ~ provided by '_utl_mixin_conversions_2d_sparse'
+// Note: Bound checking in operator[] & operator() happens during index conversion when computing memory offset
+#define _utl_mixin_indexation_2d_sparse_const                                                                          \
+public:                                                                                                                \
+    size_type size() const noexcept { return this->_data.size(); }                                                     \
+                                                                                                                       \
+    const_reference operator[](size_type idx) const {                                                                  \
+        if constexpr (self::params::checking == Checking::BOUNDS) this->_bound_check_idx(idx);                         \
+        return this->_data[idx].value;                                                                                 \
+    }                                                                                                                  \
+                                                                                                                       \
+    const_reference operator()(size_type i, size_type j) const {                                                       \
+        if constexpr (self::params::checking == Checking::BOUNDS) this->_bound_check_idx(i, j);                        \
+        return this->_data[this->get_idx_of_ij(i, j)].value;                                                           \
+    }                                                                                                                  \
+                                                                                                                       \
+private:                                                                                                               \
+    static_assert(true)
+
+
+// Requirements:
+//    > _data.operator[]                                    ~ provided by '_utl_mixin_data_2d_sparse'
+//    > get_ij_of_idx(idx)                                  ~ provided by '_utl_mixin_conversions_2d_sparse'
+// Note: Bound checking in operator[] & operator() happens during index conversion when computing memory offset
+#define _utl_mixin_indexation_2d_sparse_mutable                                                                        \
+public:                                                                                                                \
+    reference operator[](size_type idx) {                                                                              \
+        if constexpr (self::params::checking == Checking::BOUNDS) this->_bound_check_idx(idx);                         \
+        return this->_data[idx].value;                                                                                 \
+    }                                                                                                                  \
+                                                                                                                       \
+    reference operator()(size_type i, size_type j) {                                                                   \
+        if constexpr (self::params::checking == Checking::BOUNDS) this->_bound_check_idx(i, j);                        \
+        return this->_data[this->get_idx_of_ij(i, j)].value;                                                           \
+    }                                                                                                                  \
                                                                                                                        \
 private:                                                                                                               \
     static_assert(true)
@@ -2053,7 +2200,8 @@ public:
         : _data(other.data()), _rows(other.rows()), _cols(other.cols()) {}
 
     // Init-from-data
-    GenericTensor(size_type rows, size_type cols, pointer data_ptr) : _data(data_ptr), _rows(rows), _cols(cols) {}
+    explicit GenericTensor(size_type rows, size_type cols, pointer data_ptr)
+        : _data(data_ptr), _rows(rows), _cols(cols) {}
 };
 
 // ConstMatrixView
@@ -2077,7 +2225,8 @@ public:
         : _data(other.data()), _rows(other.rows()), _cols(other.cols()) {}
 
     // Init-from-data
-    GenericTensor(size_type rows, size_type cols, const_pointer data_ptr) : _data(data_ptr), _rows(rows), _cols(cols) {}
+    explicit GenericTensor(size_type rows, size_type cols, const_pointer data_ptr)
+        : _data(data_ptr), _rows(rows), _cols(cols) {}
 
     // TEMP:
     std::string dump() const {
@@ -2118,22 +2267,41 @@ public:
           _col_stride(other.col_stride()) {}
 
     // Init-from-data
-    GenericTensor(size_type rows, size_type cols, size_type row_stride, size_type col_stride, pointer data_ptr)
+    explicit GenericTensor(size_type rows, size_type cols, size_type row_stride, size_type col_stride, pointer data_ptr)
         : _data(data_ptr), _rows(rows), _cols(cols), _row_stride(row_stride), _col_stride(col_stride) {}
 };
 
 // SparseMatrix
 _utl_template_specialization(Dimension::MATRIX, Type::SPARSE, Ownership::CONTAINER) {
+    // TODO: Implement mixins
     _utl_mixin_types;
 
     _utl_mixin_extents_2d;
     _utl_mixin_data_2d_sparse;
 
+    _utl_mixin_indexation_2d_sparse_const;
+    _utl_mixin_indexation_2d_sparse_mutable;
     _utl_mixin_indexable_1d_const;
     _utl_mixin_indexable_1d_mutable;
     _utl_mixin_indexable_2d_const;
     _utl_mixin_indexable_2d_mutable;
-    _utl_mixin_conversions_2d_dense;
+    _utl_mixin_conversions_2d_sparse;
+
+public:
+    // Default ctor
+    GenericTensor() noexcept = default;
+
+    // Init-from-data (copy)
+    explicit GenericTensor(size_type rows, size_type cols, const std::vector<triplet_type>& data)
+        : _rows(rows), _cols(cols) {
+        this->insert_triplets(std::move(data));
+    }
+
+    // Init-from-data (move)
+    explicit GenericTensor(size_type rows, size_type cols, std::vector<triplet_type> && data)
+        : _rows(rows), _cols(cols) {
+        this->rewrite_triplets(std::move(data));
+    }
 };
 
 // SparseMatrixView
