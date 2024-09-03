@@ -54,7 +54,7 @@ namespace utl::config {
 // _________ DEVELOPER DOCS _________
 
 // Utils for exporting/importing configs.
-// Currently suppors JSON.
+// Currently supports JSON.
 //
 // # ::export_json() #
 // Exports JSON with given key-value entries. Entries support homogenous arrays with any level of nesting,
@@ -1110,7 +1110,7 @@ namespace utl::mvl {
 //       [mutable-matrix-like] : [const-matrix-like] & [mutable-iterable] where both parents derive from
 //       [const-iterable]
 //
-//    While those issues are resolvable, their handling becomes more and more difficult as parent glasses grow larger.
+//    While those issues are resolvable, their handling becomes more and more difficult as parent classes grow larger.
 //    A usual solution for this would be virtual inheritance, however it prevents us from calling derived methods inside
 //    the base class due to "static downcast via virtual inheritance" rule, which makes 'static_cast<Derived*>(this)'
 //    illegal. We can resolve all name collisions manually, however it leads to a code that is absolutely horrific and
@@ -1128,7 +1128,8 @@ namespace utl::mvl {
 // 5) Macro-based mixins - insert functionality directly in a class, a simple way of doing exactly what we want.
 //    "Mixed-in" methods are simply functions implemented in terms of certain "required" methods.
 //    Doesn't lead to huge template chains and doesn't have any inheritance at all. The main downside is being
-//    preprocessor based, which exposes some identifiers to a global namespace (even if we #undef them later).
+//    preprocessor based, which exposes some identifiers to a global namespace and makes all "connection points"
+//    in logic dependant on correct naming inside macros, rather than actual semantical symbols.
 
 // _________ IMPLEMENTATION _________
 
@@ -1463,6 +1464,26 @@ private:                                                                        
 public:                                                                                                                \
     size_type row_stride() const noexcept { return this->_row_stride; }                                                \
     size_type col_stride() const noexcept { return this->_col_stride; }                                                \
+                                                                                                                       \
+private:                                                                                                               \
+    static_assert(true)
+
+
+// Requirements:
+//    > NONE
+#define _utl_mixin_trivial_strides_2d                                                                                  \
+public:                                                                                                                \
+    constexpr size_type row_stride() const noexcept {                                                                  \
+        if constexpr (self::params::layout == Layout::RC) return 0;                                                    \
+        if constexpr (self::params::layout == Layout::CR) return 1;                                                    \
+        _unreachable();                                                                                                 \
+    }                                                                                                                  \
+                                                                                                                       \
+    constexpr size_type col_stride() const noexcept {                                                                  \
+        if constexpr (self::params::layout == Layout::RC) return 1;                                                    \
+        if constexpr (self::params::layout == Layout::CR) return 0;                                                    \
+        _unreachable();                                                                                                 \
+    }                                                                                                                  \
                                                                                                                        \
 private:                                                                                                               \
     static_assert(true)
@@ -2053,6 +2074,14 @@ private:                                                                        
 
 
 // Requirements:
+//    > ????
+#define _utl_mixin_filtering_ops                                                                                       \
+public:                                                                                                                \
+private:                                                                                                               \
+    static_assert(true)
+
+
+// Requirements:
 //    > self& operator=(const self& other)
 #define _utl_mixin_default_constructors_dense                                                                          \
 public:                                                                                                                \
@@ -2108,6 +2137,7 @@ _utl_template_specialization(Dimension::MATRIX, Type::DENSE, Ownership::CONTAINE
     _utl_mixin_types;
 
     _utl_mixin_extents_2d;
+    _utl_mixin_trivial_strides_2d;
     _utl_mixin_data_2d_dense;
 
     _utl_mixin_indexation_2d_dense_const;
@@ -2120,6 +2150,168 @@ _utl_template_specialization(Dimension::MATRIX, Type::DENSE, Ownership::CONTAINE
     _utl_mixin_default_constructors_dense;
 
 public:
+    // TEMP:
+    /* _utl_mixin_blocking_views_2d_mutable */
+    using block_view_type =
+        typename std::conditional_t<self::params::type == Type::SPARSE,
+                                    GenericTensor<value_type, self::params::dimension, Type::SPARSE, Ownership::VIEW,
+                                                  self::params::checking, Layout::SPARSE>,
+                                    GenericTensor<value_type, self::params::dimension, Type::STRIDED, Ownership::VIEW,
+                                                  self::params::checking, self::params::layout>>;
+
+    /* _utl_mixin_blocking_views_2d_const */
+    using block_const_view_type =
+        typename std::conditional_t<self::params::type == Type::SPARSE,
+                                    GenericTensor<value_type, self::params::dimension, Type::SPARSE,
+                                                  Ownership::CONST_VIEW, self::params::checking, Layout::SPARSE>,
+                                    GenericTensor<value_type, self::params::dimension, Type::STRIDED,
+                                                  Ownership::CONST_VIEW, self::params::checking, self::params::layout>>;
+
+    block_const_view_type block(size_type i, size_type j, size_type rows, size_type cols) const {
+        /* Sparse matrices have no better way of getting a diagonal than filtering by { i, j } */
+        if constexpr (self::params::type == Type::SPARSE) {
+            return this->filter([&](const_reference, size_type _i, size_type _j) {
+                return (i <= _i) && (_i < i + rows) && (j <= _j) && (_j < j + cols);
+            });
+        }
+        /* Non-sparse matrices can create strided view with appropriately selected strides */
+        /* to emulate blocking efficiently */
+        else {
+            if constexpr (self::params::layout == Layout::RC) {
+                const size_type row_stride = this->row_stride() + this->col_stride() * (this->cols() - cols);
+                const size_type col_stride = this->col_stride();
+                return block_const_view_type(rows, cols, row_stride, col_stride, &this->operator()(i, j));
+            }
+            if constexpr (self::params::layout == Layout::CR) {
+                const size_type row_stride = this->row_stride();
+                const size_type col_stride = this->col_stride() + this->row_stride() * (this->rows() - rows);
+                return block_const_view_type(rows, cols, row_stride, col_stride, &this->operator()(i, j));
+            }
+            _unreachable();
+        }
+    }
+
+    /* _utl_mixin_sparse_views_1d_mutable */
+private:
+    using _ref_triplet_array = std::vector<SparseEntry2D<std::reference_wrapper<value_type>>>;
+
+public:
+    using sparse_view_type = GenericTensor<value_type, self::params::dimension, Type::SPARSE, Ownership::VIEW,
+                                           self::params::checking, Layout::SPARSE>;
+
+    template <typename UnaryPredicate, _enable_if_signature<UnaryPredicate, bool(const_reference)> = true>
+    sparse_view_type filter(UnaryPredicate predicate) {
+        /* NOTE: This would need its own implementation for a proper 1D support */
+        const auto forwarded_predicate = [&](const_reference elem, size_type, size_type) -> bool {
+            return predicate(elem);
+        };
+        return this->filter(forwarded_predicate);
+    }
+
+    template <typename UnaryPredicate, _enable_if_signature<UnaryPredicate, bool(const_reference, size_type)> = true>
+    sparse_view_type filter(UnaryPredicate predicate) {
+        /* NOTE: This would need its own implementation for a proper 1D support */
+        const auto forwarded_predicate = [&](const_reference elem, size_type i, size_type j) -> bool {
+            const size_type idx = this->get_idx_of_ij(i, j);
+            return predicate(elem, idx);
+        };
+        return this->filter(forwarded_predicate);
+    }
+
+    /* _utl_mixin_filtering_views_2d_mutable */
+    template <typename UnaryPredicate,
+              _enable_if_signature<UnaryPredicate, bool(const_reference, size_type, size_type)> = true>
+    sparse_view_type filter(UnaryPredicate predicate) {
+        /* This method implements actual filtering, others just forward predicates to it */
+        _ref_triplet_array triplets;
+        /* We can't preallocate triplets without scanning predicate through the whole matrix, */
+        /* so we just push back entries into a vector and use to construct a sparse view */
+        const auto         add_triplet_if_predicate = [&](reference elem, size_type i, size_type j) -> void {
+            if (predicate(elem, i, j)) triplets.push_back({i, j, elem});
+        };
+
+        this->for_each(add_triplet_if_predicate);
+
+        triplets.shrink_to_fit();
+        return sparse_view_type(this->rows(), this->cols(), std::move(triplets));
+    }
+
+    sparse_view_type diagonal() {
+        /* Sparse matrices have no better way of getting a diagonal than filtering (i == j) */
+        if constexpr (self::params::type == Type::SPARSE) {
+            return this->filter([](const_reference, size_type i, size_type j) { return i == j; });
+        }
+        /* Non-sparce matrices can just iterate over diagonal directly */
+        else {
+            const size_type    min_size = std::min(this->rows(), this->cols());
+            _ref_triplet_array triplets;
+            triplets.reserve(min_size);
+            for (size_type k = 0; k < min_size; ++k) triplets.push_back({k, k, this->operator()(k, k)});
+            return sparse_view_type(this->rows(), this->cols(), std::move(triplets));
+        }
+    }
+
+    /* _utl_mixin_sparse_views_1d_const */
+private:
+    using _cref_triplet_array = std::vector<SparseEntry2D<std::reference_wrapper<const value_type>>>;
+
+public:
+    using sparse_const_view_type = GenericTensor<value_type, self::params::dimension, Type::SPARSE,
+                                                 Ownership::CONST_VIEW, self::params::checking, Layout::SPARSE>;
+
+    template <typename UnaryPredicate, _enable_if_signature<UnaryPredicate, bool(const_reference)> = true>
+    sparse_const_view_type filter(UnaryPredicate predicate) const {
+        /* NOTE: This would need its own implementation for a proper 1D support */
+        const auto forwarded_predicate = [&](const_reference elem, size_type, size_type) -> bool {
+            return predicate(elem);
+        };
+        return this->filter(forwarded_predicate);
+    }
+
+    template <typename UnaryPredicate, _enable_if_signature<UnaryPredicate, bool(const_reference, size_type)> = true>
+    sparse_const_view_type filter(UnaryPredicate predicate) const {
+        /* NOTE: This would need its own implementation for a proper 1D support */
+        const auto forwarded_predicate = [&](const_reference elem, size_type i, size_type j) -> bool {
+            const size_type idx = this->get_idx_of_ij(i, j);
+            return predicate(elem, idx);
+        };
+        return this->filter(forwarded_predicate);
+    }
+
+    /* _utl_mixin_filtering_views_2d_const */
+    template <typename UnaryPredicate,
+              _enable_if_signature<UnaryPredicate, bool(const_reference, size_type, size_type)> = true>
+    sparse_const_view_type filter(UnaryPredicate predicate) const {
+        /* This method implements actual filtering, others just forward predicates to it */
+        _cref_triplet_array triplets;
+        /* We can't preallocate triplets without scanning predicate through the whole matrix, */
+        /* so we just push back entries into a vector and use to construct a sparse view */
+        const auto          add_triplet_if_predicate = [&](const_reference elem, size_type i, size_type j) -> void {
+            if (predicate(elem, i, j)) triplets.push_back({i, j, elem});
+        };
+
+        this->for_each(add_triplet_if_predicate);
+
+        triplets.shrink_to_fit();
+        return sparse_const_view_type(this->rows(), this->cols(), std::move(triplets));
+    }
+
+    sparse_const_view_type diagonal() const {
+        /* Sparse matrices have no better way of getting a diagonal than filtering (i ==j) */
+        if constexpr (self::params::type == Type::SPARSE) {
+            return this->filter([](const_reference, size_type i, size_type j) { return i == j; });
+        }
+        /* Non-sparce matrices can just iterate over diagonal directly */
+        else {
+            const size_type     min_size = std::min(this->rows(), this->cols());
+            _cref_triplet_array triplets;
+            triplets.reserve(min_size);
+            for (size_type k = 0; k < min_size; ++k) triplets.push_back({k, k, this->operator()(k, k)});
+            return sparse_const_view_type(this->rows(), this->cols(), std::move(triplets));
+        }
+    }
+    // TEMP:
+
     // Default ctor
     GenericTensor() noexcept = default;
 
@@ -2180,6 +2372,7 @@ _utl_template_specialization(Dimension::MATRIX, Type::DENSE, Ownership::VIEW) {
     _utl_mixin_types;
 
     _utl_mixin_extents_2d;
+    _utl_mixin_trivial_strides_2d;
     _utl_mixin_data_2d_dense;
 
     _utl_mixin_indexation_2d_dense_const;
@@ -2209,6 +2402,7 @@ _utl_template_specialization(Dimension::MATRIX, Type::DENSE, Ownership::CONST_VI
     _utl_mixin_types;
 
     _utl_mixin_extents_2d;
+    _utl_mixin_trivial_strides_2d;
     _utl_mixin_data_2d_dense;
 
     _utl_mixin_indexation_2d_dense_const;
@@ -2271,6 +2465,34 @@ public:
         : _data(data_ptr), _rows(rows), _cols(cols), _row_stride(row_stride), _col_stride(col_stride) {}
 };
 
+// ConstStridedMatrixView
+_utl_template_specialization(Dimension::MATRIX, Type::STRIDED, Ownership::CONST_VIEW) {
+    _utl_mixin_types;
+
+    _utl_mixin_extents_2d;
+    _utl_mixin_strides_2d;
+    _utl_mixin_data_2d_dense;
+
+    _utl_mixin_indexation_2d_strided_const;
+    _utl_mixin_indexable_1d_const;
+    _utl_mixin_indexable_2d_const;
+    _utl_mixin_conversions_2d_dense;
+
+public:
+    // Init-from-tensor
+    /* Accepts: Any tensor of the same type */
+    template <Ownership other_ownership, Checking other_checking, Layout other_layout>
+    GenericTensor(GenericTensor<value_type, self::params::dimension, self::params::type, other_ownership,
+                                other_checking, other_layout> &
+                  other)
+        : _data(other.data()), _rows(other.rows()), _cols(other.cols()), _row_stride(other.row_stride()),
+          _col_stride(other.col_stride()) {}
+
+    // Init-from-data
+    explicit GenericTensor(size_type rows, size_type cols, size_type row_stride, size_type col_stride, const_pointer data_ptr)
+        : _data(data_ptr), _rows(rows), _cols(cols), _row_stride(row_stride), _col_stride(col_stride) {}
+};
+
 // SparseMatrix
 _utl_template_specialization(Dimension::MATRIX, Type::SPARSE, Ownership::CONTAINER) {
     // TODO: Implement mixins
@@ -2305,14 +2527,64 @@ public:
 };
 
 // SparseMatrixView
+_utl_template_specialization(Dimension::MATRIX, Type::SPARSE, Ownership::VIEW) {
+    _utl_mixin_types;
+
+    _utl_mixin_extents_2d;
+    _utl_mixin_data_2d_sparse;
+
+    _utl_mixin_indexation_2d_sparse_const;
+    _utl_mixin_indexation_2d_sparse_mutable;
+    _utl_mixin_indexable_1d_const;
+    _utl_mixin_indexable_1d_mutable;
+    _utl_mixin_indexable_2d_const;
+    _utl_mixin_indexable_2d_mutable;
+    _utl_mixin_conversions_2d_sparse;
+
+public:
+    // Default ctor
+    GenericTensor() noexcept = default;
+
+    // Init-from-data (copy)
+    explicit GenericTensor(size_type rows, size_type cols, const std::vector<triplet_type>& data)
+        : _rows(rows), _cols(cols) {
+        this->insert_triplets(std::move(data));
+    }
+
+    // Init-from-data (move)
+    explicit GenericTensor(size_type rows, size_type cols, std::vector<triplet_type> && data)
+        : _rows(rows), _cols(cols) {
+        this->rewrite_triplets(std::move(data));
+    }
+};
+
+// SparseMatrixConstView
 _utl_template_specialization(Dimension::MATRIX, Type::SPARSE, Ownership::CONST_VIEW) {
     _utl_mixin_types;
 
     _utl_mixin_extents_2d;
     _utl_mixin_data_2d_sparse;
 
+    _utl_mixin_indexation_2d_sparse_const;
     _utl_mixin_indexable_1d_const;
     _utl_mixin_indexable_2d_const;
+    _utl_mixin_conversions_2d_sparse;
+
+public:
+    // Default ctor
+    GenericTensor() noexcept = default;
+
+    // Init-from-data (copy)
+    explicit GenericTensor(size_type rows, size_type cols, const std::vector<triplet_type>& data)
+        : _rows(rows), _cols(cols) {
+        this->insert_triplets(std::move(data));
+    }
+
+    // Init-from-data (move)
+    explicit GenericTensor(size_type rows, size_type cols, std::vector<triplet_type> && data)
+        : _rows(rows), _cols(cols) {
+        this->rewrite_triplets(std::move(data));
+    }
 };
 
 

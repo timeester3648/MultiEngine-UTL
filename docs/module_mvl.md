@@ -123,8 +123,8 @@ class GenericTensor {
     size_type       size() const;
     size_type       rows() const; // requires MATRIX
     size_type       cols() const; // requires MATRIX
-    size_type row_stride() const; // requires MATRIX && STRIDED
-    size_type col_stride() const; // requires MATRIX && STRIDED
+    size_type row_stride() const; // requires MATRIX
+    size_type col_stride() const; // requires MATRIX
     
     const_pointer  data() const; // requires DENSE || STRIDED
     pointer        data();       // requires DENSE || STRIDED
@@ -179,15 +179,43 @@ class GenericTensor {
     const self& for_each(Callable<void(const_reference, size_type, size_type)> func) const; // requires MATRIX
     
     // - Mutating algorithms -
-    const self& for_each(Callable<void(reference)>                       func) const;
-    const self& for_each(Callable<void(reference, size_type)>            func) const;
-    const self& for_each(Callable<void(reference, size_type, size_type)> func) const; // requires MATRIX
+    self& for_each(Callable<void(reference)>                       func);
+    self& for_each(Callable<void(reference, size_type)>            func);
+    self& for_each(Callable<void(reference, size_type, size_type)> func); // requires MATRIX
     self& fill(const_reference value);
     
     self&        sort(); // requires value_type::operator<()
     self& stable_sort(); // requires value_type::operator<()
     self&        sort(Callable<bool(const_reference, const_reference)> cmp);
     self& stable_sort(Callable<bool(const_reference, const_reference)> cmp);
+    
+    // - Block Subviews -
+    using block_view_type;
+    using block_const_view_type;
+    
+    block_view_type       block(size_type i, size_type j, size_type rows, size_type cols);       // TODO:TODO:TODO:
+    block_const_view_type block(size_type i, size_type j, size_type rows, size_type cols) const; // TODO:TODO:TODO:
+    
+    block_view_type       row();       // TODO:TODO:TODO:
+    block_const_view_type row() const; // TODO:TODO:TODO:
+    
+    block_view_type       col();       // TODO:TODO:TODO:
+    block_const_view_type col() const; // TODO:TODO:TODO:
+    
+    // - Sparse Subviews -
+    using sparse_view_type;
+    using sparse_const_view_type;
+    
+    sparse_view_type filter(Callable<bool(const_reference)>                       predicate);
+    sparse_view_type filter(Callable<bool(const_reference, size_type)>            predicate);
+    sparse_view_type filter(Callable<bool(const_reference, size_type, size_type)> predicate); // requires MATRIX
+    
+    sparse_const_view_type filter(Callable<bool(const_reference)>                       predicate) const;
+    sparse_const_view_type filter(Callable<bool(const_reference, size_type)>            predicate) const;
+    sparse_const_view_type filter(Callable<bool(const_reference, size_type, size_type)> predicate) const; // requires MATRIX
+    
+    sparse_view_type       diagonal();
+    sparse_const_view_type diagonal() const; // requires MATRIX
     
     // - Sparse operations - (require SPARSE)
     using triplet_type = SparseEntry2D<                             value_type >; // requires MATRIX && CONTAINER
@@ -227,10 +255,120 @@ class GenericTensor {
 
 METHOD_DESCRIPTION.
 
-## Example 1 (EXAMPLE_NAME)
+## Example N (NAME)
 
 [ [Run this code](LINK) ]
 ```cpp
+using namespace utl;
+
+CODE
+```
+
+## Example 1 (Declaring and indexing a matrix)
+
+[ [Run this code](LINK) ]
+```cpp
+using namespace utl;
+
+// Declare regular dense matrix
+mvl::Matrix<int> A = {
+    { 1, 2, 3 },
+    { 4, 5, 6 }
+};
+
+// 2D indexation
+assert( A(0, 1) == 2 );
+
+// 1D indexation
+assert( A[3] == 3 );
+
+// Range-based loops
+for (const auto &element : A) assert( element > 0 );
+
+// std::vector-like API & iterators
+assert(  A.front()     = 1 );
+assert(  A.back()      = 6 );
+assert( *A.cbegin()    = 1 );
+assert( *A.cend() - 1  = 6 );
+
+// Printing
+std::cout << A.stringify();
+```
+
+## Example N (Various math operations)
+
+[ [Run this code](LINK) ]
+```cpp
+using namespace utl;
+
+// Compute ||A||_inf norm
+const auto norm = A.transform(std::abs).sum()
+    
+// Compute tr(A)
+const auto tr = A.diagonal().sum();
+
+// Split matrix into block views
+auto upper_half = A.block(0, 0,            0, A.size() / 2 - 1 );
+auto lower_half = A.block(0, 0, A.size() / 2, A.size() - 1     );
+
+// Set diagonal to { 1, 2, 3, ... , N }
+A.diagonal().for_each([](int &elem, size_t idx){ elem = idx; });
+```
+
+## Example N (Wrapping external data into views)
+
+[ [Run this code](LINK) ]
+```cpp
+using namespace utl;
+
+// Some raw data
+// (for example, received from external 'C' library)
+// (let's also assume it's immutable and uses col-major layout for added challenge)
+const float  data[] = { 1.f, 2.f, 3.f, 4.f, 5.f, 6.f };
+const size_t rows   = 2;
+const size_t cols   = 3;
+
+// Wrap data into MVL view and use it as a regular matrix
+mvl::ConstMatrixView<float, mvl::Checking::NONE, mvl::Layout::CR> A(
+    rows, cols, data
+);
+
+// This makes MVL easily compatible with almost every 3rd party
+// matrix library, views merely wrap around external data and expose
+// MVL matrix functionality with no copying/conversion overhead
+```
+
+## Example N (Working with images)
+
+[ [Run this code](LINK) ]
+```cpp
+using namespace utl;
+
+// Raw image RGB data
+// (outputted by most image decoders)
+const uint8_t* data     = { /* ... */ };
+const size_t   channels = 3;
+const size_t   w        = 300;
+const size_t   h        = 200;
+
+// View into R-G-B channels of an image as individual matrices
+mvl::StridedMatrixView<uint8_t> R(rows, cols, 0, channels, data + 0);
+mvl::StridedMatrixView<uint8_t> G(rows, cols, 0, channels, data + 1);
+mvl::StridedMatrixView<uint8_t> B(rows, cols, 0, channels, data + 2);
+
+// Convert image to grayscale using linear formula
+mvl::Matrix grayscale(w, h);
+grayscale.for_each([&](uint8_t &elem, size_t i, size_t j){
+    elem = 0.2126 * R(i, j)  + 0.7152 * G(i, j) + 0.0722 * B(i, j);
+});
+```
+
+## Example N (Working with sparse matrices)
+
+[ [Run this code](LINK) ]
+```cpp
+using namespace utl;
+
 CODE
 ```
 

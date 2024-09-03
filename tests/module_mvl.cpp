@@ -1,5 +1,6 @@
 // __________ TEST FRAMEWORK & LIBRARY  __________
 
+#include <cstddef>
 #include <numeric>
 #include <pstl/glue_execution_defs.h>
 #include <type_traits>
@@ -16,45 +17,27 @@
 
 #include <algorithm>
 #include <array>
-#include <stdexcept>
 #include <execution>
+#include <stdexcept>
 
 // _____________ TEST IMPLEMENTATION _____________
 
 using namespace utl;
 
-struct Dummy {
-    std::vector<mvl::SparseEntry2D<double>> _data;
-    
-    int _binary_search_ij(std::size_t i, std::size_t j) const {
-        std::size_t l = 0;
-        std::size_t r = _data.size();
-        
-        while (l <= r) {
-            std::size_t middle = (l + r) / 2;
-            
-            if (_sparse_entry_2d_ordering(_data[l], _data[r]))
-                l = middle + 1; // trim left half
-            else
-                r = middle - 1; // trim right half
-        }
-        
-        return -1;
-    }
-};
-
-
 TEST_CASE("Sparse matrix basic functionality test") {
     // Build sparse matrix + insert some more
-    mvl::SparseMatrix<int> mat(
-        4, 4,
-        {
-            { 0, 0, 10 }, { 1, 1, 20 }, { 2, 2, 30 }, { 3, 3, 40 }
-        }
-    );
-    
-    mat.insert_triplets({{ 0, 3, 50 }});
-    
+    mvl::SparseMatrix<int> mat(4, 4,
+                               {
+                                   {0, 0, 10},
+                                   {1, 1, 20},
+                                   {2, 2, 30},
+                                   {3, 3, 40}
+    });
+
+    mat.insert_triplets({
+        {0, 3, 50}
+    });
+
     // Check basic assumptions
     CHECK(mat.size() == 5);
     CHECK(mat(0, 0) == 10);
@@ -65,10 +48,13 @@ TEST_CASE("Sparse matrix basic functionality test") {
     CHECK(mat.contains_index(0, 3) == true);
     CHECK(mat.contains_index(0, 2) == false);
     CHECK(mat.sum() == 10 + 20 + 30 + 40 + 50);
-    
+
     // Check after erasing a few triplets
-    mat.erase_triplets({ { 0, 0 }, { 1, 1} });
-    
+    mat.erase_triplets({
+        {0, 0},
+        {1, 1}
+    });
+
     CHECK(mat.size() == 3);
     CHECK(mat(2, 2) == 30);
     CHECK(mat(3, 3) == 40);
@@ -78,63 +64,65 @@ TEST_CASE("Sparse matrix basic functionality test") {
 
 TEST_CASE("Strided view sanity test") {
     std::vector<int> vec = {1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3,
-                                        1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3};
-    
-    constexpr size_t rows = 3;
-    constexpr size_t cols = 4;
-    constexpr size_t size = 12;
+                            1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3};
+
+    constexpr size_t rows  = 3;
+    constexpr size_t cols  = 4;
+    constexpr size_t size  = 12;
     constexpr size_t chunk = 3; // width of a repeating chink
-    
+
     // Unit stride
     mvl::StridedMatrixView<int> trivial_view(rows, cols * chunk, 0, 1, vec.data());
-    
+
     CHECK(trivial_view[0] == 1);
     CHECK(trivial_view[1] == 2);
     CHECK(trivial_view[2] == 3);
-    
+
     CHECK(trivial_view(0, 0) == 1);
     CHECK(trivial_view(0, 1) == 2);
     CHECK(trivial_view(0, 2) == 3);
     CHECK(trivial_view(2, 0) == 1);
     CHECK(trivial_view(2, 1) == 2);
     CHECK(trivial_view(2, 2) == 3);
-    
+
     // Non-unit col stride
     mvl::StridedMatrixView<int> view_plus0(rows, cols, 0, chunk, vec.data() + 0);
     mvl::StridedMatrixView<int> view_plus1(rows, cols, 0, chunk, vec.data() + 1);
     mvl::StridedMatrixView<int> view_plus2(rows, cols, 0, chunk, vec.data() + 2);
-    
+
     mvl::Matrix<int> expected_2 = {
-        { 3, 3, 3, 3 },
-        { 3, 3, 3, 3 },
-        { 3, 3, 3, 3 }
+        {3, 3, 3, 3},
+        {3, 3, 3, 3},
+        {3, 3, 3, 3}
     };
-    
+
     CHECK(view_plus0.sum() == size * 1);
     CHECK(view_plus1.sum() == size * 2);
     CHECK(view_plus2.sum() == size * 3);
-    
-    CHECK(view_plus2.true_for_any([&](const int &e, size_t i, size_t j) { return e == 3; }));
-    CHECK(view_plus2.true_for_all([&](const int &e, size_t i, size_t j) { return e != 2; }));
-    
+
+    CHECK(view_plus2.true_for_any([&](const int& e, size_t i, size_t j) { return e == 3; }));
+    CHECK(view_plus2.true_for_all([&](const int& e, size_t i, size_t j) { return e != 2; }));
+
     CHECK(view_plus2.compare_contents(expected_2));
-    
-    for (const auto &val : view_plus2.to_std_vector()) { CHECK(val == 3); }
-    
+
+    for (const auto& val : view_plus2.to_std_vector()) { CHECK(val == 3); }
+
     CHECK(view_plus2.contains(2) == false);
     CHECK(view_plus2.contains(3) == true);
-    
+
     CHECK(view_plus2.count(2) == 0);
     CHECK(view_plus2.count(3) == size);
-    
+
     // Non-zero row stride
     mvl::StridedMatrixView<int> view_with_row_stride(2, cols, cols * chunk, chunk, vec.data() + 2);
-    
-    for (const auto &val : view_with_row_stride) { CHECK(val == 3); }
-    
-    struct Val { int x; };
+
+    for (const auto& val : view_with_row_stride) { CHECK(val == 3); }
+
+    struct Val {
+        int x;
+    };
     mvl::Matrix<Val> mat;
-    mat.stable_sort([](const Val &l, const Val &r) -> bool { return l.x < r.x; });
+    mat.stable_sort([](const Val& l, const Val& r) -> bool { return l.x < r.x; });
 }
 
 TEST_CASE("Matrix constructors & methods derived from storage::AbstractIndexableObject behave as expected") {
@@ -608,7 +596,7 @@ TEST_CASE("Col-major ordering and transposition behave as expected") {
         mvl::ConstMatrixView<int, mvl::Checking::NONE, mvl::Layout::CR> col_view(matrix.rows(), matrix.cols(),
                                                                                  matrix.data());
 
-        //std::cout << "row_view:\n" << row_view.dump() << "col_view:\n" << col_view.dump();
+        // std::cout << "row_view:\n" << row_view.dump() << "col_view:\n" << col_view.dump();
 
         // Check contents
         CHECK(row_view(0, 0) == 0);
@@ -620,4 +608,55 @@ TEST_CASE("Col-major ordering and transposition behave as expected") {
         CHECK(col_view(1, 0) == 1);
         CHECK(col_view(2, 0) == 2);
     }
+}
+
+TEST_CASE("Matrix blocking/filtering functionality test") {
+    mvl::Matrix<int> mat = {
+        {8, 7, 7, 7, 8, 0}, //
+        {7, 8, 0, 0, 8, 0}, //
+        {7, 0, 8, 0, 8, 0}, //
+        {7, 0, 0, 8, 8, 0}, //
+        {3, 3, 3, 3, 8, 0}  //
+    };
+    
+    // Test mutable filtering
+    const auto view_1 = mat.filter([](const int &elem){ return elem == 8; }).fill(10);
+    const auto view_2 = mat.filter([](const int &elem){ return elem == 3; }).fill(20);
+    const auto view_3 = mat.filter([](const int &elem){ return elem == 7; }).fill(30);
+    
+    CHECK(view_1.size() == 9);
+    CHECK(view_2.size() == 4);
+    CHECK(view_3.size() == 6);
+    CHECK(view_1.size() * 10 == view_1.sum());
+    CHECK(view_2.size() * 20 == view_2.sum());
+    CHECK(view_3.size() * 30 == view_3.sum());
+    
+    // Test const filtering
+    const auto &cref = mat;
+    
+    const auto const_view_1 = cref.filter([](const int &elem){ return elem == 10; });
+    const auto const_view_2 = cref.filter([](const int &elem){ return elem == 20; });
+    const auto const_view_3 = cref.filter([](const int &elem){ return elem == 30; });
+    const auto const_diagonal_view = cref.diagonal();
+    
+    CHECK(const_view_1.size() == 9);
+    CHECK(const_view_2.size() == 4);
+    CHECK(const_view_3.size() == 6);
+    CHECK(const_diagonal_view.size() == 5);
+    CHECK(const_view_1.size() * 10 == const_view_1.sum());
+    CHECK(const_view_2.size() * 20 == const_view_2.sum());
+    CHECK(const_view_3.size() * 30 == const_view_3.sum());
+    CHECK(const_diagonal_view.size() * 10 == const_diagonal_view.sum());
+    
+    auto middle_block = cref.block(1, 1, 3, 4);
+    CHECK(middle_block.rows() == 3);
+    CHECK(middle_block.cols() == 4);
+    CHECK(middle_block.size() == 12);
+    CHECK(middle_block(0, 0) == 10);
+    CHECK(middle_block(1, 1) == 10);
+    CHECK(middle_block(2, 2) == 10);
+    CHECK(middle_block(0, 1) == 0);
+    CHECK(middle_block(0, 2) == 0);
+    CHECK(middle_block(0, 3) == 10);
+    //const auto eights_diagonal = eights.filter([](const int &, size_t i, size_t j){ return i == j; });
 }

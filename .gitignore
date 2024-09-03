@@ -5,6 +5,10 @@
 !*/
 # Whitelist itself
 !.gitignore
+# Whitelist toolchain configuration files
+!.clang-format
+!.clang-tidy
+!.clangd
 # Whilelist allowed extensions
 # > Code
 !*.h

@@ -63,10 +63,15 @@ Secondary design goals also include:
 
 While the library itself consists of a single header, it was built and tested using a number of third-party tools and libraries, some of which are embedded in a repo.
 
-| Tool | Version | Used for | Embedded in repo |
+| Tool | Version | Used for |
+| - | - | - |
+| [clang-format](https://clang.llvm.org/docs/ClangFormat.html) | **v.14.0.0** | Automatic code formatting |
+| [clangd](https://clangd.llvm.org) | **v.15.0.7** | Language server functionality |
+| [CMake](https://cmake.org) | **v.3.2.11** | Build and test automation |
+| [valgrind](https://valgrind.org) | **v.3.18.1** | Memory leak detection |
+
+| Library | Version | Used for | Embedded in repo |
 | - | - | - | - |
-| [clang-format](https://clang.llvm.org/docs/ClangFormat.html) | **v.14.0.0** | Automatic code formatting | ✘ |
-| [CMake](https://cmake.org) | **v.3.2.11** | Build and test automation | ✘ |
 | [doctest](https://github.com/doctest/doctest) | **v.2.4.11** | Unit testing | ✔ |
 | [nanobench](https://github.com/martinus/nanobench) | **v.4.3.11** | Benchmarking | ✔ |
 
