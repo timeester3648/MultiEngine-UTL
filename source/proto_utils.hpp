@@ -32,14 +32,13 @@
 // -------------------------------
 // --------- utl::config ---------
 // -------------------------------
-#include <cstddef>
-#include <random>
 #if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_CONFIG)
 #ifndef UTLHEADERGUARD_CONFIG
 #define UTLHEADERGUARD_CONFIG
 
 // ======== header guard start ========
 
+#include <cmath>
 #include <fstream>
 #include <initializer_list>
 #include <ios>
@@ -71,21 +70,28 @@ namespace utl::config {
 // --- Export config ---
 template <typename T>
 inline void _write_formatted_value_to_ostream(std::ostream& os, const T& value) {
-    constexpr bool is_string = std::is_convertible<T, std::string_view>::value;
-    constexpr bool is_array  = !std::is_scalar<T>::value;
-
+    constexpr bool is_string = std::is_convertible_v<T, std::string_view>;
+    constexpr bool is_float = std::is_floating_point_v<T>;
+    constexpr bool is_array  = !is_string && !std::is_scalar_v<T>;
+    
+    // String => Add quotes
+    if constexpr (is_string) {
+        os << "\"" << value << "\"";
+    }
+    // Float => Save NaN/Inf cases as strings, since JSON spec doesn't include IEEE 754,
+    //          may result in non-homogenous arrays like [ 1.0, "inf" , 3.0, 4.0, "nan" ]
+    else if constexpr (is_float) {
+        if (std::isfinite(value)) os << value;
+        else os << "\"" << value << "\"";
+    }
     // Array => Expand recursively, add brackets and comma separators
-    if constexpr (is_array) {
+    else if constexpr (is_array) {
         os << "[ ";
         for (auto it = value.begin(); it != value.end(); ++it) {
             _write_formatted_value_to_ostream(os, *it);
             if (std::next(it) != value.end()) os << ", "; // prevents trailing comma
         }
         os << " ]";
-    }
-    // String => Add quotes
-    else if constexpr (is_string) {
-        os << "\"" << value << "\"";
     }
     // Numeric/Bool => Nothing
     else {
@@ -667,6 +673,8 @@ public:
 
 // ======== header guard start ========
 
+#include <cstddef>
+#include <random>
 #include <ctime>
 #include <initializer_list>
 #include <limits>
@@ -1074,6 +1082,8 @@ inline void system(double ms) { std::this_thread::sleep_for(_chrono_ns(static_ca
 // ----------------------------
 // --------- utl::mvl ---------
 // ----------------------------
+#include <tuple>
+#include <utility>
 #if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_MVL)
 #ifndef UTLHEADERGUARD_MVL
 #define UTLHEADERGUARD_MVL
@@ -1097,14 +1107,18 @@ namespace utl::mvl {
 
 // NOTE: Docs here (I dread the day I'll have to explain this)
 //
-// Here matrix/vector/view/etc code reuse is implemented though macro 'mixins', while preprocessor appoarch is
-// obviously not ideal, the alternatives have proven themselves either unsuitable or unrealistically cumbersome.
-// Below is a list of possible approaches:
+// Here matrix/vector/view/etc code reuse is implemented though a whole buch of conditional compilation with
+// SFINAE, abuse of conditional inheritance, conditional types and constexpr if's. While not perfect, this is
+// the best working approach so far. Below is a list of approaches that has been considered & tried:
 //
 // 1) No code reuse, all classes implemented manually - unrealistically cumbersome, huge code duplication
 //
+//    => [-] UNSUITABLE APPROACH
+//
 // 2) Regular OOP with virtual classes - having vtables in lightweigh containers is highly undesirable, we can
 //    avoid this using CRTP however we run into issues with multiple inheritance (see below)
+//
+//    => [-] UNSUITABLE APPROACH
 //
 // 3) CRTP - we unavoidably run into multiple inheritance issues (diamond problem) with concepts like:
 //       [mutable-matrix-like] : [const-matrix-like] & [mutable-iterable] where both parents derive from
@@ -1120,16 +1134,39 @@ namespace utl::mvl {
 //    return type to all base classes we end up with extremely unwieldy template arguments that make compile errors and
 //    refactoring a challenge.
 //
+//    => [~] SUITABLE, BUT VERY PROBLEMATIC APPROACH
+//
 // 4) Template-based mixins without CRTP - these allow to add functionality on top of a class, essentially it works like
 // "inverted" CRTP
 //    from the code logic POV. While being almost a perfect solution, it doesn't allow us to return objects of derived
 //    type from base class methods, which is a requirement for the intended matrix API.
+//
+//    => [-] UNSUITABLE APPROACH
 //
 // 5) Macro-based mixins - insert functionality directly in a class, a simple way of doing exactly what we want.
 //    "Mixed-in" methods are simply functions implemented in terms of certain "required" methods.
 //    Doesn't lead to huge template chains and doesn't have any inheritance at all. The main downside is being
 //    preprocessor based, which exposes some identifiers to a global namespace and makes all "connection points"
 //    in logic dependant on correct naming inside macros, rather than actual semantical symbols.
+//
+//    Difficult to work with due to being ignored by the language server, gets increasingly cumbersome as the number of
+//    classes grows and still has significant code duplication (vector/matrix * dense/strided/sparse *
+//    * container/view/const_view = 18 manually created definitions).
+//
+//    => [+-] SUITABLE, BUT HEAVILY FLAWED APPROACH
+//
+// 6) A single class with all pars of API correctly enabled/disabled through SFINAE. Closes thing to a sensible
+//    approach with minimal (basically none) code duplication. However it has a number of non-trivial quirks
+//    when it comes to conditionally compiling member variables, types & functions (every group has a quirk of
+//    its own, functions are the least problematic). Some of such quirks limit possible conditional API (member
+//    types suffer from this) or, for example, prevent use of initialization lists on conditionally compiled
+//    constructors (big sad).
+//
+//    A less obvious downside compared to macros, is that it doesn't get handles as well by the language server
+//    autocomplete - SFINAE-disabled methods still show up as autocomplete suggestions, even if they get marked
+//    as missing immediately upon writing the whole name.
+//
+//    => [+] DIFFICULT, BUT WORKABLE, BEST APPROACH SO FAR
 
 // _________ IMPLEMENTATION _________
 
@@ -1175,6 +1212,11 @@ public:
     constexpr _observer_ptr() noexcept = default;
     constexpr _observer_ptr(std::nullptr_t) noexcept {}
     explicit _observer_ptr(element_type* ptr) : _data(ptr) {}
+
+    _observer_ptr& operator=(element_type* ptr) {
+        this->_data = ptr;
+        return *this;
+    }
 
     // - Interface -
     constexpr element_type* get() const noexcept { return _data; }
@@ -1307,7 +1349,6 @@ private:
 
 // - Helpers -
 
-// Utility for creating unique_ptr arrays
 template <class T>
 std::unique_ptr<T[]> make_unique_ptr_array(size_t size) {
     return std::unique_ptr<T[]>(new T[size]);
@@ -1369,10 +1410,10 @@ inline bool _index_2d_sparse_ordering(const Index2D& l, const Index2D& r) noexce
 }
 
 // Shortcut template used to deduce type of '_data' based on ownership inside mixins
-template <typename MatrixType, typename ContainerResult, typename ViewResult, typename ConstViewResult>
-using _choose_based_on_ownership = std::conditional_t<
-    MatrixType::params::ownership == Ownership::CONTAINER, ContainerResult,
-    std::conditional_t<MatrixType::params::ownership == Ownership::VIEW, ViewResult, ConstViewResult>>;
+template <Ownership ownership, typename ContainerResult, typename ViewResult, typename ConstViewResult>
+using _choose_based_on_ownership =
+    std::conditional_t<ownership == Ownership::CONTAINER, ContainerResult,
+                       std::conditional_t<ownership == Ownership::VIEW, ViewResult, ConstViewResult>>;
 
 
 // - Type traits -
@@ -1392,727 +1433,87 @@ _utl_define_operator_support_type_trait(_supports_multiplication, *);
 _utl_define_operator_support_type_trait(_supports_comparison, <);
 _utl_define_operator_support_type_trait(_supports_eq_comparison, ==);
 
-// Shortcut for enable_if'ing based on value_type traits
-// Note: 'value_type = value_type' is crucial here, it allows function to be rejected without rejecting the whole class
-#define _utl_require(condition_)                                                                                       \
-    template <typename value_type = value_type, typename std::enable_if_t<condition_, bool> = true>
-
 // - Template macros -
 
-#define _utl_template_full_args                                                                                        \
-    template <class T, Dimension _dimension, Type _type, Ownership _ownership, Checking _checking, Layout _layout>
+#define _utl_template_arg_defs                                                                                         \
+    class T, Dimension _dimension, Type _type, Ownership _ownership, Checking _checking, Layout _layout
 
-#define _utl_template_param_args                                                                                       \
-    template <Dimension _dimension, Type _type, Ownership _ownership, Checking _checking, Layout _layout>
+#define _utl_template_arg_vals T, _dimension, _type, _ownership, _checking, _layout
 
-// NOTE: This trick with inheritance allows us to forward template arguments to member variables before entering
-// class definition, without this, 'params' struct would have no automatic way of getting 'dimension_', 'type_'
-// and 'ownership_' of template specialization
-#define _utl_template_specialization(dimension_, type_, ownership_)                                                    \
-    template <class T, Checking _checking, Layout _layout>                                                             \
-    class GenericTensor<T, dimension_, type_, ownership_, _checking, _layout>                                          \
-        : public _params_wrapper<dimension_, type_, ownership_, _checking, _layout>
+#define _utl_require(condition_)                                                                                       \
+    typename value_type = T, Dimension dimension = _dimension, Type type = _type, Ownership ownership = _ownership,    \
+             Checking checking = _checking, Layout layout = _layout, std::enable_if_t<condition_, bool> = true
 
+#define _utl_reqs(condition_) template <_utl_require(condition_)>
 
-// - Mixins -
+// - Data member dummy classes -
 
-// - Types -
+template <int id>
+struct _nothing {};
 
-#define _utl_mixin_types                                                                                               \
-private:                                                                                                               \
-    using type_wrapper = _types<T>;                                                                                    \
-                                                                                                                       \
-public:                                                                                                                \
-    using self = GenericTensor;                                                                                        \
-                                                                                                                       \
-    using value_type      = typename type_wrapper::value_type;                                                         \
-    using size_type       = typename type_wrapper::size_type;                                                          \
-    using difference_type = typename type_wrapper::difference_type;                                                    \
-    using reference       = typename type_wrapper::reference;                                                          \
-    using const_reference = typename type_wrapper::const_reference;                                                    \
-    using pointer         = typename type_wrapper::pointer;                                                            \
-    using const_pointer   = typename type_wrapper::const_pointer;                                                      \
-                                                                                                                       \
-private:                                                                                                               \
-    static_assert(true)
+template <_utl_template_arg_defs>
+class _2d_extents {
+private:
+    using size_type = typename _types<T>::size_type;
 
+public:
+    size_type _rows = 0;
+    size_type _cols = 0;
+};
 
-// - Members -
+template <_utl_template_arg_defs>
+class _2d_strides {
+private:
+    using size_type = typename _types<T>::size_type;
 
-// Requirements:
-//    > NONE
-#define _utl_mixin_extents_2d                                                                                          \
-private:                                                                                                               \
-    size_type _rows = 0;                                                                                               \
-    size_type _cols = 0;                                                                                               \
-                                                                                                                       \
-public:                                                                                                                \
-    size_type rows() const noexcept { return this->_rows; }                                                            \
-    size_type cols() const noexcept { return this->_cols; }                                                            \
-                                                                                                                       \
-private:                                                                                                               \
-    static_assert(true)
+public:
+    size_type _row_stride = 0;
+    size_type _col_stride = 0;
+};
 
+template <_utl_template_arg_defs>
+struct _2d_dense_data {
+private:
+    using value_type = typename _types<T>::value_type;
+    using _data_t    = _choose_based_on_ownership<_ownership, std::unique_ptr<value_type[]>, _observer_ptr<value_type>,
+                                               _observer_ptr<const value_type>>;
 
-// Requirements:
-//    > NONE
-#define _utl_mixin_strides_2d                                                                                          \
-private:                                                                                                               \
-    size_type _row_stride;                                                                                             \
-    size_type _col_stride;                                                                                             \
-                                                                                                                       \
-public:                                                                                                                \
-    size_type row_stride() const noexcept { return this->_row_stride; }                                                \
-    size_type col_stride() const noexcept { return this->_col_stride; }                                                \
-                                                                                                                       \
-private:                                                                                                               \
-    static_assert(true)
+public:
+    _data_t _data;
+};
 
+template <_utl_template_arg_defs>
+struct _2d_sparse_data {
+private:
+    using value_type = typename _types<T>::value_type;
+    using _triplet_t = _choose_based_on_ownership<_ownership, SparseEntry2D<value_type>,
+                                                  SparseEntry2D<std::reference_wrapper<value_type>>,
+                                                  SparseEntry2D<std::reference_wrapper<const value_type>>>;
 
-// Requirements:
-//    > NONE
-#define _utl_mixin_trivial_strides_2d                                                                                  \
-public:                                                                                                                \
-    constexpr size_type row_stride() const noexcept {                                                                  \
-        if constexpr (self::params::layout == Layout::RC) return 0;                                                    \
-        if constexpr (self::params::layout == Layout::CR) return 1;                                                    \
-        _unreachable();                                                                                                 \
-    }                                                                                                                  \
-                                                                                                                       \
-    constexpr size_type col_stride() const noexcept {                                                                  \
-        if constexpr (self::params::layout == Layout::RC) return 1;                                                    \
-        if constexpr (self::params::layout == Layout::CR) return 0;                                                    \
-        _unreachable();                                                                                                 \
-    }                                                                                                                  \
-                                                                                                                       \
-private:                                                                                                               \
-    static_assert(true)
+public:
+    using triplet_type = _triplet_t;
 
-
-// Requirements:
-//    > NONE
-#define _utl_mixin_data_2d_dense                                                                                       \
-private:                                                                                                               \
-    using _data_t = _choose_based_on_ownership<self, std::unique_ptr<value_type[]>, _observer_ptr<value_type>,         \
-                                               _observer_ptr<const value_type>>;                                       \
-                                                                                                                       \
-public:                                                                                                                \
-    _data_t _data;                                                                                                     \
-                                                                                                                       \
-private:                                                                                                               \
-    static_assert(true)
-
-
-// Requirements:
-//    > NONE
-#define _utl_mixin_data_2d_sparse                                                                                      \
-private:                                                                                                               \
-    using _triplet_t =                                                                                                 \
-        _choose_based_on_ownership<self, SparseEntry2D<value_type>, SparseEntry2D<std::reference_wrapper<value_type>>, \
-                                   SparseEntry2D<std::reference_wrapper<const value_type>>>;                           \
-                                                                                                                       \
-public:                                                                                                                \
-    using triplet_type = _triplet_t;                                                                                   \
-                                                                                                                       \
-    std::vector<triplet_type> _data;                                                                                   \
-                                                                                                                       \
-    self& insert_triplets(const std::vector<triplet_type>& triplets) {                                                 \
-        /* Bulk-insert triplets and sort by index */                                                                   \
-        const auto ordering = [](const triplet_type& l, const triplet_type& r) -> bool {                               \
-            return (l.i < r.i) && (l.j < r.j);                                                                         \
-        };                                                                                                             \
-                                                                                                                       \
-        this->_data.insert(this->_data.end(), triplets.begin(), triplets.end());                                       \
-        std::sort(this->_data.begin(), this->_data.end(), ordering);                                                   \
-                                                                                                                       \
-        return *this;                                                                                                  \
-    }                                                                                                                  \
-                                                                                                                       \
-    self& rewrite_triplets(std::vector<triplet_type>&& triplets) {                                                     \
-        /* Move-construct all triplets at once and sort by index */                                                    \
-        const auto ordering = [](const triplet_type& l, const triplet_type& r) -> bool {                               \
-            return (l.i < r.i) && (l.j < r.j);                                                                         \
-        };                                                                                                             \
-                                                                                                                       \
-        this->_data = std::move(triplets);                                                                             \
-        std::sort(this->_data.begin(), this->_data.end(), ordering);                                                   \
-                                                                                                                       \
-        return *this;                                                                                                  \
-    }                                                                                                                  \
-                                                                                                                       \
-    self& erase_triplets(std::vector<Index2D> indices) {                                                               \
-        /* Erase triplets with {i, j} from 'indices' using the fact that both */                                       \
-        /* 'indices' and triplets are sorted. We can scan through triplets once */                                     \
-        /* while advancing 'cursor' when 'indices[cursor]' gets deleted, which */                                      \
-        /* result in all necessary triplets being marked for erasure in order. */                                      \
-        std::sort(indices.begin(), indices.end(), _index_2d_sparse_ordering);                                          \
-        std::size_t cursor = 0;                                                                                        \
-                                                                                                                       \
-        const auto erase_condition = [&](const triplet_type& triplet) -> bool {                                        \
-            /* Stop erasing once all target indices are handled */                                                     \
-            if (cursor == indices.size()) return false;                                                                \
-            if (indices[cursor].i == triplet.i && indices[cursor].j == triplet.j) {                                    \
-                ++cursor;                                                                                              \
-                return true;                                                                                           \
-            }                                                                                                          \
-            return false;                                                                                              \
-        };                                                                                                             \
-                                                                                                                       \
-        const auto iter = std::remove_if(this->_data.begin(), this->_data.end(), erase_condition);                     \
-        this->_data.erase(iter, this->_data.end());                                                                    \
-                                                                                                                       \
-        /* Re-sort triplets just in case */                                                                            \
-        const auto ordering = [](const triplet_type& l, const triplet_type& r) -> bool {                               \
-            return (l.i < r.i) && (l.j < r.j);                                                                         \
-        };                                                                                                             \
-        std::sort(this->_data.begin(), this->_data.end(), ordering);                                                   \
-                                                                                                                       \
-        return *this;                                                                                                  \
-    }                                                                                                                  \
-                                                                                                                       \
-private:                                                                                                               \
-    static_assert(true)
-
-
-/// - Methods -
-
-// Requirements:
-//    > const_reference operator()(size_type i, size_type j) const;
-//    > size_type rows() const;
-//    > size_type cols() const;
-//    > Checking checking; // member or template arg
-//    > Layout layout;     // member or template arg
-#define _utl_mixin_conversions_2d_dense                                                                                \
-private:                                                                                                               \
-    size_type _unchecked_get_idx_of_ij(size_type i, size_type j) const {                                               \
-        if constexpr (self::params::layout == Layout::RC) return i * this->cols() + j;                                 \
-        if constexpr (self::params::layout == Layout::CR) return j * this->rows() + i;                                 \
-        _unreachable();                                                                                                \
-    }                                                                                                                  \
-                                                                                                                       \
-    Index2D _unchecked_get_ij_of_idx(size_type idx) const {                                                            \
-        if constexpr (self::params::layout == Layout::RC) return {idx / this->cols(), idx % this->cols()};             \
-        if constexpr (self::params::layout == Layout::CR) return {idx % this->rows(), idx / this->rows()};             \
-        _unreachable();                                                                                                \
-    }                                                                                                                  \
-                                                                                                                       \
-public:                                                                                                                \
-    size_type get_idx_of_ij(size_type i, size_type j) const {                                                          \
-        if constexpr (self::params::checking == Checking::BOUNDS) this->_bound_check_ij(i, j);                         \
-        return _unchecked_get_idx_of_ij(i, j);                                                                         \
-    }                                                                                                                  \
-                                                                                                                       \
-    Index2D get_ij_of_idx(size_type idx) const {                                                                       \
-        if constexpr (self::params::checking == Checking::BOUNDS) this->_bound_check_idx(idx);                         \
-        return _unchecked_get_ij_of_idx(idx);                                                                          \
-    }                                                                                                                  \
-                                                                                                                       \
-    size_type extent_major() const noexcept {                                                                          \
-        if constexpr (self::params::layout == Layout::RC) return this->rows();                                         \
-        if constexpr (self::params::layout == Layout::CR) return this->cols();                                         \
-        _unreachable();                                                                                                \
-    }                                                                                                                  \
-                                                                                                                       \
-    size_type extent_minor() const noexcept {                                                                          \
-        if constexpr (self::params::layout == Layout::RC) return this->cols();                                         \
-        if constexpr (self::params::layout == Layout::CR) return this->rows();                                         \
-        _unreachable();                                                                                                \
-    }                                                                                                                  \
-                                                                                                                       \
-private:                                                                                                               \
-    static_assert(true)
-
-
-// Requirements:
-//    > const_reference operator()(size_type i, size_type j) const;
-//    > size_type size() const;
-//    > Checking checking; // member or template arg
-#define _utl_mixin_conversions_2d_sparse                                                                               \
-private:                                                                                                               \
-    size_type _search_ij(size_type i, size_type j) const noexcept {                                                    \
-        /* Returns this->size() if {i, j} wasn't found. */                                                             \
-        /* linear search for small .size() (more efficient fue to prediction and cache locality) */                    \
-        if (true) {                                                                                                    \
-            for (size_type idx = 0; idx < this->size(); ++idx)                                                         \
-                if (this->_data[idx].i == i && this->_data[idx].j == j) return idx;                                    \
-            return this->size();                                                                                       \
-        }                                                                                                              \
-        /* binary search for larger .size() (N(log2(size)) instead of N(size) asymptotically) */                       \
-    }                                                                                                                  \
-                                                                                                                       \
-public:                                                                                                                \
-    size_type get_idx_of_ij(size_type i, size_type j) const {                                                          \
-        const size_type idx = this->_search_ij(i, j);                                                                  \
-        /* Return this->size() if {i, j} wasn't found. Throw with bound checking. */                                   \
-        if constexpr (self::params::checking == Checking::BOUNDS)                                                      \
-            if (idx == this->size())                                                                                   \
-                throw std::out_of_range(_stringify("Index { ", i, ", ", j, "} in not a part of sparse matrix"));       \
-        return idx;                                                                                                    \
-    }                                                                                                                  \
-                                                                                                                       \
-    Index2D get_ij_of_idx(size_type idx) const {                                                                       \
-        if constexpr (self::params::checking == Checking::BOUNDS) this->_bound_check_idx(idx);                         \
-        return Index2D{this->_data[idx].i, this->_data[idx].j};                                                        \
-    }                                                                                                                  \
-                                                                                                                       \
-    bool contains_index(size_type i, size_type j) const noexcept { return this->_search_ij(i, j) != this->size(); }    \
-                                                                                                                       \
-private:                                                                                                               \
-    static_assert(true)
-
-
-// Requirements:
-//    > _data.get()                                         ~ provided by '_utl_mixin_data_2d_dense'
-//    > rows()                                              ~ provided by '_utl_mixin_extents_2d'
-//    > cols()                                              ~ provided by '_utl_mixin_extents_2d'
-//    > _bound_check_idx(size_type i, size_type j)          ~ provided by '_utl_mixin_indexable_2d_const'
-//    > get_idx_of_ij(i, j)                                 ~ provided by '_utl_mixin_conversions_2d_dense'
-//    > self::params::checking                              ~ provided by base class
-// Note: Bound checking in operator[] & operator() happens during index conversion when computing memory offset
-#define _utl_mixin_indexation_2d_dense_const                                                                           \
-public:                                                                                                                \
-    size_type get_memory_offset_of_idx(size_type idx) const {                                                          \
-        if constexpr (self::params::checking == Checking::BOUNDS) this->_bound_check_idx(idx);                         \
-        return idx;                                                                                                    \
-    }                                                                                                                  \
-                                                                                                                       \
-    size_type get_memory_offset_of_ij(size_type i, size_type j) const { return this->get_idx_of_ij(i, j); }            \
-                                                                                                                       \
-public:                                                                                                                \
-    const_pointer data() const noexcept { return this->_data.get(); }                                                  \
-                                                                                                                       \
-    size_type size() const noexcept { return this->rows() * this->cols(); }                                            \
-                                                                                                                       \
-    const_reference operator[](size_type idx) const { return this->data()[this->get_memory_offset_of_idx(idx)]; }      \
-                                                                                                                       \
-    const_reference operator()(size_type i, size_type j) const {                                                       \
-        return this->data()[this->get_memory_offset_of_ij(i, j)];                                                      \
-    }                                                                                                                  \
-                                                                                                                       \
-private:                                                                                                               \
-    static_assert(true)
-
-
-// Requirements:
-//    > _data.get()                                         ~ provided by '_utl_mixin_data_2d_dense'
-//    > get_memory_offset_of_idx(idx)                       ~ provided by '_utl_mixin_indexation_2d_dense_const'
-//    > this->get_memory_offset_of_ij(i, j)                 ~ provided by '_utl_mixin_indexation_2d_dense_const'
-#define _utl_mixin_indexation_2d_dense_mutable                                                                         \
-public:                                                                                                                \
-    pointer data() noexcept { return this->_data.get(); }                                                              \
-                                                                                                                       \
-    reference operator[](size_type idx) { return this->data()[this->get_memory_offset_of_idx(idx)]; }                  \
-                                                                                                                       \
-    reference operator()(size_type i, size_type j) { return this->data()[this->get_memory_offset_of_ij(i, j)]; }       \
-                                                                                                                       \
-private:                                                                                                               \
-    static_assert(true)
-
-
-// Requirements:
-//    > _data.get()                                         ~ provided by '_utl_mixin_data_2d_dense'
-//    > rows()                                              ~ provided by '_utl_mixin_extents_2d'
-//    > cols()                                              ~ provided by '_utl_mixin_extents_2d'
-//    > row_stride()                                        ~ provided by '_utl_mixin_extents_2d'
-//    > col_stride()                                        ~ provided by '_utl_mixin_extents_2d'
-//    > get_idx_of_ij(i, j)                                 ~ provided by '_utl_mixin_conversions_2d_dense'
-//    > get_ij_of_idx(idx)                                  ~ provided by '_utl_mixin_conversions_2d_dense'
-//    > self::params::layout                                ~ provided by base class
-// Note: Bound checking in operator[] & operator() happens during index conversion when computing memory offset
-#define _utl_mixin_indexation_2d_strided_const                                                                         \
-private:                                                                                                               \
-    size_type _get_memory_offset_impl(size_type idx, size_type i, size_type j) const {                                 \
-        if constexpr (self::params::layout == Layout::RC) return idx * this->col_stride() + this->row_stride() * i;    \
-        if constexpr (self::params::layout == Layout::CR) return idx * this->row_stride() + this->col_stride() * j;    \
-        _unreachable();                                                                                                \
-    }                                                                                                                  \
-                                                                                                                       \
-public:                                                                                                                \
-    size_type get_memory_offset_of_idx(size_type idx) const {                                                          \
-        const auto ij = this->get_ij_of_idx(idx);                                                                      \
-        return _get_memory_offset_impl(idx, ij.i, ij.j);                                                               \
-    }                                                                                                                  \
-                                                                                                                       \
-    size_type get_memory_offset_of_ij(size_type i, size_type j) const {                                                \
-        const auto idx = this->get_idx_of_ij(i, j);                                                                    \
-        return _get_memory_offset_impl(idx, i, j);                                                                     \
-    }                                                                                                                  \
-                                                                                                                       \
-public:                                                                                                                \
-    const_pointer data() const noexcept { return this->_data.get(); }                                                  \
-                                                                                                                       \
-    size_type size() const noexcept { return this->rows() * this->cols(); }                                            \
-                                                                                                                       \
-    const_reference operator[](size_type idx) const { return this->data()[this->get_memory_offset_of_idx(idx)]; }      \
-                                                                                                                       \
-    const_reference operator()(size_type i, size_type j) const {                                                       \
-        return this->data()[this->get_memory_offset_of_ij(i, j)];                                                      \
-    }                                                                                                                  \
-                                                                                                                       \
-private:                                                                                                               \
-    static_assert(true)
-
-
-// Requirements:
-//    > _data.get()                                         ~ provided by '_utl_mixin_data_2d_dense'
-//    > get_memory_offset_of_idx(idx)                       ~ provided by '_utl_mixin_indexation_2d_dense_const'
-//    > this->get_memory_offset_of_ij(i, j)                 ~ provided by '_utl_mixin_indexation_2d_dense_const'
-#define _utl_mixin_indexation_2d_strided_mutable                                                                       \
-public:                                                                                                                \
-    pointer data() noexcept { return this->_data.get(); }                                                              \
-                                                                                                                       \
-    reference operator[](size_type idx) { return this->data()[this->get_memory_offset_of_idx(idx)]; }                  \
-                                                                                                                       \
-    reference operator()(size_type i, size_type j) { return this->data()[this->get_memory_offset_of_ij(i, j)]; }       \
-                                                                                                                       \
-private:                                                                                                               \
-    static_assert(true)
-
-
-// Requirements:
-//    > _data.operator[]                                    ~ provided by '_utl_mixin_data_2d_sparse'
-//    > get_ij_of_idx(idx)                                  ~ provided by '_utl_mixin_conversions_2d_sparse'
-// Note: Bound checking in operator[] & operator() happens during index conversion when computing memory offset
-#define _utl_mixin_indexation_2d_sparse_const                                                                          \
-public:                                                                                                                \
-    size_type size() const noexcept { return this->_data.size(); }                                                     \
-                                                                                                                       \
-    const_reference operator[](size_type idx) const {                                                                  \
-        if constexpr (self::params::checking == Checking::BOUNDS) this->_bound_check_idx(idx);                         \
-        return this->_data[idx].value;                                                                                 \
-    }                                                                                                                  \
-                                                                                                                       \
-    const_reference operator()(size_type i, size_type j) const {                                                       \
-        if constexpr (self::params::checking == Checking::BOUNDS) this->_bound_check_idx(i, j);                        \
-        return this->_data[this->get_idx_of_ij(i, j)].value;                                                           \
-    }                                                                                                                  \
-                                                                                                                       \
-private:                                                                                                               \
-    static_assert(true)
-
-
-// Requirements:
-//    > _data.operator[]                                    ~ provided by '_utl_mixin_data_2d_sparse'
-//    > get_ij_of_idx(idx)                                  ~ provided by '_utl_mixin_conversions_2d_sparse'
-// Note: Bound checking in operator[] & operator() happens during index conversion when computing memory offset
-#define _utl_mixin_indexation_2d_sparse_mutable                                                                        \
-public:                                                                                                                \
-    reference operator[](size_type idx) {                                                                              \
-        if constexpr (self::params::checking == Checking::BOUNDS) this->_bound_check_idx(idx);                         \
-        return this->_data[idx].value;                                                                                 \
-    }                                                                                                                  \
-                                                                                                                       \
-    reference operator()(size_type i, size_type j) {                                                                   \
-        if constexpr (self::params::checking == Checking::BOUNDS) this->_bound_check_idx(i, j);                        \
-        return this->_data[this->get_idx_of_ij(i, j)].value;                                                           \
-    }                                                                                                                  \
-                                                                                                                       \
-private:                                                                                                               \
-    static_assert(true)
-
-
-// Requirements:
-//    > const_reference operator[](size_type idx) const;
-//    > size_type size() const;
-#define _utl_mixin_indexable_1d_const                                                                                  \
-private:                                                                                                               \
-    void _bound_check_idx(size_type idx) const {                                                                       \
-        if (idx >= this->size())                                                                                       \
-            throw std::out_of_range(                                                                                   \
-                _stringify("idx (which is ", idx, ") >= this->size() (which is ", this->size(), ")"));                 \
-    }                                                                                                                  \
-                                                                                                                       \
-public:                                                                                                                \
-    bool empty() const noexcept { return (this->size() == 0); }                                                        \
-                                                                                                                       \
-    const_reference front() const { return this->operator[](0); }                                                      \
-    const_reference back() const { return this->operator[](this->size() - 1); }                                        \
-                                                                                                                       \
-    std::vector<value_type> to_std_vector() const { return std::vector(this->cbegin(), this->cend()); }                \
-                                                                                                                       \
-    template <class FuncType, _enable_if_signature<FuncType, void(const_reference)> = true>                            \
-    const self& for_each(FuncType func, _for_each_tag = _for_each_tag::DUMMY) const {                                  \
-        for (size_type idx = 0; idx < this->size(); ++idx) func(this->operator[](idx));                                \
-        return *this;                                                                                                  \
-    }                                                                                                                  \
-                                                                                                                       \
-    template <class FuncType, _enable_if_signature<FuncType, void(const_reference, size_type)> = true>                 \
-    const self& for_each(FuncType func, _for_each_idx_tag = _for_each_idx_tag::DUMMY) const {                          \
-        for (size_type idx = 0; idx < this->size(); ++idx) func(this->operator[](idx), idx);                           \
-        return *this;                                                                                                  \
-    }                                                                                                                  \
-                                                                                                                       \
-    template <class PredType, _enable_if_signature<PredType, bool(const_reference)> = true>                            \
-    bool true_for_any(PredType predicate) const {                                                                      \
-        for (size_type idx = 0; idx < this->size(); ++idx)                                                             \
-            if (predicate(this->operator[](idx), idx)) return true;                                                    \
-        return false;                                                                                                  \
-    }                                                                                                                  \
-                                                                                                                       \
-    template <class PredType, _enable_if_signature<PredType, bool(const_reference, size_type)> = true>                 \
-    bool true_for_any(PredType predicate) const {                                                                      \
-        for (size_type idx = 0; idx < this->size(); ++idx)                                                             \
-            if (predicate(this->operator[](idx), idx)) return true;                                                    \
-        return false;                                                                                                  \
-    }                                                                                                                  \
-                                                                                                                       \
-    template <class PredType, _enable_if_signature<PredType, bool(const_reference)> = true>                            \
-    bool true_for_all(PredType predicate) const {                                                                      \
-        auto inversed_predicate = [&](const_reference e) -> bool { return !predicate(e); };                            \
-        return !this->true_for_any(inversed_predicate);                                                                \
-    }                                                                                                                  \
-                                                                                                                       \
-    template <class PredType, _enable_if_signature<PredType, bool(const_reference, size_type)> = true>                 \
-    bool true_for_all(PredType predicate) const {                                                                      \
-        auto inversed_predicate = [&](const_reference e, size_type idx) -> bool { return !predicate(e, idx); };        \
-        return !this->true_for_any(inversed_predicate);                                                                \
-    }                                                                                                                  \
-                                                                                                                       \
-    _utl_require(_supports_addition<value_type>::value) value_type sum() const {                                       \
-        return std::accumulate(this->cbegin(), this->cend(), value_type());                                            \
-    }                                                                                                                  \
-                                                                                                                       \
-    _utl_require(_supports_multiplication<value_type>::value) value_type product() const {                             \
-        return std::accumulate(this->cbegin(), this->cend(), value_type(), std::multiplies<value_type>());             \
-    }                                                                                                                  \
-                                                                                                                       \
-    _utl_require(_supports_comparison<value_type>::value) value_type min() const {                                     \
-        return *std::min_element(this->cbegin(), this->cend());                                                        \
-    }                                                                                                                  \
-                                                                                                                       \
-    _utl_require(_supports_comparison<value_type>::value) value_type max() const {                                     \
-        return *std::max_element(this->cbegin(), this->cend());                                                        \
-    }                                                                                                                  \
-                                                                                                                       \
-    _utl_require(_supports_comparison<value_type>::value) bool is_sorted() const {                                     \
-        return std::is_sorted(this->cbegin(), this->cend());                                                           \
-    }                                                                                                                  \
-                                                                                                                       \
-    template <typename Compare>                                                                                        \
-    bool is_sorted(Compare cmp) const {                                                                                \
-        return std::is_sorted(this->cbegin(), this->cend(), cmp);                                                      \
-    }                                                                                                                  \
-                                                                                                                       \
-    _utl_require(_supports_eq_comparison<value_type>::value) bool contains(const_reference value) const {              \
-        return std::find(this->cbegin(), this->cend(), value) != this->cend();                                         \
-    }                                                                                                                  \
-                                                                                                                       \
-    _utl_require(_supports_eq_comparison<value_type>::value) size_type count(const_reference value) const {            \
-        return std::count(this->cbegin(), this->cend(), value);                                                        \
-    }                                                                                                                  \
-                                                                                                                       \
-    using const_iterator         = _flat_iterator<const self*, type_wrapper, true>;                                    \
-    using const_reverse_iterator = std::reverse_iterator<const_iterator>;                                              \
-                                                                                                                       \
-    const_iterator cbegin() const { return const_iterator(this, 0); }                                                  \
-    const_iterator cend() const { return const_iterator(this, this->size()); }                                         \
-                                                                                                                       \
-    const_iterator begin() const { return this->cbegin(); }                                                            \
-    const_iterator end() const { return this->cend(); }                                                                \
-                                                                                                                       \
-    const_reverse_iterator crbegin() const { return const_reverse_iterator(this->cend()); }                            \
-    const_reverse_iterator crend() const { return const_reverse_iterator(this->cbegin()); }                            \
-                                                                                                                       \
-    const_reverse_iterator rbegin() const { return this->crbegin(); }                                                  \
-    const_reverse_iterator rend() const { return this->crend(); }                                                      \
-                                                                                                                       \
-private:                                                                                                               \
-    static_assert(true)
-
-
-// Requirements:
-//    > reference operator[](size_type idx);
-//    > size_type size() const;
-#define _utl_mixin_indexable_1d_mutable                                                                                \
-public:                                                                                                                \
-    reference front() { return this->operator[](0); }                                                                  \
-    reference back() { return this->operator[](this->size() - 1); }                                                    \
-                                                                                                                       \
-    template <class FuncType, _enable_if_signature<FuncType, void(reference)> = true>                                  \
-    self& for_each(FuncType func) {                                                                                    \
-        for (size_type idx = 0; idx < this->size(); ++idx) func(this->operator[](idx));                                \
-        return *this;                                                                                                  \
-    }                                                                                                                  \
-                                                                                                                       \
-    template <class FuncType, _enable_if_signature<FuncType, void(reference, size_type)> = true>                       \
-    self& for_each(FuncType func) {                                                                                    \
-        for (size_type idx = 0; idx < this->size(); ++idx) func(this->operator[](idx), idx);                           \
-        return *this;                                                                                                  \
-    }                                                                                                                  \
-                                                                                                                       \
-    self& fill(const_reference value) {                                                                                \
-        for (size_type idx = 0; idx < this->size(); ++idx) this->operator[](idx) = value;                              \
-        return *this;                                                                                                  \
-    }                                                                                                                  \
-                                                                                                                       \
-    _utl_require(_supports_comparison<value_type>::value) self& sort() {                                               \
-        std::sort(this->begin(), this->end());                                                                         \
-        return *this;                                                                                                  \
-    }                                                                                                                  \
-                                                                                                                       \
-    template <typename Compare>                                                                                        \
-    self& sort(Compare cmp) {                                                                                          \
-        std::sort(this->begin(), this->end(), cmp);                                                                    \
-        return *this;                                                                                                  \
-    }                                                                                                                  \
-    _utl_require(_supports_comparison<value_type>::value) self& stable_sort() {                                        \
-        std::stable_sort(this->begin(), this->end());                                                                  \
-        return *this;                                                                                                  \
-    }                                                                                                                  \
-                                                                                                                       \
-    template <typename Compare>                                                                                        \
-    self& stable_sort(Compare cmp) {                                                                                   \
-        std::stable_sort(this->begin(), this->end(), cmp);                                                             \
-        return *this;                                                                                                  \
-    }                                                                                                                  \
-                                                                                                                       \
-    using iterator         = _flat_iterator<self*, type_wrapper>;                                                      \
-    using reverse_iterator = std::reverse_iterator<iterator>;                                                          \
-                                                                                                                       \
-    iterator begin() { return iterator(this, 0); }                                                                     \
-    iterator end() { return iterator(this, this->size()); }                                                            \
-                                                                                                                       \
-    reverse_iterator rbegin() { return reverse_iterator(this->end()); }                                                \
-    reverse_iterator rend() { return reverse_iterator(this->begin()); }                                                \
-                                                                                                                       \
-private:                                                                                                               \
-    static_assert(true)
-// 1D iterators
-// std::vector-like API and conversions
-// 1D bound checking
-// 1D .for_each() and algos
-
-
-// Requirements:
-//    > const_reference operator()(size_type i, size_type j) const;
-//    > size_type rows() const;
-//    > size_type cols() const;
-#define _utl_mixin_indexable_2d_const                                                                                  \
-private:                                                                                                               \
-    void _bound_check_ij(size_type i, size_type j) const {                                                             \
-        if (i >= this->rows())                                                                                         \
-            throw std::out_of_range(_stringify("i (which is ", i, ") >= this->rows() (which is ", this->rows(), ")")); \
-        else if (j >= this->cols())                                                                                    \
-            throw std::out_of_range(_stringify("j (which is ", j, ") >= this->cols() (which is ", this->cols(), ")")); \
-    }                                                                                                                  \
-                                                                                                                       \
-public:                                                                                                                \
-    template <class FuncType, _enable_if_signature<FuncType, void(const_reference, size_type, size_type)> = true>      \
-    const self& for_each(FuncType func) const {                                                                        \
-        /* Loop over all 2D indices using 1D loop with idx->ij conversion */                                           \
-        /* This is just as fast and ensures looping only over existing elements in non-dense matrices */               \
-        for (size_type idx = 0; idx < this->size(); ++idx) {                                                           \
-            const auto ij = this->get_ij_of_idx(idx);                                                                  \
-            func(this->operator[](idx), ij.i, ij.j);                                                                   \
-        }                                                                                                              \
-        return *this;                                                                                                  \
-    }                                                                                                                  \
-                                                                                                                       \
-    template <class PredType, _enable_if_signature<PredType, bool(const_reference, size_type, size_type)> = true>      \
-    bool true_for_any(PredType predicate) const {                                                                      \
-        /* Loop over all 2D indices using 1D loop with idx->ij conversion */                                           \
-        /* This is just as fast and ensures looping only over existing elements in non-dense matrices */               \
-        for (size_type idx = 0; idx < this->size(); ++idx) {                                                           \
-            const auto ij = this->get_ij_of_idx(idx);                                                                  \
-            if (predicate(this->operator[](idx), ij.i, ij.j)) return true;                                             \
-        }                                                                                                              \
-        return false;                                                                                                  \
-    }                                                                                                                  \
-                                                                                                                       \
-    template <class PredType, _enable_if_signature<PredType, bool(const_reference, size_type, size_type)> = true>      \
-    bool true_for_all(PredType predicate) const {                                                                      \
-        /* We can reuse .true_for_any() with inverted predicate due to following conjecture: */                        \
-        /* FOR_ALL (predicate)  ~  ! FOR_ANY (!predicate) */                                                           \
-        auto inversed_predicate = [&](const_reference e, size_type i, size_type j) -> bool {                           \
-            return !predicate(e, i, j);                                                                                \
-        };                                                                                                             \
-        return !this->true_for_any(inversed_predicate);                                                                \
-    }                                                                                                                  \
-                                                                                                                       \
-    template <Type other_type, Ownership other_ownership, Checking other_checking, Layout other_layout>                \
-    bool compare_contents(const GenericTensor<value_type, self::params::dimension, other_type, other_ownership,        \
-                                              other_checking, other_layout>& other) const {                            \
-        /* Surface-level checks */                                                                                     \
-        if ((this->rows() != other.rows()) || (this->cols() != other.cols())) return false;                            \
-        /* Compare while respecting sparsity */                                                                        \
-        constexpr bool is_sparse_l = (self::params::type == Type::SPARSE);                                             \
-        constexpr bool is_sparse_r = (std::remove_reference_t<decltype(other)>::params::type == Type::SPARSE);         \
-        /* Same sparsity comparison */                                                                                 \
-        if constexpr (is_sparse_l == is_sparse_r) {                                                                    \
-            return this->size() == other.size() &&                                                                     \
-                   this->true_for_all([&](const_reference e, size_type i, size_type j) { return e == other(i, j); });  \
-        }                                                                                                              \
-        /* Different sparsity comparison */                                                                            \
-        /* TODO: Impl here and use .all_of() OR .any_of() */                                                           \
-        return true;                                                                                                   \
-    }                                                                                                                  \
-                                                                                                                       \
-private:                                                                                                               \
-    static_assert(true)
-
-
-// Requirements:
-//    > const_reference operator()(size_type i, size_type j) const;
-//    > size_type rows() const;
-//    > size_type cols() const;
-#define _utl_mixin_indexable_2d_mutable                                                                                \
-public:                                                                                                                \
-    template <class FuncType, _enable_if_signature<FuncType, void(reference, size_type, size_type)> = true>            \
-    self& for_each(FuncType func, _for_each_ij_tag = _for_each_ij_tag::DUMMY) {                                        \
-        for (size_type idx = 0; idx < this->size(); ++idx) {                                                           \
-            const auto ij = this->get_ij_of_idx(idx);                                                                  \
-            func(this->operator[](idx), ij.i, ij.j);                                                                   \
-        }                                                                                                              \
-        return *this;                                                                                                  \
-    }                                                                                                                  \
-                                                                                                                       \
-private:                                                                                                               \
-    static_assert(true)
-// 1D <-> 2D index conversions
-// 2D bound checking
-// 2D .for_each() and algos
-
-
-// Requirements:
-//    > ????
-#define _utl_mixin_filtering_ops                                                                                       \
-public:                                                                                                                \
-private:                                                                                                               \
-    static_assert(true)
-
-
-// Requirements:
-//    > self& operator=(const self& other)
-#define _utl_mixin_default_constructors_dense                                                                          \
-public:                                                                                                                \
-    GenericTensor(const self& other) { *this = other; }                                                                \
-                                                                                                                       \
-    self& operator=(self&& other) noexcept = default;                                                                  \
-    GenericTensor(self&& other) noexcept   = default;                                                                  \
-                                                                                                                       \
-    template <Type other_type, Ownership other_ownership, Checking other_checking, Layout other_layout>                \
-    GenericTensor(const GenericTensor<value_type, self::params::dimension, other_type, other_ownership,                \
-                                      other_checking, other_layout>& other)                                            \
-        : GenericTensor(other.rows(), other.cols()) {                                                                  \
-        other.for_each(                                                                                                \
-            [&](const value_type& element, size_type i, size_type j) { this->operator()(i, j) = element; });           \
-    }                                                                                                                  \
-                                                                                                                       \
-private:                                                                                                               \
-    static_assert(true)
-//
-// copy ctor induced from copy assignment.
-//
-// move ctor and assignment are trivial.
-//
-// copy-from-tensor ctor: Any matrix-like object with the same 'value_type' and dimension.
-// This is not a copy constructor even if it logically implements it. Copy ctor needs to take 'const self&'.
-
+    std::vector<triplet_type> _data;
+};
 
 // - Tensor Definition -
 
-// Needed in order to forward template args to properties in specialization macro
-_utl_template_param_args struct _params_wrapper {
+// TODO:: --- START ---
+
+template <_utl_template_arg_defs>
+class GenericTensor
+    // Conditionally compile member variables through inheritance
+    : public std::conditional_t<_dimension == Dimension::MATRIX, _2d_extents<_utl_template_arg_vals>, _nothing<1>>,
+      public std::conditional_t<_dimension == Dimension::MATRIX && _type == Type::STRIDED,
+                                _2d_strides<_utl_template_arg_vals>, _nothing<2>>,
+      public std::conditional_t<_type == Type::DENSE || _type == Type::STRIDED, _2d_dense_data<_utl_template_arg_vals>,
+                                _nothing<3>>,
+      public std::conditional_t<_type == Type::SPARSE, _2d_sparse_data<_utl_template_arg_vals>, _nothing<4>>
+// > After this point no non-static member variables will be introduced
+{
+    // - Parameter reflection -
+    // ------------------------
+public:
     struct params {
         constexpr static auto dimension = _dimension;
         constexpr static auto type      = _type;
@@ -2122,78 +1523,536 @@ _utl_template_param_args struct _params_wrapper {
 
         // Prevent impossible layouts
         static_assert((dimension == Dimension::VECTOR) == (layout == Layout::FLAT), "Flat layout <=> matrix is 1D.");
-
         static_assert((type == Type::SPARSE) == (layout == Layout::SPARSE), "Sparse layout <=> matrix is sparse.");
     };
-};
 
-_utl_template_full_args class GenericTensor;
-
-
-// - Partial Specializations -
-
-// Matrix
-_utl_template_specialization(Dimension::MATRIX, Type::DENSE, Ownership::CONTAINER) {
-    _utl_mixin_types;
-
-    _utl_mixin_extents_2d;
-    _utl_mixin_trivial_strides_2d;
-    _utl_mixin_data_2d_dense;
-
-    _utl_mixin_indexation_2d_dense_const;
-    _utl_mixin_indexation_2d_dense_mutable;
-    _utl_mixin_indexable_1d_const;
-    _utl_mixin_indexable_1d_mutable;
-    _utl_mixin_indexable_2d_const;
-    _utl_mixin_indexable_2d_mutable;
-    _utl_mixin_conversions_2d_dense;
-    _utl_mixin_default_constructors_dense;
+    // - Member types -
+    // ----------------
+private:
+    using _type_wrapper = _types<T>;
 
 public:
-    // TEMP:
-    /* _utl_mixin_blocking_views_2d_mutable */
-    using block_view_type =
-        typename std::conditional_t<self::params::type == Type::SPARSE,
-                                    GenericTensor<value_type, self::params::dimension, Type::SPARSE, Ownership::VIEW,
-                                                  self::params::checking, Layout::SPARSE>,
-                                    GenericTensor<value_type, self::params::dimension, Type::STRIDED, Ownership::VIEW,
-                                                  self::params::checking, self::params::layout>>;
+    using self            = GenericTensor;
+    using value_type      = typename _type_wrapper::value_type;
+    using size_type       = typename _type_wrapper::size_type;
+    using difference_type = typename _type_wrapper::difference_type;
+    using reference       = typename _type_wrapper::reference;
+    using const_reference = typename _type_wrapper::const_reference;
+    using pointer         = typename _type_wrapper::pointer;
+    using const_pointer   = typename _type_wrapper::const_pointer;
 
-    /* _utl_mixin_blocking_views_2d_const */
-    using block_const_view_type =
-        typename std::conditional_t<self::params::type == Type::SPARSE,
-                                    GenericTensor<value_type, self::params::dimension, Type::SPARSE,
-                                                  Ownership::CONST_VIEW, self::params::checking, Layout::SPARSE>,
-                                    GenericTensor<value_type, self::params::dimension, Type::STRIDED,
-                                                  Ownership::CONST_VIEW, self::params::checking, self::params::layout>>;
+    // - Iterators -
+    // -------------
+public:
+    using const_iterator         = _flat_iterator<const self*, _type_wrapper, true>;
+    using const_reverse_iterator = std::reverse_iterator<const_iterator>;
 
-    block_const_view_type block(size_type i, size_type j, size_type rows, size_type cols) const {
-        /* Sparse matrices have no better way of getting a diagonal than filtering by { i, j } */
-        if constexpr (self::params::type == Type::SPARSE) {
-            return this->filter([&](const_reference, size_type _i, size_type _j) {
-                return (i <= _i) && (_i < i + rows) && (j <= _j) && (_j < j + cols);
-            });
+    using iterator = std::conditional_t<_ownership != Ownership::CONST_VIEW, _flat_iterator<self*, _type_wrapper>,
+                                        const_iterator>; // for const views 'iterator' is the same as 'const_iterator'
+    using reverse_iterator = std::reverse_iterator<iterator>;
+
+    const_iterator cbegin() const { return const_iterator(this, 0); }
+    const_iterator cend() const { return const_iterator(this, this->size()); }
+    const_iterator begin() const { return this->cbegin(); }
+    const_iterator end() const { return this->cend(); }
+
+    const_reverse_iterator crbegin() const { return const_reverse_iterator(this->cend()); }
+    const_reverse_iterator crend() const { return const_reverse_iterator(this->cbegin()); }
+    const_reverse_iterator rbegin() const { return this->crbegin(); }
+    const_reverse_iterator rend() const { return this->crend(); }
+
+    _utl_reqs(ownership != Ownership::CONST_VIEW)
+    iterator begin() { return iterator(this, 0); }
+
+    _utl_reqs(ownership != Ownership::CONST_VIEW)
+    iterator end() { return iterator(this, this->size()); }
+
+    _utl_reqs(ownership != Ownership::CONST_VIEW)
+    reverse_iterator rbegin() { return reverse_iterator(this->end()); }
+
+    _utl_reqs(ownership != Ownership::CONST_VIEW)
+    reverse_iterator rend() { return reverse_iterator(this->begin()); }
+
+    // - Basic getters -
+    // -----------------
+public:
+    _utl_reqs(dimension == Dimension::MATRIX && (type == Type::DENSE || type == Type::STRIDED))
+    size_type size() const noexcept { return this->rows() * this->cols(); }
+
+    _utl_reqs(type == Type::SPARSE)
+    size_type size() const noexcept { return this->_data.size(); }
+
+    _utl_reqs(dimension == Dimension::MATRIX)
+    size_type rows() const noexcept { return this->_rows; }
+
+    _utl_reqs(dimension == Dimension::MATRIX)
+    size_type cols() const noexcept { return this->_cols; }
+
+    _utl_reqs(dimension == Dimension::MATRIX && type == Type::DENSE)
+    constexpr size_type row_stride() const noexcept {
+        if constexpr (self::params::layout == Layout::RC) return 0;
+        if constexpr (self::params::layout == Layout::CR) return 1;
+        _unreachable();
+    }
+
+    _utl_reqs(dimension == Dimension::MATRIX && type == Type::DENSE)
+    constexpr size_type col_stride() const noexcept {
+        if constexpr (self::params::layout == Layout::RC) return 1;
+        if constexpr (self::params::layout == Layout::CR) return 0;
+        _unreachable();
+    }
+    _utl_reqs(dimension == Dimension::MATRIX && type == Type::STRIDED)
+    size_type row_stride() const noexcept { return this->_row_stride; }
+
+    _utl_reqs(dimension == Dimension::MATRIX && type == Type::STRIDED)
+    size_type col_stride() const noexcept { return this->_col_stride; }
+
+    _utl_reqs(type == Type::DENSE || type == Type::STRIDED)
+    const_pointer data() const noexcept { return this->_data.get(); }
+
+    _utl_reqs(ownership != Ownership::CONST_VIEW && (type == Type::DENSE || type == Type::STRIDED))
+    pointer data() noexcept { return this->_data.get(); }
+
+    bool empty() const noexcept { return (this->size() == 0); }
+
+    // - Advanced getters -
+    // --------------------
+    _utl_reqs(_supports_eq_comparison<value_type>::value)
+    bool contains(const_reference value) const {
+        return std::find(this->cbegin(), this->cend(), value) != this->cend();
+    }
+
+    _utl_reqs(_supports_eq_comparison<value_type>::value)
+    size_type count(const_reference value) const { return std::count(this->cbegin(), this->cend(), value); }
+
+    _utl_reqs(_supports_comparison<value_type>::value)
+    bool is_sorted() const { return std::is_sorted(this->cbegin(), this->cend()); }
+
+    template <typename Compare>
+    bool is_sorted(Compare cmp) const {
+        return std::is_sorted(this->cbegin(), this->cend(), cmp);
+    }
+
+    std::vector<value_type> to_std_vector() const { return std::vector(this->cbegin(), this->cend()); }
+
+    _utl_reqs(dimension == Dimension::MATRIX && type == Type::DENSE)
+    self transposed() const {
+        self res(this->cols(), this->rows());
+        this->for_each([&](const value_type& element, size_type i, size_type j) { res(j, i) = element; });
+        return res;
+    }
+
+    template <Type other_type, Ownership other_ownership, Checking other_checking, Layout other_layout>
+    bool compare_contents(const GenericTensor<value_type, self::params::dimension, other_type, other_ownership,
+                                              other_checking, other_layout>& other) const {
+        // Surface-level checks
+        if ((this->rows() != other.rows()) || (this->cols() != other.cols())) return false;
+        // Compare while respecting sparsity
+        constexpr bool is_sparse_l = (self::params::type == Type::SPARSE);
+        constexpr bool is_sparse_r = (std::remove_reference_t<decltype(other)>::params::type == Type::SPARSE);
+        // Same sparsity comparison
+        if constexpr (is_sparse_l == is_sparse_r) {
+            return this->size() == other.size() &&
+                   this->true_for_all([&](const_reference e, size_type i, size_type j) { return e == other(i, j); });
         }
-        /* Non-sparse matrices can create strided view with appropriately selected strides */
-        /* to emulate blocking efficiently */
+        // Different sparsity comparison
+        // TODO: Impl here and use .all_of() OR .any_of()
+        return true;
+    }
+
+    // - Indexation -
+    // --------------
+public:
+    // Vector API
+    const_reference front() const { return this->operator[](0); }
+    const_reference back() const { return this->operator[](this->size() - 1); }
+    reference       front() { return this->operator[](0); }
+    reference       back() { return this->operator[](this->size() - 1); }
+
+private:
+    _utl_reqs(dimension == Dimension::MATRIX && type == Type::STRIDED)
+    size_type _get_memory_offset_strided_impl(size_type idx, size_type i, size_type j) const {
+        if constexpr (self::params::layout == Layout::RC) return idx * this->col_stride() + this->row_stride() * i;
+        if constexpr (self::params::layout == Layout::CR) return idx * this->row_stride() + this->col_stride() * j;
+        _unreachable();
+    }
+
+public:
+    _utl_reqs(type == Type::DENSE)
+    size_type get_memory_offset_of_idx(size_type idx) const {
+        if constexpr (self::params::checking == Checking::BOUNDS) this->_bound_check_idx(idx);
+        return idx;
+    }
+
+    _utl_reqs(dimension == Dimension::MATRIX && type == Type::DENSE)
+    size_type get_memory_offset_of_ij(size_type i, size_type j) const { return this->get_idx_of_ij(i, j); }
+
+    _utl_reqs(dimension == Dimension::MATRIX && type == Type::STRIDED)
+    size_type get_memory_offset_of_idx(size_type idx) const {
+        const auto ij = this->get_ij_of_idx(idx);
+        return _get_memory_offset_strided_impl(idx, ij.i, ij.j);
+    }
+
+    _utl_reqs(dimension == Dimension::MATRIX && type == Type::STRIDED)
+    size_type get_memory_offset_of_ij(size_type i, size_type j) const {
+        const auto idx = this->get_idx_of_ij(i, j);
+        return _get_memory_offset_strided_impl(idx, i, j);
+    }
+
+public:
+    // Flat indexation
+    _utl_reqs(ownership != Ownership::CONST_VIEW && dimension == Dimension::MATRIX &&
+              (type == Type::DENSE || type == Type::STRIDED))
+    reference operator[](size_type idx) { return this->data()[this->get_memory_offset_of_idx(idx)]; }
+
+    _utl_reqs(dimension == Dimension::MATRIX && (type == Type::DENSE || type == Type::STRIDED))
+    const_reference operator[](size_type idx) const { return this->data()[this->get_memory_offset_of_idx(idx)]; }
+
+    _utl_reqs(ownership != Ownership::CONST_VIEW && dimension == Dimension::VECTOR || type == Type::SPARSE)
+    reference operator[](size_type idx) {
+        if constexpr (self::params::checking == Checking::BOUNDS) this->_bound_check_idx(idx);
+        return this->_data[idx].value;
+    }
+
+    _utl_reqs(dimension == Dimension::VECTOR || type == Type::SPARSE)
+    const_reference operator[](size_type idx) const {
+        if constexpr (self::params::checking == Checking::BOUNDS) this->_bound_check_idx(idx);
+        return this->_data[idx].value;
+    }
+
+    // 2D indexation
+    _utl_reqs(ownership != Ownership::CONST_VIEW && dimension == Dimension::MATRIX &&
+              (type == Type::DENSE || type == Type::STRIDED))
+    reference operator()(size_type i, size_type j) { return this->data()[this->get_memory_offset_of_ij(i, j)]; }
+
+    _utl_reqs(dimension == Dimension::MATRIX && (type == Type::DENSE || type == Type::STRIDED))
+    const_reference operator()(size_type i, size_type j) const {
+        return this->data()[this->get_memory_offset_of_ij(i, j)];
+    }
+
+    _utl_reqs(ownership != Ownership::CONST_VIEW && dimension == Dimension::MATRIX && type == Type::SPARSE)
+    reference operator()(size_type i, size_type j) {
+        if constexpr (self::params::checking == Checking::BOUNDS) this->_bound_check_idx(i, j);
+        return this->_data[this->get_idx_of_ij(i, j)].value;
+    }
+    _utl_reqs(dimension == Dimension::MATRIX && type == Type::SPARSE)
+    const_reference operator()(size_type i, size_type j) const {
+        if constexpr (self::params::checking == Checking::BOUNDS) this->_bound_check_idx(i, j);
+        return this->_data[this->get_idx_of_ij(i, j)].value;
+    }
+
+    // - Index conversions -
+    // ---------------------
+
+    // Bound checking
+private:
+    void _bound_check_idx(size_type idx) const {
+        if (idx >= this->size())
+            throw std::out_of_range(
+                _stringify("idx (which is ", idx, ") >= this->size() (which is ", this->size(), ")"));
+    }
+
+    _utl_reqs(dimension == Dimension::MATRIX)
+    void _bound_check_ij(size_type i, size_type j) const {
+        if (i >= this->rows())
+            throw std::out_of_range(_stringify("i (which is ", i, ") >= this->rows() (which is ", this->rows(), ")"));
+        else if (j >= this->cols())
+            throw std::out_of_range(_stringify("j (which is ", j, ") >= this->cols() (which is ", this->cols(), ")"));
+    }
+
+    // Dense & strided implementations
+private:
+    _utl_reqs(dimension == Dimension::MATRIX && (type == Type::DENSE || type == Type::STRIDED))
+    size_type _unchecked_get_idx_of_ij(size_type i, size_type j) const {
+        if constexpr (self::params::layout == Layout::RC) return i * this->cols() + j;
+        if constexpr (self::params::layout == Layout::CR) return j * this->rows() + i;
+        _unreachable();
+    }
+
+    _utl_reqs(dimension == Dimension::MATRIX && (type == Type::DENSE || type == Type::STRIDED))
+    Index2D _unchecked_get_ij_of_idx(size_type idx) const {
+        if constexpr (self::params::layout == Layout::RC) return {idx / this->cols(), idx % this->cols()};
+        if constexpr (self::params::layout == Layout::CR) return {idx % this->rows(), idx / this->rows()};
+        _unreachable();
+    }
+
+public:
+    _utl_reqs(dimension == Dimension::MATRIX && (type == Type::DENSE || type == Type::STRIDED))
+    size_type get_idx_of_ij(size_type i, size_type j) const {
+        if constexpr (self::params::checking == Checking::BOUNDS) this->_bound_check_ij(i, j);
+        return _unchecked_get_idx_of_ij(i, j);
+    }
+
+    _utl_reqs(dimension == Dimension::MATRIX && (type == Type::DENSE || type == Type::STRIDED))
+    Index2D get_ij_of_idx(size_type idx) const {
+        if constexpr (self::params::checking == Checking::BOUNDS) this->_bound_check_idx(idx);
+        return _unchecked_get_ij_of_idx(idx);
+    }
+
+    _utl_reqs(dimension == Dimension::MATRIX && (type == Type::DENSE || type == Type::STRIDED))
+    size_type extent_major() const noexcept {
+        if constexpr (self::params::layout == Layout::RC) return this->rows();
+        if constexpr (self::params::layout == Layout::CR) return this->cols();
+        _unreachable();
+    }
+
+    _utl_reqs(dimension == Dimension::MATRIX && (type == Type::DENSE || type == Type::STRIDED))
+    size_type extent_minor() const noexcept {
+        if constexpr (self::params::layout == Layout::RC) return this->cols();
+        if constexpr (self::params::layout == Layout::CR) return this->rows();
+        _unreachable();
+    }
+
+    // Sparse implementations
+private:
+    _utl_reqs(dimension == Dimension::MATRIX && type == Type::SPARSE)
+    size_type _search_ij(size_type i, size_type j) const noexcept {
+        /* Returns this->size() if {i, j} wasn't found. */
+        /* linear search for small .size() (more efficient fue to prediction and cache locality) */
+        if (true) {
+            for (size_type idx = 0; idx < this->size(); ++idx)
+                if (this->_data[idx].i == i && this->_data[idx].j == j) return idx;
+            return this->size();
+        }
+        /* binary search for larger .size() (N(log2(size)) instead of N(size) asymptotically) */
+    }
+
+public:
+    _utl_reqs(dimension == Dimension::MATRIX && type == Type::SPARSE)
+    size_type get_idx_of_ij(size_type i, size_type j) const {
+        const size_type idx = this->_search_ij(i, j);
+        /* Return this->size() if {i, j} wasn't found. Throw with bound checking. */
+        if constexpr (self::params::checking == Checking::BOUNDS)
+            if (idx == this->size())
+                throw std::out_of_range(_stringify("Index { ", i, ", ", j, "} in not a part of sparse matrix"));
+        return idx;
+    }
+
+    _utl_reqs(dimension == Dimension::MATRIX && type == Type::SPARSE)
+    Index2D get_ij_of_idx(size_type idx) const {
+        if constexpr (self::params::checking == Checking::BOUNDS) this->_bound_check_idx(idx);
+        return Index2D{this->_data[idx].i, this->_data[idx].j};
+    }
+
+    _utl_reqs(dimension == Dimension::MATRIX && type == Type::SPARSE)
+    bool contains_index(size_type i, size_type j) const noexcept { return this->_search_ij(i, j) != this->size(); }
+
+    // - Reductions -
+    // --------------
+    _utl_reqs(_supports_addition<value_type>::value)
+    value_type sum() const { return std::accumulate(this->cbegin(), this->cend(), value_type()); }
+
+    _utl_reqs(_supports_multiplication<value_type>::value)
+    value_type product() const {
+        return std::accumulate(this->cbegin(), this->cend(), value_type(), std::multiplies<value_type>());
+    }
+
+    _utl_reqs(_supports_comparison<value_type>::value)
+    value_type min() const { return *std::min_element(this->cbegin(), this->cend()); }
+
+    _utl_reqs(_supports_comparison<value_type>::value)
+    value_type max() const { return *std::max_element(this->cbegin(), this->cend()); }
+
+    // - Predicate operations -
+    // ------------------------
+    template <class PredType, _enable_if_signature<PredType, bool(const_reference)> = true>
+    bool true_for_any(PredType predicate) const {
+        for (size_type idx = 0; idx < this->size(); ++idx)
+            if (predicate(this->operator[](idx), idx)) return true;
+        return false;
+    }
+
+    template <class PredType, _enable_if_signature<PredType, bool(const_reference, size_type)> = true>
+    bool true_for_any(PredType predicate) const {
+        for (size_type idx = 0; idx < this->size(); ++idx)
+            if (predicate(this->operator[](idx), idx)) return true;
+        return false;
+    }
+
+    template <class PredType, _enable_if_signature<PredType, bool(const_reference, size_type, size_type)> = true,
+              _utl_require(dimension == Dimension::MATRIX)>
+              bool true_for_any(PredType predicate) const {
+        /* Loop over all 2D indices using 1D loop with idx->ij conversion */
+        /* This is just as fast and ensures looping only over existing elements in non-dense matrices */
+        for (size_type idx = 0; idx < this->size(); ++idx) {
+            const auto ij = this->get_ij_of_idx(idx);
+            if (predicate(this->operator[](idx), ij.i, ij.j)) return true;
+        }
+        return false;
+    }
+
+    template <class PredType, _enable_if_signature<PredType, bool(const_reference)> = true>
+    bool true_for_all(PredType predicate) const {
+        auto inversed_predicate = [&](const_reference e) -> bool { return !predicate(e); };
+        return !this->true_for_any(inversed_predicate);
+    }
+
+    template <class PredType, _enable_if_signature<PredType, bool(const_reference, size_type)> = true>
+    bool true_for_all(PredType predicate) const {
+        auto inversed_predicate = [&](const_reference e, size_type idx) -> bool { return !predicate(e, idx); };
+        return !this->true_for_any(inversed_predicate);
+    }
+
+    template <class PredType, _enable_if_signature<PredType, bool(const_reference, size_type, size_type)> = true,
+              _utl_require(dimension == Dimension::MATRIX)>
+              bool true_for_all(PredType predicate) const {
+        /* We can reuse .true_for_any() with inverted predicate due to following conjecture: */
+        /* FOR_ALL (predicate)  ~  ! FOR_ANY (!predicate) */
+        auto inversed_predicate = [&](const_reference e, size_type i, size_type j) -> bool {
+            return !predicate(e, i, j);
+        };
+        return !this->true_for_any(inversed_predicate);
+    }
+
+    // - Const algorithms -
+    // --------------------
+    template <class FuncType, _enable_if_signature<FuncType, void(const_reference)> = true>
+    const self& for_each(FuncType func, _for_each_tag = _for_each_tag::DUMMY) const {
+        for (size_type idx = 0; idx < this->size(); ++idx) func(this->operator[](idx));
+        return *this;
+    }
+
+    template <class FuncType, _enable_if_signature<FuncType, void(const_reference, size_type)> = true>
+    const self& for_each(FuncType func, _for_each_idx_tag = _for_each_idx_tag::DUMMY) const {
+        for (size_type idx = 0; idx < this->size(); ++idx) func(this->operator[](idx), idx);
+        return *this;
+    }
+
+    template <class FuncType, _enable_if_signature<FuncType, void(const_reference, size_type, size_type)> = true,
+              _utl_require(dimension == Dimension::MATRIX)>
+              const self& for_each(FuncType func) const {
+        /* Loop over all 2D indices using 1D loop with idx->ij conversion */
+        /* This is just as fast and ensures looping only over existing elements in non-dense matrices */
+        for (size_type idx = 0; idx < this->size(); ++idx) {
+            const auto ij = this->get_ij_of_idx(idx);
+            func(this->operator[](idx), ij.i, ij.j);
+        }
+        return *this;
+    }
+
+
+    // - Mutating algorithms -
+    // -----------------------
+    template <class FuncType, _enable_if_signature<FuncType, void(reference)> = true,
+              _utl_require(ownership != Ownership::CONST_VIEW)>
+              self& for_each(FuncType func) {
+        for (size_type idx = 0; idx < this->size(); ++idx) func(this->operator[](idx));
+        return *this;
+    }
+
+    template <class FuncType, _enable_if_signature<FuncType, void(reference, size_type)> = true,
+              _utl_require(ownership != Ownership::CONST_VIEW)>
+              self& for_each(FuncType func) {
+        for (size_type idx = 0; idx < this->size(); ++idx) func(this->operator[](idx), idx);
+        return *this;
+    }
+
+    template <class FuncType, _enable_if_signature<FuncType, void(reference, size_type, size_type)> = true,
+              _utl_require(dimension == Dimension::MATRIX)>
+              self& for_each(FuncType func, _for_each_ij_tag = _for_each_ij_tag::DUMMY) {
+        for (size_type idx = 0; idx < this->size(); ++idx) {
+            const auto ij = this->get_ij_of_idx(idx);
+            func(this->operator[](idx), ij.i, ij.j);
+        }
+        return *this;
+    }
+
+    _utl_reqs(ownership != Ownership::CONST_VIEW)
+    self& fill(const_reference value) {
+        for (size_type idx = 0; idx < this->size(); ++idx) this->operator[](idx) = value;
+        return *this;
+    }
+
+    template <typename Compare, _utl_require(ownership != Ownership::CONST_VIEW)>
+              self& sort(Compare cmp) {
+        std::sort(this->begin(), this->end(), cmp);
+        return *this;
+    }
+    template <typename Compare, _utl_require(ownership != Ownership::CONST_VIEW)>
+              self& stable_sort(Compare cmp) {
+        std::stable_sort(this->begin(), this->end(), cmp);
+        return *this;
+    }
+
+    _utl_reqs(ownership != Ownership::CONST_VIEW && _supports_comparison<value_type>::value)
+    self& sort() {
+        std::sort(this->begin(), this->end());
+        return *this;
+    }
+    _utl_reqs(ownership != Ownership::CONST_VIEW && _supports_comparison<value_type>::value)
+    self& stable_sort() {
+        std::stable_sort(this->begin(), this->end());
+        return *this;
+    }
+
+    // - Sparse Subviews -
+    // -------------------
+
+    // Const views
+private:
+    using _cref_triplet_array =
+        std::vector<SparseEntry2D<std::reference_wrapper<const value_type>>>; // NOTE: Generalize for 1D
+
+public:
+    using sparse_const_view_type = GenericTensor<value_type, self::params::dimension, Type::SPARSE,
+                                                 Ownership::CONST_VIEW, self::params::checking, Layout::SPARSE>;
+
+    template <typename UnaryPredicate, _enable_if_signature<UnaryPredicate, bool(const_reference)> = true>
+    sparse_const_view_type filter(UnaryPredicate predicate) const {
+        const auto forwarded_predicate = [&](const_reference elem, size_type, size_type) -> bool {
+            return predicate(elem);
+        };
+        return this->filter(forwarded_predicate);
+        // NOTE: This would need its own implementation for a proper 1D support
+    }
+
+    template <typename UnaryPredicate, _enable_if_signature<UnaryPredicate, bool(const_reference, size_type)> = true>
+    sparse_const_view_type filter(UnaryPredicate predicate) const {
+        const auto forwarded_predicate = [&](const_reference elem, size_type i, size_type j) -> bool {
+            const size_type idx = this->get_idx_of_ij(i, j);
+            return predicate(elem, idx);
+        };
+        return this->filter(forwarded_predicate);
+        // NOTE: This would need its own implementation for a proper 1D support
+    }
+
+    template <typename UnaryPredicate,
+              _enable_if_signature<UnaryPredicate, bool(const_reference, size_type, size_type)> = true,
+              _utl_require(dimension == Dimension::MATRIX)>
+              sparse_const_view_type filter(UnaryPredicate predicate) const {
+        // We can't preallocate triplets without scanning predicate through the whole matrix,
+        // so we just push back entries into a vector and use to construct a sparse view
+        _cref_triplet_array triplets;
+        const auto          add_triplet_if_predicate = [&](const_reference elem, size_type i, size_type j) -> void {
+            if (predicate(elem, i, j)) triplets.push_back({i, j, elem});
+        };
+
+        this->for_each(add_triplet_if_predicate);
+
+        triplets.shrink_to_fit();
+        return sparse_const_view_type(this->rows(), this->cols(), std::move(triplets));
+    }
+
+    _utl_reqs(dimension == Dimension::MATRIX)
+    sparse_const_view_type diagonal() const {
+        // Sparse matrices have no better way of getting a diagonal than filtering (i ==j)
+        if constexpr (self::params::type == Type::SPARSE) {
+            return this->filter([](const_reference, size_type i, size_type j) { return i == j; });
+        }
+        // Non-sparce matrices can just iterate over diagonal directly
         else {
-            if constexpr (self::params::layout == Layout::RC) {
-                const size_type row_stride = this->row_stride() + this->col_stride() * (this->cols() - cols);
-                const size_type col_stride = this->col_stride();
-                return block_const_view_type(rows, cols, row_stride, col_stride, &this->operator()(i, j));
-            }
-            if constexpr (self::params::layout == Layout::CR) {
-                const size_type row_stride = this->row_stride();
-                const size_type col_stride = this->col_stride() + this->row_stride() * (this->rows() - rows);
-                return block_const_view_type(rows, cols, row_stride, col_stride, &this->operator()(i, j));
-            }
-            _unreachable();
+            const size_type     min_size = std::min(this->rows(), this->cols());
+            _cref_triplet_array triplets;
+            triplets.reserve(min_size);
+            for (size_type k = 0; k < min_size; ++k) triplets.push_back({k, k, this->operator()(k, k)});
+            return sparse_const_view_type(this->rows(), this->cols(), std::move(triplets));
         }
     }
 
-    /* _utl_mixin_sparse_views_1d_mutable */
+    // Mutable views
 private:
-    using _ref_triplet_array = std::vector<SparseEntry2D<std::reference_wrapper<value_type>>>;
+    using _ref_triplet_array =
+        std::vector<SparseEntry2D<std::reference_wrapper<value_type>>>; // NOTE: Generalize for 1D
 
 public:
     using sparse_view_type = GenericTensor<value_type, self::params::dimension, Type::SPARSE, Ownership::VIEW,
@@ -2201,27 +2060,27 @@ public:
 
     template <typename UnaryPredicate, _enable_if_signature<UnaryPredicate, bool(const_reference)> = true>
     sparse_view_type filter(UnaryPredicate predicate) {
-        /* NOTE: This would need its own implementation for a proper 1D support */
         const auto forwarded_predicate = [&](const_reference elem, size_type, size_type) -> bool {
             return predicate(elem);
         };
         return this->filter(forwarded_predicate);
+        // NOTE: This would need its own implementation for a proper 1D support
     }
 
     template <typename UnaryPredicate, _enable_if_signature<UnaryPredicate, bool(const_reference, size_type)> = true>
     sparse_view_type filter(UnaryPredicate predicate) {
-        /* NOTE: This would need its own implementation for a proper 1D support */
         const auto forwarded_predicate = [&](const_reference elem, size_type i, size_type j) -> bool {
             const size_type idx = this->get_idx_of_ij(i, j);
             return predicate(elem, idx);
         };
         return this->filter(forwarded_predicate);
+        // NOTE: This would need its own implementation for a proper 1D support
     }
 
-    /* _utl_mixin_filtering_views_2d_mutable */
     template <typename UnaryPredicate,
-              _enable_if_signature<UnaryPredicate, bool(const_reference, size_type, size_type)> = true>
-    sparse_view_type filter(UnaryPredicate predicate) {
+              _enable_if_signature<UnaryPredicate, bool(const_reference, size_type, size_type)> = true,
+              _utl_require(dimension == Dimension::MATRIX)>
+              sparse_view_type filter(UnaryPredicate predicate) {
         /* This method implements actual filtering, others just forward predicates to it */
         _ref_triplet_array triplets;
         /* We can't preallocate triplets without scanning predicate through the whole matrix, */
@@ -2236,12 +2095,12 @@ public:
         return sparse_view_type(this->rows(), this->cols(), std::move(triplets));
     }
 
+    _utl_reqs(dimension == Dimension::MATRIX)
     sparse_view_type diagonal() {
         /* Sparse matrices have no better way of getting a diagonal than filtering (i == j) */
         if constexpr (self::params::type == Type::SPARSE) {
             return this->filter([](const_reference, size_type i, size_type j) { return i == j; });
-        }
-        /* Non-sparce matrices can just iterate over diagonal directly */
+        } /* Non-sparce matrices can just iterate over diagonal directly */
         else {
             const size_type    min_size = std::min(this->rows(), this->cols());
             _ref_triplet_array triplets;
@@ -2251,95 +2110,132 @@ public:
         }
     }
 
-    /* _utl_mixin_sparse_views_1d_const */
+    // - Block Subviews -
+    // ------------------
+
+    // - Sparse operations -
+    // ---------------------
+
 private:
-    using _cref_triplet_array = std::vector<SparseEntry2D<std::reference_wrapper<const value_type>>>;
+    using _triplet_t = _choose_based_on_ownership<_ownership, SparseEntry2D<value_type>,
+                                                  SparseEntry2D<std::reference_wrapper<value_type>>,
+                                                  SparseEntry2D<std::reference_wrapper<const value_type>>>;
 
 public:
-    using sparse_const_view_type = GenericTensor<value_type, self::params::dimension, Type::SPARSE,
-                                                 Ownership::CONST_VIEW, self::params::checking, Layout::SPARSE>;
+    using triplet_type = _triplet_t;
 
-    template <typename UnaryPredicate, _enable_if_signature<UnaryPredicate, bool(const_reference)> = true>
-    sparse_const_view_type filter(UnaryPredicate predicate) const {
-        /* NOTE: This would need its own implementation for a proper 1D support */
-        const auto forwarded_predicate = [&](const_reference elem, size_type, size_type) -> bool {
-            return predicate(elem);
-        };
-        return this->filter(forwarded_predicate);
-    }
-
-    template <typename UnaryPredicate, _enable_if_signature<UnaryPredicate, bool(const_reference, size_type)> = true>
-    sparse_const_view_type filter(UnaryPredicate predicate) const {
-        /* NOTE: This would need its own implementation for a proper 1D support */
-        const auto forwarded_predicate = [&](const_reference elem, size_type i, size_type j) -> bool {
-            const size_type idx = this->get_idx_of_ij(i, j);
-            return predicate(elem, idx);
-        };
-        return this->filter(forwarded_predicate);
-    }
-
-    /* _utl_mixin_filtering_views_2d_const */
-    template <typename UnaryPredicate,
-              _enable_if_signature<UnaryPredicate, bool(const_reference, size_type, size_type)> = true>
-    sparse_const_view_type filter(UnaryPredicate predicate) const {
-        /* This method implements actual filtering, others just forward predicates to it */
-        _cref_triplet_array triplets;
-        /* We can't preallocate triplets without scanning predicate through the whole matrix, */
-        /* so we just push back entries into a vector and use to construct a sparse view */
-        const auto          add_triplet_if_predicate = [&](const_reference elem, size_type i, size_type j) -> void {
-            if (predicate(elem, i, j)) triplets.push_back({i, j, elem});
+    _utl_reqs(dimension == Dimension::MATRIX && type == Type::SPARSE)
+    self& insert_triplets(const std::vector<triplet_type>& triplets) {
+        // Bulk-insert triplets and sort by index
+        const auto ordering = [](const triplet_type& l, const triplet_type& r) -> bool {
+            return (l.i < r.i) && (l.j < r.j);
         };
 
-        this->for_each(add_triplet_if_predicate);
+        this->_data.insert(this->_data.end(), triplets.begin(), triplets.end());
+        std::sort(this->_data.begin(), this->_data.end(), ordering);
 
-        triplets.shrink_to_fit();
-        return sparse_const_view_type(this->rows(), this->cols(), std::move(triplets));
+        return *this;
     }
 
-    sparse_const_view_type diagonal() const {
-        /* Sparse matrices have no better way of getting a diagonal than filtering (i ==j) */
-        if constexpr (self::params::type == Type::SPARSE) {
-            return this->filter([](const_reference, size_type i, size_type j) { return i == j; });
-        }
-        /* Non-sparce matrices can just iterate over diagonal directly */
-        else {
-            const size_type     min_size = std::min(this->rows(), this->cols());
-            _cref_triplet_array triplets;
-            triplets.reserve(min_size);
-            for (size_type k = 0; k < min_size; ++k) triplets.push_back({k, k, this->operator()(k, k)});
-            return sparse_const_view_type(this->rows(), this->cols(), std::move(triplets));
-        }
+    _utl_reqs(dimension == Dimension::MATRIX && type == Type::SPARSE)
+    self& rewrite_triplets(std::vector<triplet_type>&& triplets) {
+        // Move-construct all triplets at once and sort by index
+        const auto ordering = [](const triplet_type& l, const triplet_type& r) -> bool {
+            return (l.i < r.i) && (l.j < r.j);
+        };
+
+        this->_data = std::move(triplets);
+        std::sort(this->_data.begin(), this->_data.end(), ordering);
+
+        return *this;
     }
-    // TEMP:
+
+    _utl_reqs(dimension == Dimension::MATRIX && type == Type::SPARSE)
+    self& erase_triplets(std::vector<Index2D> indices) {
+        // Erase triplets with {i, j} from 'indices' using the fact that both
+        // 'indices' and triplets are sorted. We can scan through triplets once
+        // while advancing 'cursor' when 'indices[cursor]' gets deleted, which
+        // result in all necessary triplets being marked for erasure in order.
+        std::sort(indices.begin(), indices.end(), _index_2d_sparse_ordering);
+        std::size_t cursor = 0;
+
+        const auto erase_condition = [&](const triplet_type& triplet) -> bool {
+            /* Stop erasing once all target indices are handled */
+            if (cursor == indices.size()) return false;
+            if (indices[cursor].i == triplet.i && indices[cursor].j == triplet.j) {
+                ++cursor;
+                return true;
+            }
+            return false;
+        };
+
+        const auto iter = std::remove_if(this->_data.begin(), this->_data.end(), erase_condition);
+        this->_data.erase(iter, this->_data.end());
+
+        // Re-sort triplets just in case
+        const auto ordering = [](const triplet_type& l, const triplet_type& r) -> bool {
+            return (l.i < r.i) && (l.j < r.j);
+        };
+        std::sort(this->_data.begin(), this->_data.end(), ordering);
+
+        return *this;
+    }
+
+    // - Constructors -
+    // ----------------
+
+    // - Matrix -
+
+    // GenericTensor(const self& other) { *this = other; }
+
+    // self& operator=(self&& other) noexcept = default;
+    // GenericTensor(self&& other) noexcept   = default;
+
+    template <Type other_type, Ownership other_ownership, Checking other_checking, Layout other_layout,
+              _utl_require(dimension == Dimension::MATRIX && type == Type::DENSE && ownership == Ownership::CONTAINER)>
+              GenericTensor(const GenericTensor<value_type, self::params::dimension, other_type, other_ownership,
+                                                other_checking, other_layout>& other)
+        : GenericTensor(other.rows(), other.cols()) {
+        other.for_each([&](const value_type& element, size_type i, size_type j) { this->operator()(i, j) = element; });
+    }
 
     // Default ctor
-    GenericTensor() noexcept = default;
+    _utl_reqs(dimension == Dimension::MATRIX && type == Type::DENSE && ownership == Ownership::CONTAINER)
+    GenericTensor() noexcept {}
 
     // Copy-ctor
+    _utl_reqs(dimension == Dimension::MATRIX && type == Type::DENSE && ownership == Ownership::CONTAINER)
     self& operator=(const self& other) {
         this->_rows = other.rows();
         this->_cols = other.cols();
-        this->_data = make_unique_ptr_array<value_type>(this->size());
+        this->_data = std::move(make_unique_ptr_array<value_type>(this->size()));
         std::copy(other.begin(), other.end(), this->begin());
         return *this;
     }
 
     // Init-with-value
-    explicit GenericTensor(size_type rows, size_type cols, const_reference value = value_type()) noexcept
-        : _rows(rows), _cols(cols) {
-        this->_data = make_unique_ptr_array<value_type>(this->size());
+    _utl_reqs(dimension == Dimension::MATRIX && type == Type::DENSE && ownership == Ownership::CONTAINER)
+    explicit GenericTensor(size_type rows, size_type cols, const_reference value = value_type()) noexcept {
+        this->_rows = rows;
+        this->_cols = cols;
+        this->_data = std::move(make_unique_ptr_array<value_type>(this->size()));
         this->fill(value);
     }
 
     // Init-with-data
-    explicit GenericTensor(size_type rows, size_type cols, pointer data_ptr) noexcept
-        : _data(data_ptr), _rows(rows), _cols(cols) {}
+    _utl_reqs(dimension == Dimension::MATRIX && type == Type::DENSE && ownership == Ownership::CONTAINER)
+    explicit GenericTensor(size_type rows, size_type cols, pointer data_ptr) noexcept {
+        this->_rows = rows;
+        this->_cols = cols;
+        this->_data = std::move(decltype(this->_data)(data_ptr));
+    }
 
     // Init-with-ilist
+    _utl_reqs(dimension == Dimension::MATRIX && type == Type::DENSE && ownership == Ownership::CONTAINER)
     GenericTensor(std::initializer_list<std::initializer_list<value_type>> init) {
         this->_rows = init.size();
         this->_cols = (*init.begin()).size();
-        this->_data = make_unique_ptr_array<value_type>(this->size());
+        this->_data = std::move(make_unique_ptr_array<value_type>(this->size()));
 
         // Check dimensions (throw if cols have different dimensions)
         for (auto row_it = init.begin(); row_it < init.end(); ++row_it)
@@ -2353,239 +2249,128 @@ public:
 
     // Move-from-other-matrix
     /* Accepts: Any matrix of the same partial specialization */
-    template <Checking other_checking, Layout other_layout>
-    GenericTensor(GenericTensor<value_type, self::params::dimension, self::params::type, self::params::ownership,
-                                other_checking, other_layout> &&
-                  other)
-        : _data(std::move(other._data)), _rows(other.rows()), _cols(other.cols()) {}
-
-    // NOTE: Move to mixins
-    self transposed() const {
-        self res(this->cols(), this->rows());
-        this->for_each([&](const value_type& element, size_type i, size_type j) { res(j, i) = element; });
-        return res;
+    template <Checking other_checking, Layout other_layout,
+              _utl_require(dimension == Dimension::MATRIX && type == Type::DENSE && ownership == Ownership::CONTAINER)>
+              GenericTensor(GenericTensor<value_type, self::params::dimension, self::params::type,
+                                          self::params::ownership, other_checking, other_layout>&& other) {
+        this->_rows = other.rows();
+        this->_cols = other.cols();
+        this->_data = std::move(other._data);
     }
-};
 
-// MatrixView
-_utl_template_specialization(Dimension::MATRIX, Type::DENSE, Ownership::VIEW) {
-    _utl_mixin_types;
+    // - Matrix View -
 
-    _utl_mixin_extents_2d;
-    _utl_mixin_trivial_strides_2d;
-    _utl_mixin_data_2d_dense;
-
-    _utl_mixin_indexation_2d_dense_const;
-    _utl_mixin_indexation_2d_dense_mutable;
-    _utl_mixin_indexable_1d_const;
-    _utl_mixin_indexable_1d_mutable;
-    _utl_mixin_indexable_2d_const;
-    _utl_mixin_indexable_2d_mutable;
-    _utl_mixin_conversions_2d_dense;
-
-public:
-    // Init-from-tensor
-    /* Accepts: Any tensor of the same type */
-    template <Ownership other_ownership, Checking other_checking, Layout other_layout>
-    GenericTensor(GenericTensor<value_type, self::params::dimension, self::params::type, other_ownership,
-                                other_checking, other_layout> &
-                  other)
-        : _data(other.data()), _rows(other.rows()), _cols(other.cols()) {}
-
-    // Init-from-data
-    explicit GenericTensor(size_type rows, size_type cols, pointer data_ptr)
-        : _data(data_ptr), _rows(rows), _cols(cols) {}
-};
-
-// ConstMatrixView
-_utl_template_specialization(Dimension::MATRIX, Type::DENSE, Ownership::CONST_VIEW) {
-    _utl_mixin_types;
-
-    _utl_mixin_extents_2d;
-    _utl_mixin_trivial_strides_2d;
-    _utl_mixin_data_2d_dense;
-
-    _utl_mixin_indexation_2d_dense_const;
-    _utl_mixin_indexable_1d_const;
-    _utl_mixin_indexable_2d_const;
-    _utl_mixin_conversions_2d_dense;
-
-public:
-    // Init-from-tensor
-    /* Accepts: Any tensor of the same type */
-    template <Ownership other_ownership, Checking other_checking, Layout other_layout>
-    GenericTensor(const GenericTensor<value_type, self::params::dimension, self::params::type, other_ownership,
-                                      other_checking, other_layout>& other)
-        : _data(other.data()), _rows(other.rows()), _cols(other.cols()) {}
-
-    // Init-from-data
-    explicit GenericTensor(size_type rows, size_type cols, const_pointer data_ptr)
-        : _data(data_ptr), _rows(rows), _cols(cols) {}
-
-    // TEMP:
-    std::string dump() const {
-        std::stringstream ss;
-        for (size_type i = 0; i < this->rows(); ++i)
-            for (size_type j = 0; j < this->cols(); ++j)
-                ss << "(" << i << ", " << j << ") ~ [" << this->get_idx_of_ij(i, j) << "] = " << this->operator()(i, j)
-                   << "\n";
-        return ss.str();
+    // Init-from-tensor (any tensor of the same API type)
+    template <Ownership other_ownership, Checking other_checking, Layout other_layout,
+              _utl_require(dimension == Dimension::MATRIX && type == Type::DENSE && ownership == Ownership::VIEW)>
+              GenericTensor(GenericTensor<value_type, self::params::dimension, self::params::type, other_ownership,
+                                          other_checking, other_layout>& other) {
+        this->_rows = other.rows();
+        this->_cols = other.cols();
+        this->_data = other.data();
     }
-    // TEMP:
-};
-
-// StridedMatrixView
-_utl_template_specialization(Dimension::MATRIX, Type::STRIDED, Ownership::VIEW) {
-    _utl_mixin_types;
-
-    _utl_mixin_extents_2d;
-    _utl_mixin_strides_2d;
-    _utl_mixin_data_2d_dense;
-
-    _utl_mixin_indexation_2d_strided_const;
-    _utl_mixin_indexation_2d_strided_mutable;
-    _utl_mixin_indexable_1d_const;
-    _utl_mixin_indexable_1d_mutable;
-    _utl_mixin_indexable_2d_const;
-    _utl_mixin_indexable_2d_mutable;
-    _utl_mixin_conversions_2d_dense;
-
-public:
-    // Init-from-tensor
-    /* Accepts: Any tensor of the same type */
-    template <Ownership other_ownership, Checking other_checking, Layout other_layout>
-    GenericTensor(GenericTensor<value_type, self::params::dimension, self::params::type, other_ownership,
-                                other_checking, other_layout> &
-                  other)
-        : _data(other.data()), _rows(other.rows()), _cols(other.cols()), _row_stride(other.row_stride()),
-          _col_stride(other.col_stride()) {}
 
     // Init-from-data
-    explicit GenericTensor(size_type rows, size_type cols, size_type row_stride, size_type col_stride, pointer data_ptr)
-        : _data(data_ptr), _rows(rows), _cols(cols), _row_stride(row_stride), _col_stride(col_stride) {}
-};
+    _utl_reqs(dimension == Dimension::MATRIX && type == Type::DENSE && ownership == Ownership::VIEW)
+    explicit GenericTensor(size_type rows, size_type cols, pointer data_ptr) {
+        this->_rows = rows;
+        this->_cols = cols;
+        this->_data = data_ptr;
+    }
 
-// ConstStridedMatrixView
-_utl_template_specialization(Dimension::MATRIX, Type::STRIDED, Ownership::CONST_VIEW) {
-    _utl_mixin_types;
+    // - Const Matrix View -
 
-    _utl_mixin_extents_2d;
-    _utl_mixin_strides_2d;
-    _utl_mixin_data_2d_dense;
-
-    _utl_mixin_indexation_2d_strided_const;
-    _utl_mixin_indexable_1d_const;
-    _utl_mixin_indexable_2d_const;
-    _utl_mixin_conversions_2d_dense;
-
-public:
-    // Init-from-tensor
-    /* Accepts: Any tensor of the same type */
-    template <Ownership other_ownership, Checking other_checking, Layout other_layout>
-    GenericTensor(GenericTensor<value_type, self::params::dimension, self::params::type, other_ownership,
-                                other_checking, other_layout> &
-                  other)
-        : _data(other.data()), _rows(other.rows()), _cols(other.cols()), _row_stride(other.row_stride()),
-          _col_stride(other.col_stride()) {}
+    // Init-from-tensor (any tensor of the same API type)
+    template <Ownership other_ownership, Checking other_checking, Layout other_layout,
+              _utl_require(dimension == Dimension::MATRIX && type == Type::DENSE && ownership == Ownership::CONST_VIEW)>
+              GenericTensor(const GenericTensor<value_type, self::params::dimension, self::params::type,
+                                                other_ownership, other_checking, other_layout>& other) {
+        this->_rows = other.rows();
+        this->_cols = other.cols();
+        this->_data = other.data();
+    }
 
     // Init-from-data
-    explicit GenericTensor(size_type rows, size_type cols, size_type row_stride, size_type col_stride, const_pointer data_ptr)
-        : _data(data_ptr), _rows(rows), _cols(cols), _row_stride(row_stride), _col_stride(col_stride) {}
-};
+    _utl_reqs(dimension == Dimension::MATRIX && type == Type::DENSE && ownership == Ownership::CONST_VIEW)
+    explicit GenericTensor(size_type rows, size_type cols, const_pointer data_ptr) {
+        this->_rows = rows;
+        this->_cols = cols;
+        this->_data = data_ptr;
+    }
 
-// SparseMatrix
-_utl_template_specialization(Dimension::MATRIX, Type::SPARSE, Ownership::CONTAINER) {
-    // TODO: Implement mixins
-    _utl_mixin_types;
+    // - Strided Matrix View -
 
-    _utl_mixin_extents_2d;
-    _utl_mixin_data_2d_sparse;
+    // Init-from-tensor (any tensor of the same API type)
+    template <Ownership other_ownership, Checking other_checking, Layout other_layout,
+              _utl_require(dimension == Dimension::MATRIX && type == Type::STRIDED && ownership == Ownership::VIEW)>
+              GenericTensor(GenericTensor<value_type, self::params::dimension, self::params::type, other_ownership,
+                                          other_checking, other_layout>& other) {
+        this->_rows       = other.rows();
+        this->_cols       = other.cols();
+        this->_row_stride = other.row_stride();
+        this->_col_stride = other.col_stride();
+        this->_data       = other.data();
+    }
 
-    _utl_mixin_indexation_2d_sparse_const;
-    _utl_mixin_indexation_2d_sparse_mutable;
-    _utl_mixin_indexable_1d_const;
-    _utl_mixin_indexable_1d_mutable;
-    _utl_mixin_indexable_2d_const;
-    _utl_mixin_indexable_2d_mutable;
-    _utl_mixin_conversions_2d_sparse;
+    // Init-from-data
+    _utl_reqs(dimension == Dimension::MATRIX && type == Type::STRIDED && ownership == Ownership::VIEW)
+    explicit GenericTensor(size_type rows, size_type cols, size_type row_stride, size_type col_stride,
+                           pointer data_ptr) {
+        this->_rows       = rows;
+        this->_cols       = cols;
+        this->_row_stride = row_stride;
+        this->_col_stride = col_stride;
+        this->_data       = data_ptr;
+    }
 
-public:
+    // - Const Strided Matrix View -
+    // Init-from-tensor (any tensor of the same API type)
+    template <Ownership other_ownership, Checking other_checking, Layout other_layout,
+              _utl_require(dimension == Dimension::MATRIX && type == Type::STRIDED && ownership == Ownership::CONST_VIEW)>
+              GenericTensor(const GenericTensor<value_type, self::params::dimension, self::params::type,
+                                                other_ownership, other_checking, other_layout>& other) {
+        this->_rows       = other.rows();
+        this->_cols       = other.cols();
+        this->_row_stride = other.row_stride();
+        this->_col_stride = other.col_stride();
+        this->_data       = other.data();
+    }
+
+    // Init-from-data
+    _utl_reqs(dimension == Dimension::MATRIX && type == Type::STRIDED && ownership == Ownership::CONST_VIEW)
+    explicit GenericTensor(size_type rows, size_type cols, size_type row_stride, size_type col_stride,
+                           const_pointer data_ptr) {
+        this->_rows       = rows;
+        this->_cols       = cols;
+        this->_row_stride = row_stride;
+        this->_col_stride = col_stride;
+        this->_data       = data_ptr;
+    }
+
+    // - Sparse Matrix -
+    // - Sparse Matrix View -
+    // - Sparse Matrix Const View -
+
     // Default ctor
-    GenericTensor() noexcept = default;
+    _utl_reqs(dimension == Dimension::MATRIX && type == Type::SPARSE)
+    GenericTensor() noexcept {}
 
     // Init-from-data (copy)
-    explicit GenericTensor(size_type rows, size_type cols, const std::vector<triplet_type>& data)
-        : _rows(rows), _cols(cols) {
+    explicit GenericTensor(size_type rows, size_type cols, const std::vector<triplet_type>& data) {
+        this->_rows = rows;
+        this->_cols = cols;
         this->insert_triplets(std::move(data));
     }
 
     // Init-from-data (move)
-    explicit GenericTensor(size_type rows, size_type cols, std::vector<triplet_type> && data)
-        : _rows(rows), _cols(cols) {
+    explicit GenericTensor(size_type rows, size_type cols, std::vector<triplet_type>&& data) {
+        this->_rows = rows;
+        this->_cols = cols;
         this->rewrite_triplets(std::move(data));
     }
 };
 
-// SparseMatrixView
-_utl_template_specialization(Dimension::MATRIX, Type::SPARSE, Ownership::VIEW) {
-    _utl_mixin_types;
-
-    _utl_mixin_extents_2d;
-    _utl_mixin_data_2d_sparse;
-
-    _utl_mixin_indexation_2d_sparse_const;
-    _utl_mixin_indexation_2d_sparse_mutable;
-    _utl_mixin_indexable_1d_const;
-    _utl_mixin_indexable_1d_mutable;
-    _utl_mixin_indexable_2d_const;
-    _utl_mixin_indexable_2d_mutable;
-    _utl_mixin_conversions_2d_sparse;
-
-public:
-    // Default ctor
-    GenericTensor() noexcept = default;
-
-    // Init-from-data (copy)
-    explicit GenericTensor(size_type rows, size_type cols, const std::vector<triplet_type>& data)
-        : _rows(rows), _cols(cols) {
-        this->insert_triplets(std::move(data));
-    }
-
-    // Init-from-data (move)
-    explicit GenericTensor(size_type rows, size_type cols, std::vector<triplet_type> && data)
-        : _rows(rows), _cols(cols) {
-        this->rewrite_triplets(std::move(data));
-    }
-};
-
-// SparseMatrixConstView
-_utl_template_specialization(Dimension::MATRIX, Type::SPARSE, Ownership::CONST_VIEW) {
-    _utl_mixin_types;
-
-    _utl_mixin_extents_2d;
-    _utl_mixin_data_2d_sparse;
-
-    _utl_mixin_indexation_2d_sparse_const;
-    _utl_mixin_indexable_1d_const;
-    _utl_mixin_indexable_2d_const;
-    _utl_mixin_conversions_2d_sparse;
-
-public:
-    // Default ctor
-    GenericTensor() noexcept = default;
-
-    // Init-from-data (copy)
-    explicit GenericTensor(size_type rows, size_type cols, const std::vector<triplet_type>& data)
-        : _rows(rows), _cols(cols) {
-        this->insert_triplets(std::move(data));
-    }
-
-    // Init-from-data (move)
-    explicit GenericTensor(size_type rows, size_type cols, std::vector<triplet_type> && data)
-        : _rows(rows), _cols(cols) {
-        this->rewrite_triplets(std::move(data));
-    }
-};
+// TODO: --- END ---
 
 
 // - Implementation wrappers -
@@ -2624,6 +2409,13 @@ using SparseMatrixView = GenericTensor<T, Dimension::MATRIX, Type::SPARSE, Owner
 template <typename T, Checking checking = _default_checking>
 using ConstSparseMatrixView =
     GenericTensor<T, Dimension::MATRIX, Type::SPARSE, Ownership::CONST_VIEW, checking, Layout::SPARSE>;
+    
+// - Clear out internal macros -
+#undef _utl_define_operator_support_type_trait
+#undef _utl_template_arg_defs
+#undef _utl_template_arg_vals
+#undef _utl_require
+#undef _utl_reqs
 
 } // namespace utl::mvl
 
@@ -3483,9 +3275,6 @@ inline void _utl_exit_with_message(std::string_view file, int line, std::string_
 }
 
 #define UTL_DEFINE_EXIT(...) _utl_exit_with_message(__FILE__, __LINE__, __func__, __VA_ARGS__);
-
-// TODO: UTL_DEFINE_BITFLAG_OPERATORS
-// TODO: UTL_DEFINE_BITFLAG_COMPATIBILITY_CHECK
 
 // ========= header guard end =========
 

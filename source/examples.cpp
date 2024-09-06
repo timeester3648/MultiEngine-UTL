@@ -9,6 +9,7 @@
 #include <initializer_list>
 #include <ios>
 #include <iostream>
+#include <limits>
 #include <list>
 #include <numeric>
 #include <random>
@@ -374,16 +375,20 @@ int main(int argc, char* argv[]) {
 
     std::filesystem::create_directory("temp");
 
-    config::export_json("temp/cfg.json", config::entry("date", "2024.04.02"), config::entry("time_steps", 500),
-                        config::entry("time_period", 1.24709e+2), config::entry("auxiliary_info", true),
-                        config::entry("scaling_functions",
-                                      {
-                                          "identity", "log10"
-    }),
-                        config::entry("options", {17, 45}), config::entry("coefs", {0.125, 0.3}),
-                        config::entry("flags", {true, true, false}),
-                        config::entry("matrix", {{0.7, -1.3}, {3.1}}) // 2D, 3D, 4D arrays are also fine
-    );
+    config::export_json(
+        "temp/cfg.json",
+        config::entry("date", std::string("2024.04.02")),
+        config::entry("time_steps", 500),
+        config::entry("time_period", 1.24709e+2),
+        config::entry("auxiliary_info", true),
+        config::entry("scaling_functions", { "identity", "log10" }), 
+        config::entry("options", {17, 45}),
+        config::entry("coefs", {0.125, 0.3}),
+        config::entry("flags", {true, true, false}),
+        config::entry("matrix", {{0.7, -1.3}, {3.1}}), // 2D, 3D, 4D arrays are also fine
+        config::entry("bad numbers",
+                      {std::numeric_limits<double>::infinity(), std::numeric_limits<double>::denorm_min(),
+                       std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::signaling_NaN()}));
 
     // ### MACRO_PROFILER ###
     std::cout << "\n\n### UTL_PROFILER ###\n\n";

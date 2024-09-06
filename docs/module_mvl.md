@@ -123,8 +123,8 @@ class GenericTensor {
     size_type       size() const;
     size_type       rows() const; // requires MATRIX
     size_type       cols() const; // requires MATRIX
-    size_type row_stride() const; // requires MATRIX
-    size_type col_stride() const; // requires MATRIX
+    size_type row_stride() const; // requires MATRIX && (DENSE || STRIDED)
+    size_type col_stride() const; // requires MATRIX && (DENSE || STRIDED)
     
     const_pointer  data() const; // requires DENSE || STRIDED
     pointer        data();       // requires DENSE || STRIDED
@@ -138,6 +138,8 @@ class GenericTensor {
     bool is_sorted(Callable<bool(const_reference, const_reference)> cmp) const; // requires value_type::operator<()
     
     std::vector<value_type> to_std_vector() const;
+    
+    self transposed() const; // requires MATRIX && DENSE
     
     // - Indexation -
     const_reference front() const;
@@ -167,20 +169,20 @@ class GenericTensor {
     
     // - Predicate operations -
     bool true_for_any(Callable<bool(const_reference)>                       predicate) const;
-    bool true_for_any(Callable<bool(const_reference, size_type)>            predicate) const;
+    bool true_for_any(Callable<bool(const_reference, size_type)>            predicate) const; // [???] requires VECTOR
     bool true_for_any(Callable<bool(const_reference, size_type, size_type)> predicate) const; // requires MATRIX
     bool true_for_all(Callable<bool(const_reference)>                       predicate) const;
-    bool true_for_all(Callable<bool(const_reference, size_type)>            predicate) const;
+    bool true_for_all(Callable<bool(const_reference, size_type)>            predicate) const; // [???] requires VECTOR
     bool true_for_all(Callable<bool(const_reference, size_type, size_type)> predicate) const; // requires MATRIX
     
     // - Const algorithms -
     const self& for_each(Callable<void(const_reference)>                       func) const;
-    const self& for_each(Callable<void(const_reference, size_type)>            func) const;
+    const self& for_each(Callable<void(const_reference, size_type)>            func) const; // [???] requires VECTOR
     const self& for_each(Callable<void(const_reference, size_type, size_type)> func) const; // requires MATRIX
     
     // - Mutating algorithms -
     self& for_each(Callable<void(reference)>                       func);
-    self& for_each(Callable<void(reference, size_type)>            func);
+    self& for_each(Callable<void(reference, size_type)>            func); // [???] requires VECTOR
     self& for_each(Callable<void(reference, size_type, size_type)> func); // requires MATRIX
     self& fill(const_reference value);
     
@@ -193,25 +195,25 @@ class GenericTensor {
     using block_view_type;
     using block_const_view_type;
     
-    block_view_type       block(size_type i, size_type j, size_type rows, size_type cols);       // TODO:TODO:TODO:
-    block_const_view_type block(size_type i, size_type j, size_type rows, size_type cols) const; // TODO:TODO:TODO:
+    block_view_type       block(size_type i, size_type j, size_type rows, size_type cols);
+    block_const_view_type block(size_type i, size_type j, size_type rows, size_type cols) const;
     
-    block_view_type       row();       // TODO:TODO:TODO:
-    block_const_view_type row() const; // TODO:TODO:TODO:
+    block_view_type       row();
+    block_const_view_type row() const;
     
-    block_view_type       col();       // TODO:TODO:TODO:
-    block_const_view_type col() const; // TODO:TODO:TODO:
+    block_view_type       col();
+    block_const_view_type col() const;
     
     // - Sparse Subviews -
     using sparse_view_type;
     using sparse_const_view_type;
     
     sparse_view_type filter(Callable<bool(const_reference)>                       predicate);
-    sparse_view_type filter(Callable<bool(const_reference, size_type)>            predicate);
+    sparse_view_type filter(Callable<bool(const_reference, size_type)>            predicate); // [???] requires VECTOR
     sparse_view_type filter(Callable<bool(const_reference, size_type, size_type)> predicate); // requires MATRIX
     
     sparse_const_view_type filter(Callable<bool(const_reference)>                       predicate) const;
-    sparse_const_view_type filter(Callable<bool(const_reference, size_type)>            predicate) const;
+    sparse_const_view_type filter(Callable<bool(const_reference, size_type)>            predicate) const; // [???] requires VECTOR
     sparse_const_view_type filter(Callable<bool(const_reference, size_type, size_type)> predicate) const; // requires MATRIX
     
     sparse_view_type       diagonal();
@@ -292,7 +294,7 @@ assert( *A.cbegin()    = 1 );
 assert( *A.cend() - 1  = 6 );
 
 // Printing
-std::cout << A.stringify();
+std::cout << A; // equivalent to 'std::cout << A.stringify()'
 ```
 
 ## Example N (Various math operations)
@@ -302,7 +304,7 @@ std::cout << A.stringify();
 using namespace utl;
 
 // Compute ||A||_inf norm
-const auto norm = A.transform(std::abs).sum()
+const auto norm = A.transform(std::abs).sum();
     
 // Compute tr(A)
 const auto tr = A.diagonal().sum();

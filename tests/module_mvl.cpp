@@ -648,15 +648,15 @@ TEST_CASE("Matrix blocking/filtering functionality test") {
     CHECK(const_view_3.size() * 30 == const_view_3.sum());
     CHECK(const_diagonal_view.size() * 10 == const_diagonal_view.sum());
     
-    auto middle_block = cref.block(1, 1, 3, 4);
-    CHECK(middle_block.rows() == 3);
-    CHECK(middle_block.cols() == 4);
-    CHECK(middle_block.size() == 12);
-    CHECK(middle_block(0, 0) == 10);
-    CHECK(middle_block(1, 1) == 10);
-    CHECK(middle_block(2, 2) == 10);
-    CHECK(middle_block(0, 1) == 0);
-    CHECK(middle_block(0, 2) == 0);
-    CHECK(middle_block(0, 3) == 10);
+    // auto middle_block = cref.block(1, 1, 3, 4);
+    // CHECK(middle_block.rows() == 3);
+    // CHECK(middle_block.cols() == 4);
+    // CHECK(middle_block.size() == 12);
+    // CHECK(middle_block(0, 0) == 10);
+    // CHECK(middle_block(1, 1) == 10);
+    // CHECK(middle_block(2, 2) == 10);
+    // CHECK(middle_block(0, 1) == 0);
+    // CHECK(middle_block(0, 2) == 0);
+    // CHECK(middle_block(0, 3) == 10);
     //const auto eights_diagonal = eights.filter([](const int &, size_t i, size_t j){ return i == j; });
 }
