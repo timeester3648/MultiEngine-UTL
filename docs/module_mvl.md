@@ -42,7 +42,7 @@ This approach provides a generic way of working with matrices that is mostly agn
 
 ## Performance & linear algebra operations
 
-**mvl** classes are intented to be lightweight wrappers that allow convenient data manipulation without any performance tradeoffs on basic operations (loops, indexing, standard algorithms, etc.), this is achieved through conditional compilation and compile-time resolution of all indexing formulas. See [benchmarks]() for details.
+**mvl** classes are intented to be lightweight wrappers that allow convenient data manipulation without any performance tradeoffs on basic operations (loops, indexing, standard algorithms, etc.), this is achieved through conditional compilation and compile-time resolution of all indexing formulas. See [benchmarks](TODO:) for details.
 
 Due to its arbitrary-data approach, linear algebra operations are intentionally **NOT** implemented by **mvl**. Numeric computation is a separate field and is much better handled by existing libraries like [XTensor](https://xtensor.readthedocs.io), [Eigen](https://eigen.tuxfamily.org) and [Blaze](https://bitbucket.org/blaze-lib/blaze). In cases where matrix computation is needed, it's heavily recommended to use matrices provided by those libraries as a main implementation, and whenever **mvl** functions are needed, those can be wrapped in **mvl** view. For example:
 
@@ -58,10 +58,14 @@ mvl::MatrixView<double, Checking::NONE, Layout::CR> view(A.rows(), A.cols(), A.d
 
 ## Definitions
 
+> [!Important]
+> `requires` tag specifies methods that get conditionally compiled by some specializations.
+
+> [!Important]
+> `Callable<Args...>` is a shortcut for a template parameter, restricted to callable objects with specific signature.
+
 ```cpp
 // Generic template
-// 'requires' tag specifies methods that get conditionally compiled by some specializations
-// 'Callable<Args...>' refers to a template parameter, restricted to callable objects with specific signature
 template <
     class       T,
     Dimension   dimension,
@@ -243,6 +247,9 @@ namespace format {
 
 > [!Note]
 > `noexcept` specifiers are omitted in this section to reduce verbosity.
+
+> [!Note]
+> From now on `mvl::GenericTensor::` will be omitted for same reason.
 
 ## Methods
 
