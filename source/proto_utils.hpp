@@ -71,9 +71,9 @@ namespace utl::config {
 template <typename T>
 inline void _write_formatted_value_to_ostream(std::ostream& os, const T& value) {
     constexpr bool is_string = std::is_convertible_v<T, std::string_view>;
-    constexpr bool is_float = std::is_floating_point_v<T>;
+    constexpr bool is_float  = std::is_floating_point_v<T>;
     constexpr bool is_array  = !is_string && !std::is_scalar_v<T>;
-    
+
     // String => Add quotes
     if constexpr (is_string) {
         os << "\"" << value << "\"";
@@ -674,7 +674,6 @@ public:
 // ======== header guard start ========
 
 #include <cstddef>
-#include <random>
 #include <ctime>
 #include <initializer_list>
 #include <limits>
@@ -1092,6 +1091,8 @@ inline void system(double ms) { std::this_thread::sleep_for(_chrono_ns(static_ca
 
 #include <cstddef>
 #include <functional>
+#include <iomanip>
+#include <ios>
 #include <iterator>
 #include <memory>
 #include <numeric>
@@ -1226,16 +1227,49 @@ public:
 // - Enums -
 
 // Parameter enums
-// Their combination + value type fully defines the type of matrix/matri-view
+// They specify compiler tensor API
 enum class Dimension { VECTOR, MATRIX };
 enum class Type { DENSE, STRIDED, SPARSE };
 enum class Ownership { CONTAINER, VIEW, CONST_VIEW };
+// Config enums
+// They specify conditional logic for a tensor
+// Their combination + parameter enums fully defines a GenericTensor
 enum class Checking { NONE, BOUNDS };
 enum class Layout { /* 1D */ FLAT, /* 2D */ RC, CR, /* Other */ SPARSE };
 
+// - IOFormat utils - // TEMP:
+enum class IOFormat { TENSOR, FLAT, LIST };
+
+constexpr auto _fmt_tensor_empty_element = "-";
+constexpr auto _fmt_tensor_separator     = ", ";
+constexpr auto _fmt_tensor_begin         = "[\n";
+constexpr auto _fmt_tensor_end           = "]\n";
+constexpr auto _fmt_tensor_row_begin     = "  [ ";
+constexpr auto _fmt_tensor_row_end       = " ]\n";
+
+constexpr auto _fmt_flat_separator = ", ";
+constexpr auto _fmt_flat_begin     = "{ ";
+constexpr auto _fmt_flat_end       = "{ ";
+
+constexpr auto _fmt_list_idx_begin = "(";
+constexpr auto _fmt_list_idx_mid   = ", ";
+constexpr auto _fmt_list_idx_end   = ") -> ";
+constexpr auto _fmt_list_entry_end = "\n";
+
+
+
+template <typename T>
+std::string default_stringifier(const T& value) {
+    std::stringstream ss;
+    ss << std::right << std::boolalpha << value;
+    return ss.str();
+}
+
+// IOFormat;
+
 // Overload tags (dummy types used to create "overloads" of .for_each(), which changes the way compiler handles
 // name based lookup, preventing shadowing of base class methods)
-// NOTE: Might be unnecessary after a switch to mixins
+// NOTE: Most likely unnecessary after away from CRTP
 enum class _for_each_tag { DUMMY };
 enum class _for_each_idx_tag { DUMMY };
 enum class _for_each_ij_tag { DUMMY };
@@ -1417,6 +1451,13 @@ using _choose_based_on_ownership =
 
 
 // - Type traits -
+
+template <typename Type, typename = void>
+struct _supports_stream_output : std::false_type {};
+
+template <typename Type>
+struct _supports_stream_output<Type, std::void_t<decltype(std::declval<std::ostream>() << std::declval<Type>())>>
+    : std::true_type {};
 
 #define _utl_define_operator_support_type_trait(trait_name_, operator_)                                                \
     template <typename Type, typename = void>                                                                          \
@@ -2409,7 +2450,167 @@ using SparseMatrixView = GenericTensor<T, Dimension::MATRIX, Type::SPARSE, Owner
 template <typename T, Checking checking = _default_checking>
 using ConstSparseMatrixView =
     GenericTensor<T, Dimension::MATRIX, Type::SPARSE, Ownership::CONST_VIEW, checking, Layout::SPARSE>;
+
+// - Formatters - // TEMP:
+namespace format {
     
+// TODO: Formats 'as_matrix', 'as_dictionary', 'as_json_array', 'as_raw_text' need 1D overloads
+    
+// - Human-readable formats -
+
+constexpr std::size_t max_displayed_rows = 70;
+constexpr std::size_t max_displayed_cols = 40;
+constexpr std::size_t max_displayed_flat_size = 500;
+constexpr auto content_indent = "  ";
+
+template <class T, Dimension dimension, Type type, Ownership ownership, Checking checking, Layout layout>
+std::string _as_too_large(const GenericTensor<T, dimension, type, ownership, checking, layout>& tensor) {
+    std::stringstream ss;
+    ss << "matrix[ " << tensor.rows() << " x " << tensor.cols() << " ] ->\n<hidden due to large size>\n";
+    return ss.str();
+}
+
+template<class T>
+std::string _ss_stringify(const T& value) {
+    std::stringstream ss;
+    ss.flags(std::ios::boolalpha);
+    ss << value;
+    return ss.str();
+}
+
+template<class T>
+std::string _ss_stringify_for_json(const T& value) {
+    // Modification of '_ss_stringify()' that properly handles floats for JSON
+    std::stringstream ss;
+    ss.flags(std::ios::boolalpha);
+    
+    if constexpr (std::is_floating_point_v<T>) {
+        if (std::isfinite(value)) ss << value;
+        else ss << "\"" << value << "\"";
+    }
+    else {
+        ss << value;
+    }
+    
+    return ss.str();
+}
+
+template <class T, Dimension dimension, Type type, Ownership ownership, Checking checking, Layout layout>
+std::string _stringify_metainfo(const GenericTensor<T, dimension, type, ownership, checking, layout>& tensor) {
+    std::stringstream ss;
+    ss << "Tensor [size = " << tensor.size() << "] (" << tensor.rows() << " x " << tensor.cols() << "):\n";
+    return ss.str();
+}
+
+template <class T, Dimension dimension, Type type, Ownership ownership, Checking checking, Layout layout>
+std::string as_vector(const GenericTensor<T, dimension, type, ownership, checking, layout>& tensor) {
+    if (tensor.size() > max_displayed_flat_size) return _as_too_large(tensor);
+    
+    std::stringstream ss;
+    ss << _stringify_metainfo(tensor);
+    
+    ss << content_indent << "{ ";
+    for (std::size_t idx = 0; idx < tensor.size(); ++idx) ss << tensor[idx] << (idx + 1 < tensor.size() ? ", " : "");
+    ss << " }\n";
+    
+    return ss.str();
+}
+    
+template <class T, Type type, Ownership ownership, Checking checking, Layout layout>
+std::string as_matrix(const GenericTensor<T, Dimension::MATRIX, type, ownership, checking, layout>& tensor) {
+    if (tensor.rows() > max_displayed_rows || tensor.cols() > max_displayed_cols) return _as_too_large(tensor);
+    
+    // Take care of sparsity using 'fill-ctor + for_each()' - if present, missing elements will just stay "default"
+    GenericTensor<std::string, Dimension::MATRIX, Type::DENSE, Ownership::CONTAINER, Checking::NONE, Layout::RC>
+        strings(tensor.rows(), tensor.cols(), "-");
+    tensor.for_each([&](const T& elem, std::size_t i, std::size_t j) { strings(i, j) = _ss_stringify(elem); });
+
+    // Get appropriate widths for each column - we want matrix to format nicely
+    std::vector<std::size_t> column_widths(strings.cols());
+    for (std::size_t i = 0; i < strings.rows(); ++i)
+        for (std::size_t j = 0; j < strings.cols(); ++j)
+            column_widths[j] = std::max(column_widths[j], strings(i, j).size());
+
+    // Output the formatted result
+    std::stringstream ss;
+    ss << _stringify_metainfo(tensor);
+    
+    for (std::size_t i = 0; i < strings.rows(); ++i) {
+        ss << content_indent << "[ ";
+        for (std::size_t j = 0; j < strings.cols(); ++j)
+            ss << std::setw(column_widths[j]) << strings(i, j) << (j + 1 < strings.cols() ? " " : "");
+        ss << " ]\n";
+    }
+    
+    return ss.str();
+}
+
+template <class T, Type type, Ownership ownership, Checking checking, Layout layout>
+std::string as_dictionary(const GenericTensor<T, Dimension::MATRIX, type, ownership, checking, layout>& tensor) {
+    if (tensor.size() > max_displayed_flat_size) return _as_too_large(tensor);
+    
+    std::stringstream ss;
+    ss << _stringify_metainfo(tensor);
+    
+    tensor.for_each([&](const T& elem, std::size_t i, std::size_t j) {
+        ss << content_indent << "(" << i << ", " << j << ") = " << _ss_stringify(elem) << "\n";
+    });
+    
+    return ss.str();
+}
+
+// - Export formats -
+
+template <class T, Type type, Ownership ownership, Checking checking, Layout layout>
+std::string as_raw_text(const GenericTensor<T, Dimension::MATRIX, type, ownership, checking, layout>& tensor) {
+    // Take care of sparsity using 'fill-ctor + for_each()' - if present, missing elements will just stay "default"
+    GenericTensor<std::string, Dimension::MATRIX, Type::DENSE, Ownership::CONTAINER, Checking::NONE, Layout::RC>
+        strings(tensor.rows(), tensor.cols(), _ss_stringify(T()));
+    tensor.for_each([&](const T& elem, std::size_t i, std::size_t j) { strings(i, j) = _ss_stringify(elem); });
+
+    // Output the formatted result
+    std::stringstream ss;
+    
+    for (std::size_t i = 0; i < strings.rows(); ++i) {
+        for (std::size_t j = 0; j < strings.cols(); ++j)
+            ss << strings(i, j) << (j + 1 < strings.cols() ? " " : "");
+        ss << " \n";
+    }
+    ss << "\n";
+    
+    return ss.str();
+}
+
+template <class T, Type type, Ownership ownership, Checking checking, Layout layout>
+std::string as_json_array(const GenericTensor<T, Dimension::MATRIX, type, ownership, checking, layout>& tensor) {
+    // Take care of sparsity using 'fill-ctor + for_each()' - if present, missing elements will just stay "default"
+    GenericTensor<std::string, Dimension::MATRIX, Type::DENSE, Ownership::CONTAINER, Checking::NONE, Layout::RC>
+        strings(tensor.rows(), tensor.cols(), _ss_stringify(T()));
+    tensor.for_each([&](const T& elem, std::size_t i, std::size_t j) { strings(i, j) = _ss_stringify(elem); });
+
+    // Get appropriate widths for each column - we want matrix to format nicely
+    std::vector<std::size_t> column_widths(strings.cols());
+    for (std::size_t i = 0; i < strings.rows(); ++i)
+        for (std::size_t j = 0; j < strings.cols(); ++j)
+            column_widths[j] = std::max(column_widths[j], strings(i, j).size());
+
+    // Output the formatted result
+    std::stringstream ss;
+    
+    ss << "[\n";
+    for (std::size_t i = 0; i < strings.rows(); ++i) {
+        ss << "  [ ";
+        for (std::size_t j = 0; j < strings.cols(); ++j)
+            ss << std::setw(column_widths[j]) << strings(i, j) << (j + 1 < strings.cols() ? ", " : "");
+        ss << " ]" << (i + 1 < strings.rows() ? "," : "") << " \n";
+    }
+    ss << "]\n";
+    
+    return ss.str();
+}
+
+} // namespace formatters
+
 // - Clear out internal macros -
 #undef _utl_define_operator_support_type_trait
 #undef _utl_template_arg_defs

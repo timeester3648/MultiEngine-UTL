@@ -389,6 +389,27 @@ int main(int argc, char* argv[]) {
         config::entry("bad numbers",
                       {std::numeric_limits<double>::infinity(), std::numeric_limits<double>::denorm_min(),
                        std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::signaling_NaN()}));
+    
+    // ### utl::mvl:: ###
+    std::cout << "\n\n### utl::mvl:: ###\n\n";
+                
+    mvl::SparseMatrix<double> mat(3, 4,
+    {
+        {0, 0, 3.14    },
+        {0, 1, 4.24    },
+        {1, 1, 7.15    },
+        {2, 2, 2.38    },
+        {2, 3, 734.835 }
+    });
+    
+    std::cout
+        // Human-readable formats
+        << "\n## as_vector() ##\n\n"     << mvl::format::as_vector(    mat)
+        << "\n## as_matrix() ##\n\n"     << mvl::format::as_matrix(    mat)
+        << "\n## as_dictionary() ##\n\n" << mvl::format::as_dictionary(mat)
+        // Export formats
+        << "\n## as_json_array() ##\n\n" << mvl::format::as_json_array(mat)
+        << "\n## as_raw_text() ##\n\n"   << mvl::format::as_raw_text(  mat);
 
     // ### MACRO_PROFILER ###
     std::cout << "\n\n### UTL_PROFILER ###\n\n";

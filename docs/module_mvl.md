@@ -4,13 +4,13 @@
 
 **mvl** (aka **M**atrix **V**iew **L**ibrary) implements generic classes for dense/strided/sparse vectors, matrices and views.
 
-Unlike most existing matrix implementations, **mvl** focuses on data-oriented matrices that support arbitrary element types and can be used similarly to [std::vector](https://en.cppreference.com/w/cpp/container/vector). It's main goal is simplicity of API and interoperability with most existing implementations.
+Unlike most existing matrix implementations, **mvl** focuses on data-oriented matrices that support arbitrary element types and can be used similarly to [std::vector](https://en.cppreference.com/w/cpp/container/vector). It's main goal is the simplicity of API and interoperability with most existing implementations.
 
 > [!Important]
-> Due to rather extensive API, seeing [usage examples](##example-1-(basic-usage)) first might be helpful.
+> Due to rather extensive API, seeing [usage examples](##example-1-declaring-and-indexing a-matrix) first might be helpful.
 
 > [!Tip]
-> Use GitHub built-in [table of contents](https://github.blog/changelog/2021-04-13-table-of-contents-support-in-markdown-files/) to navigate this page.
+> Use GitHub's built-in [table of contents](https://github.blog/changelog/2021-04-13-table-of-contents-support-in-markdown-files/) to navigate this page.
 
 ## Class structure
 
@@ -18,7 +18,7 @@ All vectors, matrices and views in **mvl** stem from a single generic template c
 ```cpp
 // Generic template
 template <
-    typename    T,
+    class       T,
     Dimension   dimension,
     Type        type,
     Ownership   ownership,
@@ -63,7 +63,7 @@ mvl::MatrixView<double, Checking::NONE, Layout::CR> view(A.rows(), A.cols(), A.d
 // 'requires' tag specifies methods that get conditionally compiled by some specializations
 // 'Callable<Args...>' refers to a template parameter, restricted to callable objects with specific signature
 template <
-    typename    T,
+    class       T,
     Dimension   dimension,
     Type        type,
     Ownership   ownership,
@@ -135,7 +135,7 @@ class GenericTensor {
     size_type    count(const_reference value) const; // requires value_type::operator==()
     
     bool is_sorted()                                                     const; // requires value_type::operator<()
-    bool is_sorted(Callable<bool(const_reference, const_reference)> cmp) const; // requires value_type::operator<()
+    bool is_sorted(Callable<bool(const_reference, const_reference)> cmp) const;
     
     std::vector<value_type> to_std_vector() const;
     
@@ -148,8 +148,10 @@ class GenericTensor {
     reference        back();
     
     reference       operator[](size_type idx);
+    reference       operator()(size_type i);                    // [TODO:] requires VECTOR
     reference       operator()(size_type i, size_type j);       // requires MATRIX
     const_reference operator[](size_type idx)            const;
+    const_reference operator()(size_type i)              const; // [TODO:] requires VECTOR
     const_reference operator()(size_type i, size_type j) const; // requires MATRIX
     
     // - Index conversions -
@@ -169,20 +171,20 @@ class GenericTensor {
     
     // - Predicate operations -
     bool true_for_any(Callable<bool(const_reference)>                       predicate) const;
-    bool true_for_any(Callable<bool(const_reference, size_type)>            predicate) const; // [???] requires VECTOR
+    bool true_for_any(Callable<bool(const_reference, size_type)>            predicate) const; // [TODO:] requires VECTOR
     bool true_for_any(Callable<bool(const_reference, size_type, size_type)> predicate) const; // requires MATRIX
     bool true_for_all(Callable<bool(const_reference)>                       predicate) const;
-    bool true_for_all(Callable<bool(const_reference, size_type)>            predicate) const; // [???] requires VECTOR
+    bool true_for_all(Callable<bool(const_reference, size_type)>            predicate) const; // [TODO:] requires VECTOR
     bool true_for_all(Callable<bool(const_reference, size_type, size_type)> predicate) const; // requires MATRIX
     
     // - Const algorithms -
     const self& for_each(Callable<void(const_reference)>                       func) const;
-    const self& for_each(Callable<void(const_reference, size_type)>            func) const; // [???] requires VECTOR
+    const self& for_each(Callable<void(const_reference, size_type)>            func) const; // [TODO:] requires VECTOR
     const self& for_each(Callable<void(const_reference, size_type, size_type)> func) const; // requires MATRIX
     
     // - Mutating algorithms -
     self& for_each(Callable<void(reference)>                       func);
-    self& for_each(Callable<void(reference, size_type)>            func); // [???] requires VECTOR
+    self& for_each(Callable<void(reference, size_type)>            func); // [TODO:] requires VECTOR
     self& for_each(Callable<void(reference, size_type, size_type)> func); // requires MATRIX
     self& fill(const_reference value);
     
@@ -195,39 +197,48 @@ class GenericTensor {
     using block_view_type;
     using block_const_view_type;
     
-    block_view_type       block(size_type i, size_type j, size_type rows, size_type cols);
-    block_const_view_type block(size_type i, size_type j, size_type rows, size_type cols) const;
+    block_view_type       block(size_type i, size_type j, size_type rows, size_type cols);       // requires MATRIX
+    block_const_view_type block(size_type i, size_type j, size_type rows, size_type cols) const; // requires MATRIX
     
-    block_view_type       row();
-    block_const_view_type row() const;
+    block_view_type       row();       // requires MATRIX
+    block_const_view_type row() const; // requires MATRIX
     
-    block_view_type       col();
-    block_const_view_type col() const;
+    block_view_type       col();       // requires MATRIX
+    block_const_view_type col() const; // requires MATRIX
     
     // - Sparse Subviews -
     using sparse_view_type;
     using sparse_const_view_type;
     
     sparse_view_type filter(Callable<bool(const_reference)>                       predicate);
-    sparse_view_type filter(Callable<bool(const_reference, size_type)>            predicate); // [???] requires VECTOR
+    sparse_view_type filter(Callable<bool(const_reference, size_type)>            predicate); // [TODO:] requires VECTOR
     sparse_view_type filter(Callable<bool(const_reference, size_type, size_type)> predicate); // requires MATRIX
     
     sparse_const_view_type filter(Callable<bool(const_reference)>                       predicate) const;
-    sparse_const_view_type filter(Callable<bool(const_reference, size_type)>            predicate) const; // [???] requires VECTOR
+    sparse_const_view_type filter(Callable<bool(const_reference, size_type)>            predicate) const; // [TODO:] requires VECTOR
     sparse_const_view_type filter(Callable<bool(const_reference, size_type, size_type)> predicate) const; // requires MATRIX
     
-    sparse_view_type       diagonal();
+    sparse_view_type       diagonal();       // requires MATRIX
     sparse_const_view_type diagonal() const; // requires MATRIX
     
-    // - Sparse operations - (require SPARSE)
-    using triplet_type = SparseEntry2D<                             value_type >; // requires MATRIX && CONTAINER
-    using triplet_type = SparseEntry2D<std::reference_wrapper<      value_type>>; // requires MATRIX && VIEW
-    using triplet_type = SparseEntry2D<std::reference_wrapper<const value_type>>; // requires MATRIX && CONST_VIEW
+    // - Sparse operations - (requires SPARSE)
+    using sparse_entry_type; // requires SPARSE
     
-    self&  insert_triplets(const std::vector<triplet_type>&  triplets); // requires MATRIX
-    self& rewrite_triplets(      std::vector<triplet_type>&& triplets); // requires MATRIX
-    self&   erase_triplets(      std::vector<Index2D     >   indices ); // requires MATRIX
+    self& rewrite_triplets(      std::vector<triplet_type>&& triplets); // requires MATRIX && SPARSE
+    self&  insert_triplets(const std::vector<triplet_type>&  triplets); // requires MATRIX && SPARSE
+    self&   erase_triplets(      std::vector<Index2D     >   indices ); // requires MATRIX && SPARSE
 };
+
+// - Tensor IO formats -
+namespace format {
+    // Human-readable formats
+    std::string as_vector(    const GenericTensor<...> &tensor);
+    std::string as_matrix(    const GenericTensor<...> &tensor);
+    std::string as_dictionary(const GenericTensor<...> &tensor);
+    // Export formats
+    std::string as_raw_text(  const GenericTensor<...> &tensor);
+    std::string as_json_array(const GenericTensor<...> &tensor);
+}
 ```
 
 > [!Note]
@@ -237,34 +248,402 @@ class GenericTensor {
 
 ### Parameter reflection
 
+> ```cpp
+> struct params {
+>     constexpr static Dimension   dimension
+>     constexpr static Type        type;
+>     constexpr static Ownership   ownership;
+>     constexpr static Checking    checking;
+>     constexpr static Layout      layout;
+> };
+> ```
+
+Compile-time reflection of template parameters defining current `GenericTensor`.
+
+Useful for implementing templates over tensor types and conditional compilation  (for example, template over `TensorType` can use `if constexpr (TensorType::params::dimension == Dimension::MATRIX) {}` to conditionally enable logic for matrices).
+
 ### Member types
+
+> ```cpp
+> using self            = GenericTensor;
+> using value_type      = T;
+> using size_type       = std::size_t;
+> using difference_type = std::ptrdiff_t;
+> using reference       = T&;
+> using const_reference = const T&;
+> using pointer         = T*;
+> using const_pointer   = const T*;
+> ```
+
+A set of member types analogous to member types of [std::vector](https://en.cppreference.com/w/cpp/container/vector).
+
+### Iterators
+
+> ```cpp
+> using               iterator;
+> using       reverse_iterator;
+> using         const_iterator;
+> using const_reverse_iterator;
+> 
+> iterator begin();
+> iterator   end();
+> 
+> reverse_iterator rbegin();
+> reverse_iterator   rend();
+> 
+> const_iterator  begin() const;
+> const_iterator    end() const;
+> const_iterator cbegin() const;
+> const_iterator   cend() const;
+> 
+> const_reverse_iterator  rbegin() const;
+> const_reverse_iterator    rend() const;
+> const_reverse_iterator crbegin() const;
+> const_reverse_iterator   crend() const;
+> ```
+
+Iterators for 1D iteration over the underlying array. API and functionality is exactly the same as the one provided by `std::vector` iterators.
+
+### Basic getters
+
+> ```cpp
+> size_type size() const;
+> ```
+
+Returns the number of elements stored by the tensor. Size of the underlying array.
+
+**Note:** While `size() == rows() * cols()` is a valid assumption for dense matrices, the same cannot be said about the sparse case.
+
+> ```cpp
+> size_type rows() const; // requires MATRIX
+> size_type cols() const; // requires MATRIX
+> ```
+
+Returns number of rows/columns in the matrix.
+
+> ```cpp
+> size_type row_stride() const; // requires MATRIX && (DENSE || STRIDED)
+> size_type col_stride() const; // requires MATRIX && (DENSE || STRIDED)
+> ```
+
+Returns strides of the matrix.
+
+**Note 1:** Most linear algebra libraries use only one stride per matrix. In context of the `Layout::RC` that "conventional" stride will correspond to `col_stride()`. `row_stride()` denotes the number of elements which get "skipped" by indexing after the end of each row. Using two strides like this gives us a more general way of viewing into data, particularly in regard to blocking.
+
+**Note 2:** Dense non-strided matrices return trivial strides to accommodate API's that can work with both dense and strided inputs. There is no overhead from using actual unit-strides. What constitutes as "trivial strides" can be seen in the table below:
+
+| Matrix type | Layout | Trivial `row_stride()` / `col_stride()` |
+| - | - | - |
+| `DENSE` | `RC` | **0** / **1** |
+| `DENSE` | `CR` | **1** / **0** |
+
+> ```cpp
+> const_pointer  data() const; // requires DENSE || STRIDED
+> pointer        data();       // requires DENSE || STRIDED
+> ```
+
+Returns the pointer to the underlying array.
+
+> ```cpp
+> bool empty() const;
+> ```
+
+Returns whether there are any elements stored in the tensor.
+
+### Advanced getters
+
+> ```cpp
+> bool contains(const_reference value) const; // requires value_type::operator==()
+> ```
+
+Returns whether matrix contains element equal to `value`.
+
+> ```cpp
+> size_type count(const_reference value) const; // requires value_type::operator==()
+> ```
+
+Returns number of matrix elements equal to`value`.
+
+> ```cpp
+> bool is_sorted()                                                     const; // requires value_type::operator<()
+> bool is_sorted(Callable<bool(const_reference, const_reference)> cmp) const;
+> ```
+
+Returns whether the underlying array is sorted. Uses `operator<` to perform comparison by default, callable `cmp` can be passed to use a custom comparison instead.
+
+> ```cpp
+> std::vector<value_type> to_std_vector() const;
+> ```
+
+Returns a copy of the underlying array as `std::vector`.
+
+> ```cpp
+> self transposed() const; // requires MATRIX && DENSE
+> ```
+
+Returns [transpose](https://en.wikipedia.org/wiki/Transpose) of the matrix.
 
 ### Indexation
 
+> ```cpp
+> const_reference front() const;
+> const_reference  back() const;
+> reference       front();
+> reference        back();
+> ```
+
+Returns first/last element from the underlying 1D representation of the tensor.
+
+> ```cpp
+> reference       operator[](size_type idx);
+> const_reference operator[](size_type idx) const;
+> ```
+
+Returns element number `idx` from the underlying 1D representation of the tensor.
+
+> ```cpp
+> reference       operator()(size_type i);                    // requires VECTOR
+> const_reference operator()(size_type i)              const; // requires VECTOR
+> reference       operator()(size_type i, size_type j);       // requires MATRIX
+> const_reference operator()(size_type i, size_type j) const; // requires MATRIX
+> ```
+
+Returns element `i` (for vectors) or element `(i, j)` (for matrices) according to a logical index.
+
+**Note:** `operator()` is a *default way of indexing tensors* and should be used in vast majority of cases, the main purpose of `operator[]` is to allow efficient looping over the underlying data when uniform transforms are applied. It is a good idea to prefer `operator()` even for 1D vectors since in some cases (like sparse vectors) logical index `i` may not be the same as "in-memory index" `idx`.
+
 ### Index conversions
+
+> ```cpp
+> size_type get_idx_of_ij(size_type i, size_type j) const; // requires MATRIX
+> Index2D   get_ij_of_idx(size_type idx)            const; // requires MATRIX
+> ```
+
+Conversion between underlying index `idx` and logical index `(i, j)` for matrices.
+
+> ```cpp
+> bool contains_index(size_type i, size_type j) const; // requires MATRIX && SPARSE
+> ```
+
+Returns whether sparse matrix contains an element with a given index.
+
+> ```cpp
+> size_type extent_major() const; // requires MATRIX && (DENSE || STRIDED)
+> size_type extent_minor() const; // requires MATRIX && (DENSE || STRIDED)
+> ```
+
+Returns dense matrix extents according to a memory layout. For example: with a row-major layout (aka `Layout::RC`) `extent_major()` will return the number of rows and `extent_minor()` will return the number of columns.
+
+This is useful for creating generic logic for different layouts.
 
 ### Reductions
 
+> ```cpp
+> value_type     sum() const; // requires value_type::operator+()
+> value_type product() const; // requires value_type::operator*()
+> value_type     min() const; // requires value_type::operator<()
+> value_type     max() const; // requires value_type::operator<()
+> ```
+
+Reduces matrix over a binary operation `+`, `*`, `min` or `max`.
+
+Particularly useful in combination with [subviews](###block-subviews).
+
 ### Predicate operations
 
-### Algorithms
+> ```cpp
+> bool true_for_any(Callable<bool(const_reference)>                       predicate) const;
+> bool true_for_any(Callable<bool(const_reference, size_type)>            predicate) const; // requires VECTOR
+> bool true_for_any(Callable<bool(const_reference, size_type, size_type)> predicate) const; // requires MATRIX
+> ```
+
+Returns whether  `predicate` evaluates to `true` for any elements in the tensor.
+
+Overloads **(2)** and **(3)** allow predicates to also take element index into condition.
+
+> ```cpp
+> bool true_for_all(Callable<bool(const_reference)>                       predicate) const;
+> bool true_for_all(Callable<bool(const_reference, size_type)>            predicate) const; // requires VECTOR
+> bool true_for_all(Callable<bool(const_reference, size_type, size_type)> predicate) const; // requires MATRIX
+> ```
+
+Returns whether  `predicate` evaluates to `true` for all elements in the tensor.
+
+Overloads **(2)** and **(3)** allow predicates to also take element index into condition.
+
+### Const algorithms
+
+> ```cpp
+> const self& for_each(Callable<void(const_reference)>                       func) const;
+> const self& for_each(Callable<void(const_reference, size_type)>            func) const; // requires VECTOR
+> const self& for_each(Callable<void(const_reference, size_type, size_type)> func) const; // requires MATRIX
+> ```
+
+Invokes non-mutating `func` for all elements in the tensor. 
+
+Overloads **(2)** and **(3)** allow `func` to also use element index as an argument.
+
+### Mutating algorithms
+
+> ```cpp
+> self& for_each(Callable<void(reference)>                       func);
+> self& for_each(Callable<void(reference, size_type)>            func); // requires VECTOR
+> self& for_each(Callable<void(reference, size_type, size_type)> func); // requires MATRIX
+> ```
+
+Invokes mutating `func` for all elements in the tensor. 
+
+Overloads **(2)** and **(3)** allow `func` to also use element index as an argument.
+
+> ```cpp
+> self& fill(const_reference value);
+> ```
+
+Sets all elements of the tensor to `value`.
+
+> ```cpp
+> self&        sort(); // requires value_type::operator<()
+> self& stable_sort(); // requires value_type::operator<()
+> self&        sort(Callable<bool(const_reference, const_reference)> cmp);
+> self& stable_sort(Callable<bool(const_reference, const_reference)> cmp);
+> ```
+
+Sorts elements of the underlying array according to `operator<` or a custom comparison `cmp`.
+
+`stable_sort()` uses [stable sorting algorithms](https://en.wikipedia.org/wiki/Category:Stable_sorts) to maintain the relative order of entries with equal values, however it may come at a cost of some performance (specifics depend on a compiler implementation).
+
+### Block subviews
+
+> ```cpp
+> using block_view_type;
+> using block_const_view_type;
+> ```
+
+Types returned by blocking subview methods of the tensor.
+
+Dense and strided matrices will use apropriately strided views to efficiently represent blocking, while sparse matrices returns sparse views.
+
+All subviews inherit `T`, `Dimension` and `Checking` configuration from the parent.
+
+> ```cpp
+> block_view_type       block(size_type i, size_type j, size_type rows, size_type cols);        // requires MATRIX
+> block_const_view_type block(size_type i, size_type j, size_type rows, size_type cols) const;  // requires MATRIX
+> ```
+
+Returns block subview starting at `(i, j)` with size `rows` x `cols`. 
+
+> ```cpp
+> block_view_type       row(size_type i);       // requires MATRIX
+> block_const_view_type row(size_type i) const; // requires MATRIX
+> ```
+
+Returns block subview corresponding to the `i`-th row.
+
+> ```cpp
+> block_view_type       col(size_type j);       // requires MATRIX
+> block_const_view_type col(size_type j) const; // requires MATRIX
+> ```
+
+Returns block subview corresponding to the `j`-th column.
+
+### Sparse subviews
+
+> ```cpp
+> using sparse_view_type;
+> using sparse_const_view_type;
+> ```
+
+Types returned by sparse subview methods of the tensor.
+
+Evaluate to appropriate sparse tensor views that inherits `T`, `Dimension` and `Checking` configuration from the parent.
+
+> ```cpp
+> sparse_view_type filter(Callable<bool(const_reference)>                       predicate);
+> sparse_view_type filter(Callable<bool(const_reference, size_type)>            predicate); // [???] requires VECTOR
+> sparse_view_type filter(Callable<bool(const_reference, size_type, size_type)> predicate); // requires MATRIX
+> ```
+
+Returns a sparse view to all elements satisfying the `predicate`.
+
+Overloads **(2)** and **(3)** allow predicates to also take element index into condition.
+
+> ```cpp
+> sparse_const_view_type filter(Callable<bool(const_reference)>                       predicate) const;
+> sparse_const_view_type filter(Callable<bool(const_reference, size_type)>            predicate) const; // [???] requires VECTOR
+> sparse_const_view_type filter(Callable<bool(const_reference, size_type, size_type)> predicate) const; // requires MATRIX
+> ```
+
+`const` version of the previous method.
+
+> ```cpp
+> sparse_view_type       diagonal();       // requires MATRIX
+> sparse_const_view_type diagonal() const; // requires MATRIX
+> ```
+
+Returns sparse view to a matrix diagonal.
 
 ### Sparse operations
 
 > ```cpp
-> mvl::METHOD_NAME();
+> using sparse_entry_type; // requires SPARSE
 > ```
 
-METHOD_DESCRIPTION.
+`index` + `value` entry type corresponding to a sparse  tensor (aka pairs for vector and triplets for matrices). Such entries are used to initialize and fill sparse matrices with values (similarly to the vast majority of other sparse matrix implementation).
 
-## Example N (NAME)
+A table of appropriate sparse entry types can be seen below:
 
-[ [Run this code](LINK) ]
-```cpp
-using namespace utl;
+| Tensor dimension | Ownership    | Value of `sparse_entry_type`                              |
+| ---------------- | ------------ | --------------------------------------------------------- |
+| `VECTOR`         | `CONTAINER`  | `SparseEntry1D<value_type>>`                              |
+| `VECTOR`         | `VIEW`       | `SparseEntry1D<std::reference_wrapper<value_type>>`       |
+| `VECTOR`         | `CONST_VIEW` | `SparseEntry1D<std::reference_wrapper<const value_type>>` |
+| `MATRIX`         | `CONTAINER`  | `SparseEntry2D<value_type>>`                              |
+| `MATRIX`         | `VIEW`       | `SparseEntry2D<std::reference_wrapper<value_type>>`       |
+| `MATRIX`         | `CONST_VIEW` | `SparseEntry2D<std::reference_wrapper<const value_type>>` |
 
-CODE
-```
+> ```cpp
+> self& rewrite_triplets(std::vector<triplet_type>&& triplets); // requires MATRIX && SPARSE
+> ```
+
+Replaces all existing entries in the sparse matrix with given `triplets`. 
+
+> ```cpp
+> self& insert_triplets(const std::vector<triplet_type>&  triplets); // requires MATRIX && SPARSE
+> ```
+
+Inserts given `triplets` into a sparse matrix.
+
+> ```cpp
+> self& erase_triplets(std::vector<Index2D> indices ); // requires MATRIX && SPARSE
+> ```
+
+Erases entries with given `indices` from the sparse matrix.
+
+### Tensor IO formats
+
+> ```cpp
+> // Human-readable formats
+> std::string mvl::format::as_vector(    const GenericTensor<...> &tensor);
+> std::string mvl::format::as_matrix(    const GenericTensor<...> &tensor);
+> std::string mvl::format::as_dictionary(const GenericTensor<...> &tensor);
+> // Export formats
+> std::string mvl::format::as_raw_text(  const GenericTensor<...> &tensor);
+> std::string mvl::format::as_json_array(const GenericTensor<...> &tensor);
+> ```
+
+Converts tensor to string, formatted according to a chosen schema. All formats accept arbitrary tensors and properly handle sparse matrices.
+
+| Method          | Output                                                       |
+| --------------- | ------------------------------------------------------------ |
+| `as_vector`     | Human-readable format. Formats tensor as a flat array of values. |
+| `as_matrix`     | Human-readable format. Formats tensor as a 1- or 2-D matrix. Missing sparse matrix entries are marked with `-`. |
+| `as_dictionary` | Human-readable format. Formats tensor as a list of `key`-`value` pairs. Useful for sparse matrices. |
+| `as_raw_text`   | Export format. Formats tensor as a raw data separated by spaces and newlines (in case of matrices). |
+| `as_json_array` | Export format. Formats tensor as a 1- or 2-D [JSON](https://en.wikipedia.org/wiki/JSON) array. |
+
+See corresponding [example](##example-2-IO-formats) to get a better idea of what each output looks like.
+
+**Note:** Stringification works for any type with an existing `operator<<(std::ostream&, const T&)` overload.
 
 ## Example 1 (Declaring and indexing a matrix)
 
@@ -288,13 +667,81 @@ assert( A[3] == 3 );
 for (const auto &element : A) assert( element > 0 );
 
 // std::vector-like API & iterators
-assert(  A.front()     = 1 );
-assert(  A.back()      = 6 );
-assert( *A.cbegin()    = 1 );
-assert( *A.cend() - 1  = 6 );
+assert(  A.front()       = 1 );
+assert(  A.back()        = 6 );
+assert( *A.cbegin()      = 1 );
+assert( *(A.cend() - 1)  = 6 );
 
-// Printing
-std::cout << A; // equivalent to 'std::cout << A.stringify()'
+// Basic getters
+assert( A.rows()  == 2     );
+assert( A.cols()  == 3     );
+assert( A.size()  == 6     );
+assert( A.empty() == false );
+```
+
+## Example 2 (IO formats)
+
+[ [Run this code](LINK) ]
+```cpp
+using namespace utl;
+
+// Create sparse matrix from triplets
+mvl::SparseMatrix<double> mat(3, 4,
+{
+    {0, 0, 3.14    },
+    {0, 1, 4.24    },
+    {1, 1, 7.15    },
+    {2, 2, 2.38    },
+    {2, 3, 734.835 }
+});
+
+// Showcase different IO formats
+std::cout
+    // Human-readable formats
+    << "\n## as_vector() ##\n\n"     << mvl::format::as_vector(    mat)
+    << "\n## as_matrix() ##\n\n"     << mvl::format::as_matrix(    mat)
+    << "\n## as_dictionary() ##\n\n" << mvl::format::as_dictionary(mat)
+    // Export formats
+    << "\n## as_raw_text() ##\n\n"   << mvl::format::as_raw_text(  mat)
+    << "\n## as_json_array() ##\n\n" << mvl::format::as_json_array(mat);
+```
+
+Output:
+```
+## as_vector() ##
+
+Tensor [size = 5] (3 x 4):
+  { 3.14, 4.24, 7.15, 2.38, 734.835 }
+
+## as_matrix() ##
+
+Tensor [size = 5] (3 x 4):
+  [ 3.14 4.24    -       - ]
+  [    - 7.15    -       - ]
+  [    -    - 2.38 734.835 ]
+
+## as_dictionary() ##
+
+Tensor [size = 5] (3 x 4):
+  (0, 0) = 3.14
+  (0, 1) = 4.24
+  (1, 1) = 7.15
+  (2, 2) = 2.38
+  (2, 3) = 734.835
+  
+## as_raw_text() ##
+
+3.14 4.24 0 0 
+0 7.15 0 0 
+0 0 2.38 734.835
+
+## as_json_array() ##
+
+[
+  [ 3.14, 4.24,    0,       0 ], 
+  [    0, 7.15,    0,       0 ], 
+  [    0,    0, 2.38, 734.835 ] 
+]
 ```
 
 ## Example N (Various math operations)
@@ -303,8 +750,11 @@ std::cout << A; // equivalent to 'std::cout << A.stringify()'
 ```cpp
 using namespace utl;
 
+// Create 7x7 matrix with random values in [0, 1] range
+auto A = mvl::create::random_matrix(7, 7, 0., 1.); // [TODO:]
+
 // Compute ||A||_inf norm
-const auto norm = A.transform(std::abs).sum();
+const auto norm = A.transform(std::abs).sum(); // [TODO:]
     
 // Compute tr(A)
 const auto tr = A.diagonal().sum();
@@ -314,7 +764,7 @@ auto upper_half = A.block(0, 0,            0, A.size() / 2 - 1 );
 auto lower_half = A.block(0, 0, A.size() / 2, A.size() - 1     );
 
 // Set diagonal to { 1, 2, 3, ... , N }
-A.diagonal().for_each([](int &elem, size_t idx){ elem = idx; });
+A.diagonal().for_each([](int &elem, size_t i, size_t){ elem = i; });
 ```
 
 ## Example N (Wrapping external data into views)
@@ -366,6 +816,15 @@ grayscale.for_each([&](uint8_t &elem, size_t i, size_t j){
 ```
 
 ## Example N (Working with sparse matrices)
+
+[ [Run this code](LINK) ]
+```cpp
+using namespace utl;
+
+CODE
+```
+
+## Example N (NAME)
 
 [ [Run this code](LINK) ]
 ```cpp
