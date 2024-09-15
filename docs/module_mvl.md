@@ -7,7 +7,7 @@
 Unlike most existing matrix implementations, **mvl** focuses on data-oriented matrices that support arbitrary element types and can be used similarly to [std::vector](https://en.cppreference.com/w/cpp/container/vector). It's main goal is the simplicity of API and interoperability with most existing implementations.
 
 > [!Important]
-> Due to rather extensive API, seeing [usage examples](##example-1-declaring-and-indexing a-matrix) first might be helpful.
+> Due to rather extensive API, seeing [usage examples](#example-1-declaring-and-indexing-a-matrix) first might be helpful.
 
 > [!Tip]
 > Use GitHub's built-in [table of contents](https://github.blog/changelog/2021-04-13-table-of-contents-support-in-markdown-files/) to navigate this page.
@@ -447,7 +447,7 @@ This is useful for creating generic logic for different layouts.
 
 Reduces matrix over a binary operation `+`, `*`, `min` or `max`.
 
-Particularly useful in combination with [subviews](###block-subviews).
+Particularly useful in combination with [subviews](#block-subviews).
 
 ### Predicate operations
 
@@ -641,7 +641,7 @@ Converts tensor to string, formatted according to a chosen schema. All formats a
 | `as_raw_text`   | Export format. Formats tensor as a raw data separated by spaces and newlines (in case of matrices). |
 | `as_json_array` | Export format. Formats tensor as a 1- or 2-D [JSON](https://en.wikipedia.org/wiki/JSON) array. |
 
-See corresponding [example](##example-2-IO-formats) to get a better idea of what each output looks like.
+See corresponding [example](#example-2-IO-formats) to get a better idea of what each output looks like.
 
 **Note:** Stringification works for any type with an existing `operator<<(std::ostream&, const T&)` overload.
 
