@@ -140,13 +140,13 @@ Returns $|x|$, $\mathrm{sign} (x)$, $x^2$ or $x^3$ of an appropriate type.
 Returns $\dfrac{a + b}{2}$ of an appropriate type. Can be used with vectors or other custom types that have defined `operator+()` and scalar `operator*()`.
 
 > ```cpp
-> int kronecker_delta(IntegerType i, IntegerType j);
+> int math::kronecker_delta(IntegerType i, IntegerType j);
 > ```
 
 Computes [Kronecker delta](https://en.wikipedia.org/wiki/Kronecker_delta) symbol: $\delta_{ii} = \begin{cases}1, \quad i = j\\0, \quad i \neq j\end{cases}$.
 
 > ```cpp
-> int power_of_minus_one(IntegerType power);
+> int math::power_of_minus_one(IntegerType power);
 > ```
 
 Computes $(-1)^{power}$ efficiently.
@@ -174,13 +174,13 @@ Converts degrees to radians and back.
 `Points` implicitly converts to `Intervals` ($N + 1$ points corresponds to $N$ intervals), allowing most meshing functions to accept both types as an input.
 
 > ```cpp
-> std::vector<FloatType> linspace(FloatType L1, FloatType L2, Intervals N);
+> std::vector<FloatType> math::linspace(FloatType L1, FloatType L2, Intervals N);
 > ```
 
 Meshes $[L_1, L_2]$ range into a regular 1D grid with $N$ intervals (which corresponds to $N + 1$ grid points). Similar to `linspace()` from [Matlab](https://www.mathworks.com/products/matlab.html) and [numpy](https://numpy.org).
 
 > ```cpp
-> FloatType integrate_trapezoidal(FuncType f, FloatType L1, FloatType L2, Intervals N);
+> FloatType math::integrate_trapezoidal(FuncType f, FloatType L1, FloatType L2, Intervals N);
 > ```
 
 Numericaly computes integral $I_h = \int\limits_{L_1}^{L_2} f(x) \mathrm{d} x$ over $N$ integration intervals using [trapezoidal rule](https://en.wikipedia.org/wiki/Trapezoidal_rule).
