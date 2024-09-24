@@ -2302,12 +2302,12 @@ private:
                                                   SparseEntry2D<std::reference_wrapper<const value_type>>>;
 
 public:
-    using triplet_type = _triplet_t;
+    using sparse_entry_type = _triplet_t;
 
     _utl_reqs(dimension == Dimension::MATRIX && type == Type::SPARSE)
-    self& insert_triplets(const std::vector<triplet_type>& triplets) {
+    self& insert_triplets(const std::vector<sparse_entry_type>& triplets) {
         // Bulk-insert triplets and sort by index
-        const auto ordering = [](const triplet_type& l, const triplet_type& r) -> bool {
+        const auto ordering = [](const sparse_entry_type& l, const sparse_entry_type& r) -> bool {
             return (l.i < r.i) && (l.j < r.j);
         };
 
@@ -2318,9 +2318,9 @@ public:
     }
 
     _utl_reqs(dimension == Dimension::MATRIX && type == Type::SPARSE)
-    self& rewrite_triplets(std::vector<triplet_type>&& triplets) {
+    self& rewrite_triplets(std::vector<sparse_entry_type>&& triplets) {
         // Move-construct all triplets at once and sort by index
-        const auto ordering = [](const triplet_type& l, const triplet_type& r) -> bool {
+        const auto ordering = [](const sparse_entry_type& l, const sparse_entry_type& r) -> bool {
             return (l.i < r.i) && (l.j < r.j);
         };
 
@@ -2339,7 +2339,7 @@ public:
         std::sort(indices.begin(), indices.end(), _index_2d_sparse_ordering);
         std::size_t cursor = 0;
 
-        const auto erase_condition = [&](const triplet_type& triplet) -> bool {
+        const auto erase_condition = [&](const sparse_entry_type& triplet) -> bool {
             /* Stop erasing once all target indices are handled */
             if (cursor == indices.size()) return false;
             if (indices[cursor].i == triplet.i && indices[cursor].j == triplet.j) {
@@ -2353,7 +2353,7 @@ public:
         this->_data.erase(iter, this->_data.end());
 
         // Re-sort triplets just in case
-        const auto ordering = [](const triplet_type& l, const triplet_type& r) -> bool {
+        const auto ordering = [](const sparse_entry_type& l, const sparse_entry_type& r) -> bool {
             return (l.i < r.i) && (l.j < r.j);
         };
         std::sort(this->_data.begin(), this->_data.end(), ordering);
@@ -2452,7 +2452,7 @@ public:
                                                         other_ownership, other_checking, other_layout>& other) {
         this->_rows = other.rows();
         this->_cols = other.cols();
-        std::vector<triplet_type> triplets;
+        std::vector<sparse_entry_type> triplets;
         
         // Other sparse matrices can be trivially copied
         if constexpr (other_type == Type::SPARSE) {
@@ -2720,7 +2720,7 @@ public:
 
     // Init-from-data (copy)
     _utl_reqs(dimension == Dimension::MATRIX && type == Type::SPARSE)
-    explicit GenericTensor(size_type rows, size_type cols, const std::vector<triplet_type>& data) {
+    explicit GenericTensor(size_type rows, size_type cols, const std::vector<sparse_entry_type>& data) {
         this->_rows = rows;
         this->_cols = cols;
         this->insert_triplets(std::move(data));
@@ -2728,7 +2728,7 @@ public:
 
     // Init-from-data (move)
     _utl_reqs(dimension == Dimension::MATRIX && type == Type::SPARSE)
-    explicit GenericTensor(size_type rows, size_type cols, std::vector<triplet_type>&& data) {
+    explicit GenericTensor(size_type rows, size_type cols, std::vector<sparse_entry_type>&& data) {
         this->_rows = rows;
         this->_cols = cols;
         this->rewrite_triplets(std::move(data));

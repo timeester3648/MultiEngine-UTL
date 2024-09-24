@@ -75,13 +75,6 @@ template <
     Layout      layout
 >
 class GenericTensor {
-    // - Generic constructors -
-    GenericTensor(const self&  other);
-    GenericTensor(      self&& other);
-    
-    self& operator=(self&  other);
-    self& operator=(self&& other);
-        
     // - Parameter reflection -
     struct params {
         constexpr static Dimension   dimension
@@ -506,7 +499,7 @@ Returns element `i` (for vectors) or element `(i, j)` (for matrices) according t
 > Index2D   get_ij_of_idx(size_type idx)            const; // requires MATRIX
 > ```
 
-Conversion between underlying index `idx` and logical index `(i, j)` for matrices.
+Conversion between the underlying index `idx` and logical index `(i, j)` for matrices.
 
 > ```cpp
 > bool contains_index(size_type i, size_type j) const; // requires MATRIX && SPARSE
@@ -666,7 +659,7 @@ Evaluate to appropriate sparse tensor views that inherits `T`, `Dimension` and `
 
 > ```cpp
 > sparse_view_type filter(Callable<bool(const_reference)>                       predicate);
-> sparse_view_type filter(Callable<bool(const_reference, size_type)>            predicate); // [???] requires VECTOR
+> sparse_view_type filter(Callable<bool(const_reference, size_type)>            predicate); // requires VECTOR
 > sparse_view_type filter(Callable<bool(const_reference, size_type, size_type)> predicate); // requires MATRIX
 > ```
 
@@ -676,7 +669,7 @@ Overloads **(2)** and **(3)** allow predicates to also take element index into c
 
 > ```cpp
 > sparse_const_view_type filter(Callable<bool(const_reference)>                       predicate) const;
-> sparse_const_view_type filter(Callable<bool(const_reference, size_type)>            predicate) const; // [???] requires VECTOR
+> sparse_const_view_type filter(Callable<bool(const_reference, size_type)>            predicate) const; // requires VECTOR
 > sparse_const_view_type filter(Callable<bool(const_reference, size_type, size_type)> predicate) const; // requires MATRIX
 > ```
 
@@ -909,22 +902,33 @@ Constructs a const strided matrix view into another strided `mvl` matrix.
 
 ```cpp
 // pass triplets by copy
-explicit GenericTensor(size_type rows, size_type cols, const std::vector<triplet_type>& data);
+explicit GenericTensor(size_type rows, size_type cols, const std::vector<sparse_entry_type>&  data);
 // pass triplets with move-semantics
-explicit GenericTensor(size_type rows, size_type cols, std::vector<triplet_type>&& data);
+explicit GenericTensor(size_type rows, size_type cols,       std::vector<sparse_entry_type>&& data);
 ```
 
 Constructs a `rows` by `cols` sparse matrix from a list of `{ i, j, value }` triplets.
 
 If triplets aren't intended to be reused, they can be passed with `std::move()` for a faster construction.
 
-These constructors are valid for both owning sparse matrices and views, with the only difference being the expected `triplet_type` (note that this is a member type of the tensor class, it can always be used directly as provided). Below is the table detailing possible triplet types for each ownership:
+These constructors are valid for both owning sparse matrices and views, with the only difference being the expected `sparse_entry_type` (note that this is a member type of the tensor class, it can always be used directly as provided). Below is the table detailing possible triplet types for each ownership:
 
-| Ownership    | Value of `triplet_type`                    |
-| ------------ | ------------------------------------------ |
-| `CONTAINER`  | `value_type`                               |
-| `VIEW`       | `std::reference_wrapper<value_type>`       |
-| `CONST_VIEW` | `std::reference_wrapper<const value_type>` |
+| Ownership    | Value of `sparse_entry_type`                              |
+| ------------ | --------------------------------------------------------- |
+| `CONTAINER`  | `SparseEntry2D<value_type>`                               |
+| `VIEW`       | `SparseEntry2D<std::reference_wrapper<value_type>>`       |
+| `CONST_VIEW` | `SparseEntry2D<std::reference_wrapper<const value_type>>` |
+
+Here `mvl::SparseEntry2D<T>` is a simple POD struct:
+
+```cpp
+template <typename T>
+struct SparseEntry2D {
+    size_t i;
+    size_t j;
+    T      value;
+};
+```
 
 
 
@@ -965,7 +969,7 @@ assert( A.empty() == false );
 // Declare matrix with enabled bound-checking
 mvl::Matrix<int, Checking::BOUNDS> B = A;
 
-// B(3, 2) = 1; // will throw with message "i (which is 3) >= this->rows() (which is 2)"
+// B(3, 2) = 1; // will throw with a message "i (which is 3) >= this->rows() (which is 2)"
 ```
 
 ## Example 2 (IO formats)
