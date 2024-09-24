@@ -145,6 +145,8 @@ class GenericTensor {
     
     self transposed() const; // requires MATRIX && DENSE
     
+    self move() &;
+    
     // - Indexation -
     const_reference front() const;
     const_reference  back() const;
@@ -190,7 +192,16 @@ class GenericTensor {
     self& for_each(Callable<void(reference)>                       func);
     self& for_each(Callable<void(reference, size_type)>            func); // [TODO:] requires VECTOR
     self& for_each(Callable<void(reference, size_type, size_type)> func); // requires MATRIX
+    
+    self& transform(Callable<value_type(const_reference)>                       func);
+    self& transform(Callable<value_type(const_reference, size_type)>            func); // [TODO:] requires VECTOR
+    self& transform(Callable<value_type(const_reference, size_type, size_type)> func); // requires MATRIX
+    
     self& fill(const_reference value);
+    
+    self& fill(Callable<value_type()>                       func);
+    self& fill(Callable<value_type(), size_type>            func); // [TODO:] requires VECTOR
+    self& fill(Callable<value_type(), size_type, size_type> func); // requires MATRIX
     
     self&        sort(); // requires value_type::operator<()
     self& stable_sort(); // requires value_type::operator<()
@@ -226,22 +237,83 @@ class GenericTensor {
     sparse_const_view_type diagonal() const; // requires MATRIX
     
     // - Sparse operations - (requires SPARSE)
-    using sparse_entry_type; // requires SPARSE
+    using sparse_entry_type;
     
-    self& rewrite_triplets(      std::vector<triplet_type>&& triplets); // requires MATRIX && SPARSE
-    self&  insert_triplets(const std::vector<triplet_type>&  triplets); // requires MATRIX && SPARSE
-    self&   erase_triplets(      std::vector<Index2D     >   indices ); // requires MATRIX && SPARSE
+    self& rewrite_triplets(      std::vector<triplet_type>&& triplets); // requires MATRIX
+    self&  insert_triplets(const std::vector<triplet_type>&  triplets); // requires MATRIX
+    self&   erase_triplets(      std::vector<Index2D     >   indices ); // requires MATRIX
+    
+    // - Constructors -
+    // Note: Lots of entries in this section, 
+    // following full documentation looks more digestible
+    
+    // Default
+    GenericTensor(); // requires CONTAINER
+    
+    // Copy/move
+    GenericTensor(  const self&  other);
+    GenericTensor(        self&& other);
+    self& operator=(const self&  other);
+    self& operator=(      self&& other);
+
+    // Copy over template parameter boundaries
+    template <Type other_type, Ownership other_ownership, Checking other_checking, Layout other_layout>
+    GenericTensor(  const GenericTensor<...>&  other);
+    template <Type other_type, Ownership other_ownership, Checking other_checking, Layout other_layout>
+    self& operator=(const GenericTensor<...>&  other);
+    
+    // Move over template parameter boundaries
+    template <Checking other_checking>
+    GenericTensor(  GenericTensor<...>&& other);
+    template <Checking other_checking>
+    self& operator=(GenericTensor<...>&& other);
+    
+    // 'Matrix' ctors (requires MATRIX && DENSE && CONTAINER)
+    explicit GenericTensor(size_type rows, size_type cols, const_reference value = value_type());
+    explicit GenericTensor(size_type rows, size_type cols, Callable<value_type(size_type, size_type)> init_func);
+    explicit GenericTensor(size_type rows, size_type cols, pointer data_ptr);
+    GenericTensor(std::initializer_list<std::initializer_list<value_type>> init_list);
+    
+    // 'MatrixView' ctors (requires MATRIX && DENSE && VIEW)
+    explicit GenericTensor(size_type rows, size_type cols, pointer data_ptr);
+    template<Ownership other_ownership, Checking other_checking, Layout other_layout>
+    GenericTensor(const GenericTensor<...>& other);
+    
+    // 'ConstMatrixView' ctors (requires MATRIX && DENSE && CONST_VIEW)
+    explicit GenericTensor(size_type rows, size_type cols, const_pointer data_ptr);
+    template<Ownership other_ownership, Checking other_checking, Layout other_layout>
+    GenericTensor(const GenericTensor<...>& other);
+    
+    // 'StridedMatrix' ctors (requires MATRIX && DENSE && CONTAINER)
+    explicit GenericTensor(size_type rows, size_type cols, size_type row_stride, size_type col_stride, const_reference value = value_type());
+    explicit GenericTensor(size_type rows, size_type cols, size_type row_stride, size_type col_stride, Callable<value_type(size_type, size_type)> init_func);
+    explicit GenericTensor(size_type rows, size_type cols, size_type row_stride, size_type col_stride, pointer data_ptr);
+    GenericTensor(std::initializer_list<std::initializer_list<value_type>> init_list, size_type row_stride, size_type col_stride);
+    
+    // 'StridedMatrixView' ctors (requires MATRIX && DENSE && VIEW)
+    explicit GenericTensor(size_type rows, size_type cols, size_type row_stride, size_type col_stride, pointer data_ptr);
+    template<Ownership other_ownership, Checking other_checking, Layout other_layout>
+    GenericTensor(const GenericTensor<...>& other);
+    
+    // 'ConstStridedMatrixView' ctors (requires MATRIX && DENSE && CONST_VIEW)
+    explicit GenericTensor(size_type rows, size_type cols, size_type row_stride, size_type col_stride, const_pointer data_ptr);
+    template<Ownership other_ownership, Checking other_checking, Layout other_layout>
+    GenericTensor(const GenericTensor<...>& other);
+    
+    // Sparse ctors (requires MATRIX && DENSE)
+    explicit GenericTensor(size_type rows, size_type cols, const std::vector<triplet_type>& data);
+    explicit GenericTensor(size_type rows, size_type cols, std::vector<triplet_type>&& data);
 };
 
 // - Tensor IO formats -
 namespace format {
     // Human-readable formats
-    std::string as_vector(    const GenericTensor<...> &tensor);
-    std::string as_matrix(    const GenericTensor<...> &tensor);
-    std::string as_dictionary(const GenericTensor<...> &tensor);
+    std::string as_vector(    const GenericTensor<Args...> &tensor);
+    std::string as_matrix(    const GenericTensor<Args...> &tensor);
+    std::string as_dictionary(const GenericTensor<Args...> &tensor);
     // Export formats
-    std::string as_raw_text(  const GenericTensor<...> &tensor);
-    std::string as_json_array(const GenericTensor<...> &tensor);
+    std::string as_raw_text(  const GenericTensor<Args...> &tensor);
+    std::string as_json_array(const GenericTensor<Args...> &tensor);
 }
 ```
 
@@ -390,6 +462,14 @@ Returns a copy of the underlying array as `std::vector`.
 
 Returns [transpose](https://en.wikipedia.org/wiki/Transpose) of the matrix.
 
+> ```cpp
+> self move() &;
+> ```
+
+Returns `std::move(*this)`. This is useful to avoid a copy when initializing objects with method chaining.
+
+See corresponding [example](#example-3-initializing-a-matrix-by-chaining-operations).
+
 ### Indexation
 
 > ```cpp
@@ -503,10 +583,30 @@ Invokes mutating `func` for all elements in the tensor.
 Overloads **(2)** and **(3)** allow `func` to also use element index as an argument.
 
 > ```cpp
+> self& transform(Callable<value_type(const_reference)>                       func);
+> self& transform(Callable<value_type(const_reference, size_type)>            func); // requires VECTOR
+> self& transform(Callable<value_type(const_reference, size_type, size_type)> func); // requires MATRIX
+> ```
+
+Set `element` to `func(element)` for all element of the tensor.
+
+Overloads **(2)** and **(3)** allow `func` to also use element index as an argument.
+
+> ```cpp
 > self& fill(const_reference value);
 > ```
 
 Sets all elements of the tensor to `value`.
+
+> ```cpp
+> self& fill(Callable<value_type()>                       func);
+> self& fill(Callable<value_type(), size_type>            func); // requires VECTOR
+> self& fill(Callable<value_type(), size_type, size_type> func); // requires MATRIX
+> ```
+
+Sets all elements of the tensor to a value returned by `func()`.
+
+Overloads **(2)** and **(3)** allow `func` to also use element index as an argument.
 
 > ```cpp
 > self&        sort(); // requires value_type::operator<()
@@ -650,7 +750,184 @@ Converts tensor to string, formatted according to a chosen schema. All formats a
 
 See corresponding [example](#example-2-IO-formats) to get a better idea of what each output looks like.
 
-**Note:** Stringification works for any type with an existing `operator<<(std::ostream&, const T&)` overload.
+**Note 1:** Stringification works for any type with an existing `operator<<(std::ostream&, const T&)` overload.
+
+**Note 2:** `as_json_array` assumes that `operator<<(std::ostream&, const T&)` produces a string, corresponding to a valid [JSON object](https://ecma-international.org/publications-and-standards/standards/ecma-404/). By default, `mvl` knows how to properly handle all built-in numeric, logical and string types, user-defined types have to handle their formatting themselves.
+
+### Constructors
+
+#### Generic constructors
+
+```cpp
+GenericTensor(); // requires CONTAINER
+```
+
+Default-initializes an empty tensor. Only provided for containers, since views cannot exist without a target to view into.
+
+```cpp
+GenericTensor(  const self&  other);
+GenericTensor(        self&& other);
+self& operator=(const self&  other);
+self& operator=(      self&& other);
+```
+
+Copy/move constructors and assignment operators for tensors of the same type.
+
+```cpp
+template <Type other_type, Ownership other_ownership, Checking other_checking, Layout other_layout>
+GenericTensor(  const GenericTensor<...>&  other);
+
+template <Type other_type, Ownership other_ownership, Checking other_checking, Layout other_layout>
+self& operator=(const GenericTensor<...>&  other);
+```
+
+Converting copy constructor/assignment operator for tensors that have different types.
+
+Copy-conversion freely converts over the boundaries of `type`, `ownership`, `checking` and `layout`. It may use non-trivial logic to perform a "logical copy" for matrices with different APIs, such as, for example, convert sparse matrix to dense by cloning all the sparse contents and setting the other elements to default value, or, for example, construct sparse matrix from dense by filtering out all default-initialized elements and using the remainder as sparse contents (see an [example](#example-7-working-with-sparse-matrices) of working with sparse matrices).
+
+```cpp
+template <Checking other_checking>
+GenericTensor(  GenericTensor<...>&& other);
+
+template <Checking other_checking>
+self& operator=(GenericTensor<...>&& other);
+```
+
+Converting move constructor/assignment operator for tensors that have different types, yet can logically be converted to each other.
+
+Note that move-conversion is more restricting than copy-conversion due to move-semantics requiring both matrices to have a compatible memory layout of .
+
+#### `Matrix` constructors
+
+```cpp
+explicit GenericTensor(size_type rows, size_type cols, const_reference value = value_type());
+```
+
+Constructs a `rows` by `cols` matrix with elements initialized to `value`.
+
+```cpp
+explicit GenericTensor(size_type rows, size_type cols, Callable<value_type(size_type, size_type)> init_func);
+```
+
+Constructs a `rows` by `cols` matrix with elements initialized to `init_func(i, j)`.
+
+```cpp
+explicit GenericTensor(size_type rows, size_type cols, pointer data_ptr);
+```
+
+Takes ownership of `C` array `data_ptr` and constructs a `rows` by `cols` matrix over it.
+
+```cpp
+GenericTensor(std::initializer_list<std::initializer_list<value_type>> init_list);
+```
+
+Constructs matrix from a braced list: `{ { ... }, ... , { ... } }`.
+
+#### `MatrixView` constructors
+
+```cpp
+explicit GenericTensor(size_type rows, size_type cols, pointer data_ptr);
+```
+
+Constructs a `rows` by `cols` matrix view into the data stored at `data_ptr`.
+
+```cpp
+template<Ownership other_ownership, Checking other_checking, Layout other_layout>
+GenericTensor(const GenericTensor<...>& other);
+```
+
+Constructs a matrix view into another dense `mvl` matrix.
+
+#### `ConstMatrixView` constructors
+
+```cpp
+explicit GenericTensor(size_type rows, size_type cols, const_pointer data_ptr);
+```
+
+Constructs a `rows` by `cols` const  matrix view into the data stored at `data_ptr`.
+
+```cpp
+template<Ownership other_ownership, Checking other_checking, Layout other_layout>
+GenericTensor(const GenericTensor<...>& other);
+```
+
+Constructs a const matrix view into another dense `mvl` matrix.
+
+#### `StridedMatrix` constructors
+
+```cpp
+explicit GenericTensor(size_type rows, size_type cols, size_type row_stride, size_type col_stride, const_reference value = value_type());
+```
+
+Constructs a `rows` by `cols` matrix with given strides and all elements initialized to `value`. 
+
+**Note 1:** See ["Basic getters" section](#basic-getters) to learn how row- and col- strides work in `mvl`.
+
+**Note 2:** Strides are usually used in the context of views. In case of an owning matrix strides function as an additional padding between elements, while rarely directly useful, in some cases it can be used to reduce cache misses caused by a particulary "unlucky" alignment of rows relative to a cache size.
+
+```cpp
+explicit GenericTensor(size_type rows, size_type cols, size_type row_stride, size_type col_stride, Callable<value_type(size_type, size_type)> init_func);
+```
+
+Constructs a `rows` by `cols` matrix with given strides and all elements initialized to `init_func(i, j)`.
+
+```cpp
+explicit GenericTensor(size_type rows, size_type cols, size_type row_stride, size_type col_stride, pointer data_ptr);
+```
+
+#### `StridedMatrixView` constructors
+
+```cpp
+explicit GenericTensor(size_type rows, size_type cols, size_type row_stride, size_type col_stride, pointer data_ptr);
+```
+
+Constructs a `rows` by `cols` strided matrix view into the data stored at `data_ptr`.
+
+```cpp
+template<Ownership other_ownership, Checking other_checking, Layout other_layout>
+GenericTensor(const GenericTensor<...>& other);
+```
+
+Constructs a strided matrix view into another strided `mvl` matrix.
+
+#### `ConstStridedMatrixView` constructors
+
+```cpp
+explicit GenericTensor(size_type rows, size_type cols, size_type row_stride, size_type col_stride, const_pointer data_ptr);
+```
+
+Constructs a `rows` by `cols` const strided matrix view into the data stored at `data_ptr`.
+
+```cpp
+template<Ownership other_ownership, Checking other_checking, Layout other_layout>
+GenericTensor(const GenericTensor<...>& other);
+```
+
+Constructs a const strided matrix view into another strided `mvl` matrix.
+
+#### SparseMatrix constructors
+
+```cpp
+// pass triplets by copy
+explicit GenericTensor(size_type rows, size_type cols, const std::vector<triplet_type>& data);
+// pass triplets with move-semantics
+explicit GenericTensor(size_type rows, size_type cols, std::vector<triplet_type>&& data);
+```
+
+Constructs a `rows` by `cols` sparse matrix from a list of `{ i, j, value }` triplets.
+
+If triplets aren't intended to be reused, they can be passed with `std::move()` for a faster construction.
+
+These constructors are valid for both owning sparse matrices and views, with the only difference being the expected `triplet_type` (note that this is a member type of the tensor class, it can always be used directly as provided). Below is the table detailing possible triplet types for each ownership:
+
+| Ownership    | Value of `triplet_type`                    |
+| ------------ | ------------------------------------------ |
+| `CONTAINER`  | `value_type`                               |
+| `VIEW`       | `std::reference_wrapper<value_type>`       |
+| `CONST_VIEW` | `std::reference_wrapper<const value_type>` |
+
+
+
 
 ## Example 1 (Declaring and indexing a matrix)
 
@@ -751,30 +1028,37 @@ Tensor [size = 5] (3 x 4):
 ]
 ```
 
-## Example N (Various math operations)
+## Example 3 (Initializing a matrix by chaining operations)
 
 [ [Run this code](LINK) ]
 ```cpp
 using namespace utl;
 
-// Create 7x7 matrix with random values in [0, 1] range
-auto A = mvl::create::random_matrix(7, 7, 0., 1.); // [TODO:]
+std::random_device         rd;    
+std::default_random_engine gen(rd());
+std::normal_distribution   dist(0., 1.);
 
-// Compute ||A||_inf norm
-const auto norm = A.transform(std::abs).sum(); // [TODO:]
-    
-// Compute tr(A)
-const auto tr = A.diagonal().sum();
+const auto rand_value = [&]()        { return dist(gen);   };
+const auto abs        = [&](double x){ return std::abs(x); };
 
-// Split matrix into block views
-auto upper_half = A.block(0, 0,            0, A.size() / 2 - 1 );
-auto lower_half = A.block(0, 0, A.size() / 2, A.size() - 1     );
+// Build 5x5 matrix where {a_ij} = |N(0, 1)|
+// '.move()' avoids a copy when assigning 'A'
+auto A = mvl::Matrix<double>(5, 5).fill(rand_value).transform(abs).move();
 
-// Set diagonal to { 1, 2, 3, ... , N }
-A.diagonal().for_each([](int &elem, size_t i, size_t){ elem = i; });
+std::cout << mvl::format::as_matrix(A);
 ```
 
-## Example N (Wrapping external data into views)
+Output:
+```
+Tensor [size = 25] (5 x 5):
+  [ 0.592525 0.378606  1.94445 0.724242 0.0230773 ]
+  [ 0.854804 0.578115  2.33575  1.10363   1.24067 ]
+  [ 0.731419 0.870693 0.681755 0.446197  0.136237 ]
+  [ 0.889649  1.84099  1.17115  0.45199  0.506486 ]
+  [ 0.915286 0.287618 0.638074 0.489174    1.1951 ]
+```
+
+## Example 4 (Wrapping external data into views)
 
 [ [Run this code](LINK) ]
 ```cpp
@@ -797,7 +1081,37 @@ mvl::ConstMatrixView<float, mvl::Checking::NONE, mvl::Layout::CR> A(
 // MVL matrix functionality with no copying/conversion overhead
 ```
 
-## Example N (Working with images)
+## Example 5 (Usage with `utl::math`)
+
+[ [Run this code](LINK) ]
+```cpp
+using namespace utl;
+
+// Create 7x7 identity matrix
+auto A = mvl::Matrix<double>(7, 7, math::kronecker_delta<size_t>);
+
+// Compute ||A||_inf norm
+const auto norm = A.transform(math::abs<double>).sum();
+    
+// Compute tr(A)
+const auto tr = A.diagonal().sum();
+
+// Split matrix into block views
+auto upper_half = A.block(0, 0,            0, A.size() / 2 - 1 );
+auto lower_half = A.block(0, 0, A.size() / 2, A.size() - 1     );
+
+// Set diagonal to { 1, 2, 3, ... , N }
+A.diagonal().for_each([](int &elem, size_t i, size_t){ elem = i + 1; });
+
+// Evenly mesh [0, PI] x [0, 2 PI] with 100 intervals on each side
+// and save the 2D grid as a matrix
+using vertex_t = std::pair<double, double>;
+auto  x        = math::linspace(0., math::PI,     math::Intervals(100));
+auto  y        = math::linspace(0., math::PI_TWO, math::Intervals(100));
+auto  grid     = mvl::Matrix<vertex_t>(x.size(), y.size(), [&](size_t i, size_t j){ return vertex_t{ x[i], y[j] }; });
+```
+
+## Example 6 (Working with images)
 
 [ [Run this code](LINK) ]
 ```cpp
@@ -822,22 +1136,65 @@ grayscale.for_each([&](uint8_t &elem, size_t i, size_t j){
 });
 ```
 
-## Example N (Working with sparse matrices)
+## Example 7 (Working with sparse matrices)
 
 [ [Run this code](LINK) ]
+
 ```cpp
 using namespace utl;
 
-CODE
+// Create sparse matrix from triplets
+mvl::SparseMatrix<int> A(3, 3, {
+    {0, 0, 1},
+    {1, 1, 2},
+    {2, 2, 3}
+});
+
+// Check that sparse matrix contains an element
+assert( A.contains_index({1, 1}) == true  );
+assert( A.contains_index({1, 2}) == false );
+
+// Convert sparse matrix to dense
+mvl::Matrix<int>        dense_A = A;
+// Convert dense matrix to sparse
+mvl::SparseMatrix<int> sparse_A = dense_A;
+
+std::cout
+    << "\n## A (sparse) ##\n\n"                    << mvl::format::as_matrix(       A)
+    << "\n## A (sparse converted to dense) ##\n\n" << mvl::format::as_matrix( dense_A)
+    << "\n## A (dense converted to sparse) ##\n\n" << mvl::format::as_matrix(sparse_A);
 ```
 
-## Example N (NAME)
+Output:
+```
+## A (sparse) ##
 
-[ [Run this code](LINK) ]
-```cpp
-using namespace utl;
+Tensor [size = 3] (3 x 3):
+  [ 1 - - ]
+  [ - 2 - ]
+  [ - - 3 ]
 
-CODE
+## A (sparse converted to dense) ##
+
+Tensor [size = 9] (3 x 3):
+  [ 1 0 0 ]
+  [ 0 2 0 ]
+  [ 0 0 3 ]
+
+## A (dense converted to sparse) ##
+
+Tensor [size = 3] (3 x 3):
+  [ 1 - - ]
+  [ - 2 - ]
+  [ - - 3 ]
 ```
 
-## Benchmarks
+## Work in progress
+
+- `Benchmarks` section
+- Specializations with `Dimension::VECTOR` (lots of repetitive work, nothing particularly new)
+- A way of indexing a sparse matrix like a dense one (there exists a solution with next to no additional overhead, but it requires some careful thought on the API) and setting a "default element" that is different from default-initialized
+- Operators `+`, `-`, `*`, `+=`, `-=`, `*=`
+- Some additional algorithms like `sample()`, `shuffle()`, `clamp()`
+- Matrix concat operations
+- Working `[ Run this code ]` links (will be done once API is properly finalized)

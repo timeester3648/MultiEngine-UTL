@@ -1237,27 +1237,6 @@ enum class Ownership { CONTAINER, VIEW, CONST_VIEW };
 enum class Checking { NONE, BOUNDS };
 enum class Layout { /* 1D */ FLAT, /* 2D */ RC, CR, /* Other */ SPARSE };
 
-// - IOFormat utils - // TEMP:
-enum class IOFormat { TENSOR, FLAT, LIST };
-
-constexpr auto _fmt_tensor_empty_element = "-";
-constexpr auto _fmt_tensor_separator     = ", ";
-constexpr auto _fmt_tensor_begin         = "[\n";
-constexpr auto _fmt_tensor_end           = "]\n";
-constexpr auto _fmt_tensor_row_begin     = "  [ ";
-constexpr auto _fmt_tensor_row_end       = " ]\n";
-
-constexpr auto _fmt_flat_separator = ", ";
-constexpr auto _fmt_flat_begin     = "{ ";
-constexpr auto _fmt_flat_end       = "{ ";
-
-constexpr auto _fmt_list_idx_begin = "(";
-constexpr auto _fmt_list_idx_mid   = ", ";
-constexpr auto _fmt_list_idx_end   = ") -> ";
-constexpr auto _fmt_list_entry_end = "\n";
-
-
-
 template <typename T>
 std::string default_stringifier(const T& value) {
     std::stringstream ss;
@@ -1816,6 +1795,26 @@ private:
         if constexpr (self::params::layout == Layout::CR) return {idx % this->rows(), idx / this->rows()};
         _unreachable();
     }
+    
+    _utl_reqs(dimension == Dimension::MATRIX && type == Type::STRIDED && ownership == Ownership::CONTAINER)
+    size_type _total_allocated_size() const noexcept {
+        // NOTE: Allocated size of the strided matrix is NOT equal to .size() (which is same as rows * cols)
+        // This is due to all the padding between the actual elements
+        // NOTE: The question of whether .size() should return the number of 'strided' elements or the number
+        // of actually allocated elements is rather perplexing, while the second option is more "correct" its
+        // usefulness is dubious at bets, while the first one does in fact allow convenient 1D iteration over
+        // all the elements. Option 1 also provides an API consistent with strided views, which is why it ended
+        // up being the one chosen
+        //
+        // This method returns a true allocated size
+        if constexpr (self::params::layout == Layout::RC)
+            return (this->rows() - 1) * this->row_stride() + this->rows() * this->cols() * this->col_stride();
+        if constexpr (self::params::layout == Layout::CR)
+            return (this->cols() - 1) * this->col_stride() + this->rows() * this->cols() * this->row_stride();
+        _unreachable();
+    }
+    
+
 
 public:
     _utl_reqs(dimension == Dimension::MATRIX && (type == Type::DENSE || type == Type::STRIDED))
@@ -1998,10 +1997,54 @@ public:
         return *this;
     }
 
+    template <class FuncType, _enable_if_signature<FuncType, value_type(const_reference)> = true,
+              _utl_require(ownership != Ownership::CONST_VIEW)>
+              self& transform(FuncType func) {
+        const auto func_wrapper = [&](reference elem) { elem = func(elem); };
+        return this->for_each(func_wrapper);
+    }
+
+    template <class FuncType, _enable_if_signature<FuncType, value_type(const_reference, size_type)> = true,
+              _utl_require(dimension == Dimension::VECTOR && ownership != Ownership::CONST_VIEW)>
+              self& transform(FuncType func) {
+        const auto func_wrapper = [&](reference elem, size_type i) { elem = func(elem, i); };
+        return this->for_each(func_wrapper);
+    }
+
+    template <class FuncType, _enable_if_signature<FuncType, value_type(const_reference, size_type, size_type)> = true,
+              _utl_require(dimension == Dimension::MATRIX && ownership != Ownership::CONST_VIEW)>
+              self& transform(FuncType func, _for_each_ij_tag = _for_each_ij_tag::DUMMY) {
+        const auto func_wrapper = [&](reference elem, size_type i, size_type j) { elem = func(elem, i, j); };
+        return this->for_each(func_wrapper);
+    }
+
     _utl_reqs(ownership != Ownership::CONST_VIEW)
     self& fill(const_reference value) {
         for (size_type idx = 0; idx < this->size(); ++idx) this->operator[](idx) = value;
         return *this;
+    }
+
+    self move() & { return std::move(*this); };
+
+    template <class FuncType, _enable_if_signature<FuncType, value_type()> = true,
+              _utl_require(ownership != Ownership::CONST_VIEW)>
+              self& fill(FuncType func) {
+        const auto func_wrapper = [&](reference elem) { elem = func(); };
+        return this->for_each(func_wrapper);
+    }
+
+    template <class FuncType, _enable_if_signature<FuncType, value_type(size_type)> = true,
+              _utl_require(dimension == Dimension::VECTOR && ownership != Ownership::CONST_VIEW)>
+              self& fill(FuncType func) {
+        const auto func_wrapper = [&](reference elem, size_type i) { elem = func(i); };
+        return this->for_each(func_wrapper);
+    }
+
+    template <class FuncType, _enable_if_signature<FuncType, value_type(size_type, size_type)> = true,
+              _utl_require(dimension == Dimension::MATRIX && ownership != Ownership::CONST_VIEW)>
+              self& fill(FuncType func) {
+        const auto func_wrapper = [&](reference elem, size_type i, size_type j) { elem = func(i, j); };
+        return this->for_each(func_wrapper);
     }
 
     template <typename Compare, _utl_require(ownership != Ownership::CONST_VIEW)>
@@ -2099,7 +2142,7 @@ public:
     using sparse_view_type = GenericTensor<value_type, self::params::dimension, Type::SPARSE, Ownership::VIEW,
                                            self::params::checking, Layout::SPARSE>;
 
-    template <typename UnaryPredicate, _enable_if_signature<UnaryPredicate, bool(const_reference)> = true>
+    template <typename UnaryPredicate, _utl_require(ownership != Ownership::CONST_VIEW), _enable_if_signature<UnaryPredicate, bool(const_reference)> = true>
     sparse_view_type filter(UnaryPredicate predicate) {
         const auto forwarded_predicate = [&](const_reference elem, size_type, size_type) -> bool {
             return predicate(elem);
@@ -2108,7 +2151,7 @@ public:
         // NOTE: This would need its own implementation for a proper 1D support
     }
 
-    template <typename UnaryPredicate, _enable_if_signature<UnaryPredicate, bool(const_reference, size_type)> = true>
+    template <typename UnaryPredicate, _utl_require(ownership != Ownership::CONST_VIEW), _enable_if_signature<UnaryPredicate, bool(const_reference, size_type)> = true>
     sparse_view_type filter(UnaryPredicate predicate) {
         const auto forwarded_predicate = [&](const_reference elem, size_type i, size_type j) -> bool {
             const size_type idx = this->get_idx_of_ij(i, j);
@@ -2120,12 +2163,12 @@ public:
 
     template <typename UnaryPredicate,
               _enable_if_signature<UnaryPredicate, bool(const_reference, size_type, size_type)> = true,
-              _utl_require(dimension == Dimension::MATRIX)>
+              _utl_require(dimension == Dimension::MATRIX && ownership != Ownership::CONST_VIEW)>
               sparse_view_type filter(UnaryPredicate predicate) {
-        /* This method implements actual filtering, others just forward predicates to it */
+        // This method implements actual filtering, others just forward predicates to it
         _ref_triplet_array triplets;
-        /* We can't preallocate triplets without scanning predicate through the whole matrix, */
-        /* so we just push back entries into a vector and use to construct a sparse view */
+        // We can't preallocate triplets without scanning predicate through the whole matrix,
+        // so we just push back entries into a vector and use to construct a sparse view
         const auto         add_triplet_if_predicate = [&](reference elem, size_type i, size_type j) -> void {
             if (predicate(elem, i, j)) triplets.push_back({i, j, elem});
         };
@@ -2136,7 +2179,7 @@ public:
         return sparse_view_type(this->rows(), this->cols(), std::move(triplets));
     }
 
-    _utl_reqs(dimension == Dimension::MATRIX)
+    _utl_reqs(dimension == Dimension::MATRIX && ownership != Ownership::CONST_VIEW)
     sparse_view_type diagonal() {
         /* Sparse matrices have no better way of getting a diagonal than filtering (i == j) */
         if constexpr (self::params::type == Type::SPARSE) {
@@ -2153,6 +2196,102 @@ public:
 
     // - Block Subviews -
     // ------------------
+public:
+    // Const view
+    using block_const_view_type =
+        std::conditional_t<self::params::type == Type::SPARSE, sparse_const_view_type,
+                           GenericTensor<value_type, self::params::dimension, Type::STRIDED, Ownership::CONST_VIEW,
+                                         self::params::checking, self::params::layout>>;
+
+    _utl_reqs(dimension == Dimension::MATRIX && type == Type::SPARSE)
+    block_const_view_type block(size_type block_i, size_type block_j, size_type block_rows,
+                                size_type block_cols) const {
+        // Sparse matrices have no better way of getting a block than filtering by { i, j }
+
+        // Do the same thing as in .filter(), but shrink resulting view size to
+        // { block_rows, block_cols } and shift indexation by { block_i, block_j }
+        _cref_triplet_array triplets;
+
+        const auto add_triplet_if_inside_block = [&](const_reference elem, size_type i, size_type j) -> void {
+            if ((block_i <= i) && (i < block_i + block_rows) && (block_j <= j) && (j < block_j + block_cols))
+                triplets.push_back({i - block_i, j - block_j, elem});
+        };
+
+        this->for_each(add_triplet_if_inside_block);
+
+        triplets.shrink_to_fit();
+        return block_const_view_type(block_rows, block_cols, std::move(triplets));
+    }
+
+    _utl_reqs(dimension == Dimension::MATRIX && type != Type::SPARSE)
+    block_const_view_type block(size_type block_i, size_type block_j, size_type block_rows,
+                                size_type block_cols) const {
+        if constexpr (self::params::layout == Layout::RC) {
+            const size_type row_stride = this->row_stride() + this->col_stride() * (this->cols() - block_cols);
+            const size_type col_stride = this->col_stride();
+            return block_const_view_type(block_rows, block_cols, row_stride, col_stride,
+                                         &this->operator()(block_i, block_j));
+        }
+        if constexpr (self::params::layout == Layout::CR) {
+            const size_type row_stride = this->row_stride();
+            const size_type col_stride = this->col_stride() + this->row_stride() * (this->rows() - block_rows);
+            return block_const_view_type(block_rows, block_cols, row_stride, col_stride,
+                                         &this->operator()(block_i, block_j));
+        }
+        _unreachable();
+    }
+
+    _utl_reqs(dimension == Dimension::MATRIX)
+    block_const_view_type row(size_type i) const { return this->block(i, 0, 1, this->cols()); }
+
+    _utl_reqs(dimension == Dimension::MATRIX)
+    block_const_view_type col(size_type j) const { return this->block(0, j, this->rows(), 1); }
+
+    // Mutable views
+    using block_view_type =
+        std::conditional_t<self::params::type == Type::SPARSE, sparse_view_type,
+                           GenericTensor<value_type, self::params::dimension, Type::STRIDED, Ownership::VIEW,
+                                         self::params::checking, self::params::layout>>;
+
+    _utl_reqs(dimension == Dimension::MATRIX && type == Type::SPARSE && ownership != Ownership::CONST_VIEW)
+    block_view_type block(size_type block_i, size_type block_j, size_type block_rows, size_type block_cols) {
+        // Sparse matrices have no better way of getting a block than filtering by { i, j }
+
+        // Do the same thing as in .filter(), but shrink resulting view size to
+        // { block_rows, block_cols } and shift indexation by { block_i, block_j }
+        _ref_triplet_array triplets;
+
+        const auto add_triplet_if_inside_block = [&](reference elem, size_type i, size_type j) -> void {
+            if ((block_i <= i) && (i < block_i + block_rows) && (block_j <= j) && (j < block_j + block_cols))
+                triplets.push_back({i - block_i, j - block_j, elem});
+        };
+
+        this->for_each(add_triplet_if_inside_block);
+
+        triplets.shrink_to_fit();
+        return block_view_type(block_rows, block_cols, std::move(triplets));
+    }
+
+    _utl_reqs(dimension == Dimension::MATRIX && type != Type::SPARSE && ownership != Ownership::CONST_VIEW)
+    block_view_type block(size_type block_i, size_type block_j, size_type block_rows, size_type block_cols) {
+        if constexpr (self::params::layout == Layout::RC) {
+            const size_type row_stride = this->row_stride() + this->col_stride() * (this->cols() - block_cols);
+            const size_type col_stride = this->col_stride();
+            return block_view_type(block_rows, block_cols, row_stride, col_stride, &this->operator()(block_i, block_j));
+        }
+        if constexpr (self::params::layout == Layout::CR) {
+            const size_type row_stride = this->row_stride();
+            const size_type col_stride = this->col_stride() + this->row_stride() * (this->rows() - block_rows);
+            return block_view_type(block_rows, block_cols, row_stride, col_stride, &this->operator()(block_i, block_j));
+        }
+        _unreachable();
+    }
+
+    _utl_reqs(dimension == Dimension::MATRIX && ownership != Ownership::CONST_VIEW)
+    block_view_type row(size_type i) { return this->block(i, 0, 1, this->cols()); }
+
+    _utl_reqs(dimension == Dimension::MATRIX && ownership != Ownership::CONST_VIEW)
+    block_view_type col(size_type j) { return this->block(0, j, this->rows(), 1); }
 
     // - Sparse operations -
     // ---------------------
@@ -2226,32 +2365,162 @@ public:
     // ----------------
 
     // - Matrix -
+public:
+    // Rule of five:
+    // copy-ctor       - [+] (deduced from copy-assignment)
+    // move-ctor       - [+] (= default)
+    // copy-assignment - [+] (custom for dense/strided, same as default for sparse)
+    // move-assignment - [+] (= default)
+    // destructor      - [+] (= default)
 
-    // GenericTensor(const self& other) { *this = other; }
+    // Move-ctor is default for all types
+    GenericTensor(self&& other) noexcept = default;
 
-    // self& operator=(self&& other) noexcept = default;
-    // GenericTensor(self&& other) noexcept   = default;
+    // Move-assignment is default for all types
+    self& operator=(self&& other) noexcept = default;
 
-    template <Type other_type, Ownership other_ownership, Checking other_checking, Layout other_layout,
-              _utl_require(dimension == Dimension::MATRIX && type == Type::DENSE && ownership == Ownership::CONTAINER)>
-              GenericTensor(const GenericTensor<value_type, self::params::dimension, other_type, other_ownership,
-                                                other_checking, other_layout>& other)
-        : GenericTensor(other.rows(), other.cols()) {
-        other.for_each([&](const value_type& element, size_type i, size_type j) { this->operator()(i, j) = element; });
+    // Copy-ctor is deduced from assignment operator
+    GenericTensor(const self& other) { *this = other; }
+
+    // Copy-assignment
+    self& operator=(const self& other) {
+        // Note: copy-assignment operator CANNOT be templated, it has to be implemented with 'if constexpr'
+        this->_rows = other.rows();
+        this->_cols = other.cols();
+        if constexpr (self::params::type == Type::DENSE) {
+            this->_data = std::move(make_unique_ptr_array<value_type>(this->size()));
+            std::copy(other.begin(), other.end(), this->begin());
+        }
+        if constexpr (self::params::type == Type::STRIDED) {
+            this->_row_stride = other.row_stride();
+            this->_col_stride = other.col_stride();
+            this->_data = std::move(make_unique_ptr_array<value_type>(this->size()));
+            std::copy(other.begin(), other.end(), this->begin());
+        }
+        if constexpr (self::params::type == Type::SPARSE) {
+            this->_data = other._data;
+        }
+        return *this;
     }
 
-    // Default ctor
-    _utl_reqs(dimension == Dimension::MATRIX && type == Type::DENSE && ownership == Ownership::CONTAINER)
+    // Default-ctor (containers)
+    _utl_reqs(ownership == Ownership::CONTAINER)
     GenericTensor() noexcept {}
 
-    // Copy-ctor
-    _utl_reqs(dimension == Dimension::MATRIX && type == Type::DENSE && ownership == Ownership::CONTAINER)
-    self& operator=(const self& other) {
+    // Default-ctor (views)
+    _utl_reqs(ownership != Ownership::CONTAINER)
+    GenericTensor() noexcept = delete;
+
+    // Copy-assignment over the config boundaries
+    // We can change checking config, copy from matrices with different layouts,
+    // copy from views and even matrices of other types
+    template <Type other_type, Ownership other_ownership, Checking other_checking, Layout other_layout,
+              _utl_require(dimension == Dimension::MATRIX && type == Type::DENSE && ownership == Ownership::CONTAINER)>
+    self& operator=(const GenericTensor<value_type, self::params::dimension, other_type,
+                                                             other_ownership, other_checking, other_layout>& other) {
         this->_rows = other.rows();
         this->_cols = other.cols();
         this->_data = std::move(make_unique_ptr_array<value_type>(this->size()));
-        std::copy(other.begin(), other.end(), this->begin());
+        this->fill(value_type());
+        other.for_each([&](const value_type& element, size_type i, size_type j) { this->operator()(i, j) = element; });
         return *this;
+        // copying from sparse to dense works, all elements that weren't in the sparse matrix remain default-initialized
+    }
+    
+    template <Type other_type, Ownership other_ownership, Checking other_checking, Layout other_layout,
+              _utl_require(dimension == Dimension::MATRIX && type == Type::STRIDED && ownership == Ownership::CONTAINER)>
+    self& operator=(const GenericTensor<value_type, self::params::dimension, other_type,
+                                                             other_ownership, other_checking, other_layout>& other) {
+        this->_rows       = other.rows();
+        this->_cols       = other.cols();
+        this->_row_stride = other.row_stride();
+        this->_col_strude = other.col_stride();
+        this->_data       = std::move(make_unique_ptr_array<value_type>(this->size()));
+        this->fill(value_type());
+        // Not quite sure whether swapping strides when changing layouts like this is okay,
+        // but it seems to be correct
+        if constexpr (self::params::layout != other_layout) std::swap(this->_row_stride, this->_cols_stride);
+        other.for_each([&](const value_type& element, size_type i, size_type j) { this->operator()(i, j) = element; });
+        return *this;
+        // copying from sparse to strided works, all elements that weren't in the sparse matrix remain
+        // default-initialized
+    }
+    
+    template <Type other_type, Ownership other_ownership, Checking other_checking, Layout other_layout,
+              _utl_require(dimension == Dimension::MATRIX && type == Type::SPARSE && ownership == Ownership::CONTAINER)>
+    self& operator=(const GenericTensor<value_type, self::params::dimension, other_type,
+                                                        other_ownership, other_checking, other_layout>& other) {
+        this->_rows = other.rows();
+        this->_cols = other.cols();
+        std::vector<triplet_type> triplets;
+        
+        // Other sparse matrices can be trivially copied
+        if constexpr (other_type == Type::SPARSE) {
+            triplets.reserve(other.size());
+            other.for_each([&](const value_type& elem, size_type i, size_type j) { triplets.push_back({i, j, elem}); });
+        }
+        // Non-sparse matrices are filtered by non-default-initialized-elements to construct a sparse subset
+        else {
+            other.for_each([&](const_reference elem, size_type i, size_type j){
+                if (elem != value_type()) triplets.push_back({ i, j, elem });
+            });
+        }
+        
+        this->rewrite_triplets(std::move(triplets));
+        return *this;
+    }
+    
+    // Copy-ctor over the config boundaries (deduced from assignment over config boundaries)
+    template <Type other_type, Ownership other_ownership, Checking other_checking, Layout other_layout,
+                _utl_require(dimension == Dimension::MATRIX && ownership == Ownership::CONTAINER)>
+                GenericTensor(const GenericTensor<value_type, self::params::dimension, other_type, other_ownership,
+                                                other_checking, other_layout>& other) {
+        *this = other;
+    }
+    
+    // Move-assignment over config boundaries
+    // Note: Unlike copying, we can't change layout, only checking config
+    // Also 'other' can no longer be a view or have a different type
+    template <Checking other_checking,
+              _utl_require(dimension == Dimension::MATRIX && type == Type::DENSE && ownership == Ownership::CONTAINER)>
+    self& operator=(
+                  GenericTensor<value_type, self::params::dimension, self::params::type, self::params::ownership,
+                                      other_checking, self::params::layout>&& other) {
+        this->_rows = other.rows();
+        this->_cols = other.cols();
+        this->_data = std::move(other._data);
+        return *this;
+    }
+    
+    template <Checking other_checking, _utl_require(dimension == Dimension::MATRIX && type == Type::STRIDED && ownership == Ownership::CONTAINER)>
+    self& operator=(
+                  GenericTensor<value_type, self::params::dimension, self::params::type, self::params::ownership,
+                                      other_checking, self::params::layout>&& other) {
+        this->_rows       = other.rows();
+        this->_cols       = other.cols();
+        this->_row_stride = other.row_stride();
+        this->_col_stride = other.col_stride();
+        this->_data       = std::move(other._data);
+        return *this;
+    }
+    
+    template <Checking other_checking,
+              _utl_require(dimension == Dimension::MATRIX && type == Type::SPARSE && ownership == Ownership::CONTAINER)>
+    self& operator=(
+                GenericTensor<value_type, self::params::dimension, self::params::type, self::params::ownership,
+                                      other_checking, self::params::layout>&& other) {
+        this->_rows = other.rows();
+        this->_cols = other.cols();
+        this->_data = std::move(other._data);
+        return *this;
+    }
+    
+    // Move-ctor over the config boundaries (deduced from move-assignment over config boundaries)
+    template <Type other_type, Ownership other_ownership, Checking other_checking, Layout other_layout,
+                _utl_require(dimension == Dimension::MATRIX && ownership == Ownership::CONTAINER)>
+                GenericTensor(GenericTensor<value_type, self::params::dimension, other_type, other_ownership,
+                                                other_checking, other_layout>&& other) {
+        *this = std::move(other);
     }
 
     // Init-with-value
@@ -2262,13 +2531,16 @@ public:
         this->_data = std::move(make_unique_ptr_array<value_type>(this->size()));
         this->fill(value);
     }
-
-    // Init-with-data
-    _utl_reqs(dimension == Dimension::MATRIX && type == Type::DENSE && ownership == Ownership::CONTAINER)
-    explicit GenericTensor(size_type rows, size_type cols, pointer data_ptr) noexcept {
+    
+    // Init-with-lambda
+    template <typename FuncType,
+              _utl_require(dimension == Dimension::MATRIX && type == Type::DENSE && ownership == Ownership::CONTAINER) >
+              explicit GenericTensor(size_type rows, size_type cols, FuncType init_func) {
+        // .fill() already takes care of preventing improper values of 'FuncType', no need to do the check here
         this->_rows = rows;
         this->_cols = cols;
-        this->_data = std::move(decltype(this->_data)(data_ptr));
+        this->_data = std::move(make_unique_ptr_array<value_type>(this->size()));
+        this->fill(init_func);
     }
 
     // Init-with-ilist
@@ -2280,27 +2552,32 @@ public:
 
         // Check dimensions (throw if cols have different dimensions)
         for (auto row_it = init.begin(); row_it < init.end(); ++row_it)
-            if ((*row_it).end() - (*row_it).begin() != this->_cols)
+            if (static_cast<size_type>((*row_it).end() - (*row_it).begin()) != this->cols())
                 throw std::invalid_argument("Initializer list dimensions don't match.");
 
         // Copy elements
         for (size_type i = 0; i < this->rows(); ++i)
             for (size_type j = 0; j < this->cols(); ++j) this->operator()(i, j) = (init.begin()[i]).begin()[j];
     }
-
-    // Move-from-other-matrix
-    /* Accepts: Any matrix of the same partial specialization */
-    template <Checking other_checking, Layout other_layout,
-              _utl_require(dimension == Dimension::MATRIX && type == Type::DENSE && ownership == Ownership::CONTAINER)>
-              GenericTensor(GenericTensor<value_type, self::params::dimension, self::params::type,
-                                          self::params::ownership, other_checking, other_layout>&& other) {
-        this->_rows = other.rows();
-        this->_cols = other.cols();
-        this->_data = std::move(other._data);
+    
+    // Init-with-data
+    _utl_reqs(dimension == Dimension::MATRIX && type == Type::DENSE && ownership == Ownership::CONTAINER)
+    explicit GenericTensor(size_type rows, size_type cols, pointer data_ptr) noexcept {
+        this->_rows = rows;
+        this->_cols = cols;
+        this->_data = std::move(decltype(this->_data)(data_ptr));
     }
-
+    
     // - Matrix View -
 
+    // Init-from-data
+    _utl_reqs(dimension == Dimension::MATRIX && type == Type::DENSE && ownership == Ownership::VIEW)
+    explicit GenericTensor(size_type rows, size_type cols, pointer data_ptr) {
+        this->_rows = rows;
+        this->_cols = cols;
+        this->_data = data_ptr;
+    }
+    
     // Init-from-tensor (any tensor of the same API type)
     template <Ownership other_ownership, Checking other_checking, Layout other_layout,
               _utl_require(dimension == Dimension::MATRIX && type == Type::DENSE && ownership == Ownership::VIEW)>
@@ -2311,16 +2588,16 @@ public:
         this->_data = other.data();
     }
 
+    // - Const Matrix View -
+
     // Init-from-data
-    _utl_reqs(dimension == Dimension::MATRIX && type == Type::DENSE && ownership == Ownership::VIEW)
-    explicit GenericTensor(size_type rows, size_type cols, pointer data_ptr) {
+    _utl_reqs(dimension == Dimension::MATRIX && type == Type::DENSE && ownership == Ownership::CONST_VIEW)
+    explicit GenericTensor(size_type rows, size_type cols, const_pointer data_ptr) {
         this->_rows = rows;
         this->_cols = cols;
         this->_data = data_ptr;
     }
-
-    // - Const Matrix View -
-
+    
     // Init-from-tensor (any tensor of the same API type)
     template <Ownership other_ownership, Checking other_checking, Layout other_layout,
               _utl_require(dimension == Dimension::MATRIX && type == Type::DENSE && ownership == Ownership::CONST_VIEW)>
@@ -2330,17 +2607,78 @@ public:
         this->_cols = other.cols();
         this->_data = other.data();
     }
-
-    // Init-from-data
-    _utl_reqs(dimension == Dimension::MATRIX && type == Type::DENSE && ownership == Ownership::CONST_VIEW)
-    explicit GenericTensor(size_type rows, size_type cols, const_pointer data_ptr) {
+    
+    // - Strided Matrix -
+    
+    // Init-with-value
+    _utl_reqs(dimension == Dimension::MATRIX && type == Type::STRIDED && ownership == Ownership::CONTAINER)
+    explicit GenericTensor(size_type rows, size_type cols, size_type row_stride, size_type col_stride, const_reference value = value_type()) noexcept {
         this->_rows = rows;
         this->_cols = cols;
-        this->_data = data_ptr;
+        this->_row_stride = row_stride;
+        this->_col_stride = col_stride;
+        // Allocates size is NOT the same as .size() due to padding, see notes on '_total_allocated_size()'
+        this->_data = std::move(make_unique_ptr_array<value_type>(this->_total_allocated_size()));
+        this->fill(value);
+    }
+    
+    // Init-with-lambda
+    template <typename FuncType,
+              _utl_require(dimension == Dimension::MATRIX && type == Type::STRIDED && ownership == Ownership::CONTAINER) >
+              explicit GenericTensor(size_type rows, size_type cols, size_type row_stride, size_type col_stride, FuncType init_func) {
+        // .fill() already takes care of preventing improper values of 'FuncType', no need to do the check here
+        this->_rows = rows;
+        this->_cols = cols;
+        this->_row_stride = row_stride;
+        this->_col_stride = col_stride;
+        // Allocates size is NOT the same as .size() due to padding, see notes on '_total_allocated_size()'
+        this->_data = std::move(make_unique_ptr_array<value_type>(this->_total_allocated_size()));
+        this->fill(init_func);
+    }
+    
+    // Init-with-ilist
+    _utl_reqs(dimension == Dimension::MATRIX && type == Type::STRIDED && ownership == Ownership::CONTAINER)
+    GenericTensor(std::initializer_list<std::initializer_list<value_type>> init, size_type row_stride, size_type col_stride) {
+        this->_rows = init.size();
+        this->_cols = (*init.begin()).size();
+        this->_row_stride = row_stride;
+        this->_col_stride = col_stride;
+        // Allocates size is NOT the same as .size() due to padding, see notes on '_total_allocated_size()'
+        this->_data = std::move(make_unique_ptr_array<value_type>(this->_total_allocated_size()));
+    
+        // Check dimensions (throw if cols have different dimensions)
+        for (auto row_it = init.begin(); row_it < init.end(); ++row_it)
+            if ((*row_it).end() - (*row_it).begin() != this->_cols)
+                throw std::invalid_argument("Initializer list dimensions don't match.");
+    
+        // Copy elements
+        for (size_type i = 0; i < this->rows(); ++i)
+            for (size_type j = 0; j < this->cols(); ++j) this->operator()(i, j) = (init.begin()[i]).begin()[j];
+    }
+    
+    // Init-with-data
+    _utl_reqs(dimension == Dimension::MATRIX && type == Type::STRIDED && ownership == Ownership::CONTAINER)
+    explicit GenericTensor(size_type rows, size_type cols, size_type row_stride, size_type col_stride, pointer data_ptr) noexcept {
+        this->_rows = rows;
+        this->_cols = cols;
+        this->_row_stride = row_stride;
+        this->_col_stride = col_stride;
+        this->_data = std::move(decltype(this->_data)(data_ptr));
     }
 
     // - Strided Matrix View -
 
+    // Init-from-data
+    _utl_reqs(dimension == Dimension::MATRIX && type == Type::STRIDED && ownership == Ownership::VIEW)
+    explicit GenericTensor(size_type rows, size_type cols, size_type row_stride, size_type col_stride,
+                           pointer data_ptr) {
+        this->_rows       = rows;
+        this->_cols       = cols;
+        this->_row_stride = row_stride;
+        this->_col_stride = col_stride;
+        this->_data       = data_ptr;
+    }
+    
     // Init-from-tensor (any tensor of the same API type)
     template <Ownership other_ownership, Checking other_checking, Layout other_layout,
               _utl_require(dimension == Dimension::MATRIX && type == Type::STRIDED && ownership == Ownership::VIEW)>
@@ -2353,18 +2691,19 @@ public:
         this->_data       = other.data();
     }
 
+    // - Const Strided Matrix View -
+
     // Init-from-data
-    _utl_reqs(dimension == Dimension::MATRIX && type == Type::STRIDED && ownership == Ownership::VIEW)
+    _utl_reqs(dimension == Dimension::MATRIX && type == Type::STRIDED && ownership == Ownership::CONST_VIEW)
     explicit GenericTensor(size_type rows, size_type cols, size_type row_stride, size_type col_stride,
-                           pointer data_ptr) {
+                           const_pointer data_ptr) {
         this->_rows       = rows;
         this->_cols       = cols;
         this->_row_stride = row_stride;
         this->_col_stride = col_stride;
         this->_data       = data_ptr;
     }
-
-    // - Const Strided Matrix View -
+    
     // Init-from-tensor (any tensor of the same API type)
     template <Ownership other_ownership, Checking other_checking, Layout other_layout,
               _utl_require(dimension == Dimension::MATRIX && type == Type::STRIDED && ownership == Ownership::CONST_VIEW)>
@@ -2377,26 +2716,10 @@ public:
         this->_data       = other.data();
     }
 
-    // Init-from-data
-    _utl_reqs(dimension == Dimension::MATRIX && type == Type::STRIDED && ownership == Ownership::CONST_VIEW)
-    explicit GenericTensor(size_type rows, size_type cols, size_type row_stride, size_type col_stride,
-                           const_pointer data_ptr) {
-        this->_rows       = rows;
-        this->_cols       = cols;
-        this->_row_stride = row_stride;
-        this->_col_stride = col_stride;
-        this->_data       = data_ptr;
-    }
-
-    // - Sparse Matrix -
-    // - Sparse Matrix View -
-    // - Sparse Matrix Const View -
-
-    // Default ctor
-    _utl_reqs(dimension == Dimension::MATRIX && type == Type::SPARSE)
-    GenericTensor() noexcept {}
+    // - Sparse Matrix / Sparse Matrix View / Sparse Matrix Const View -
 
     // Init-from-data (copy)
+    _utl_reqs(dimension == Dimension::MATRIX && type == Type::SPARSE)
     explicit GenericTensor(size_type rows, size_type cols, const std::vector<triplet_type>& data) {
         this->_rows = rows;
         this->_cols = cols;
@@ -2404,6 +2727,7 @@ public:
     }
 
     // Init-from-data (move)
+    _utl_reqs(dimension == Dimension::MATRIX && type == Type::SPARSE)
     explicit GenericTensor(size_type rows, size_type cols, std::vector<triplet_type>&& data) {
         this->_rows = rows;
         this->_cols = cols;
@@ -2453,15 +2777,15 @@ using ConstSparseMatrixView =
 
 // - Formatters - // TEMP:
 namespace format {
-    
+
 // TODO: Formats 'as_matrix', 'as_dictionary', 'as_json_array', 'as_raw_text' need 1D overloads
-    
+
 // - Human-readable formats -
 
-constexpr std::size_t max_displayed_rows = 70;
-constexpr std::size_t max_displayed_cols = 40;
+constexpr std::size_t max_displayed_rows      = 70;
+constexpr std::size_t max_displayed_cols      = 40;
 constexpr std::size_t max_displayed_flat_size = 500;
-constexpr auto content_indent = "  ";
+constexpr auto        content_indent          = "  ";
 
 template <class T, Dimension dimension, Type type, Ownership ownership, Checking checking, Layout layout>
 std::string _as_too_large(const GenericTensor<T, dimension, type, ownership, checking, layout>& tensor) {
@@ -2470,7 +2794,7 @@ std::string _as_too_large(const GenericTensor<T, dimension, type, ownership, che
     return ss.str();
 }
 
-template<class T>
+template <class T>
 std::string _ss_stringify(const T& value) {
     std::stringstream ss;
     ss.flags(std::ios::boolalpha);
@@ -2478,20 +2802,19 @@ std::string _ss_stringify(const T& value) {
     return ss.str();
 }
 
-template<class T>
+template <class T>
 std::string _ss_stringify_for_json(const T& value) {
     // Modification of '_ss_stringify()' that properly handles floats for JSON
     std::stringstream ss;
     ss.flags(std::ios::boolalpha);
-    
+
     if constexpr (std::is_floating_point_v<T>) {
         if (std::isfinite(value)) ss << value;
         else ss << "\"" << value << "\"";
-    }
-    else {
+    } else {
         ss << value;
     }
-    
+
     return ss.str();
 }
 
@@ -2505,21 +2828,21 @@ std::string _stringify_metainfo(const GenericTensor<T, dimension, type, ownershi
 template <class T, Dimension dimension, Type type, Ownership ownership, Checking checking, Layout layout>
 std::string as_vector(const GenericTensor<T, dimension, type, ownership, checking, layout>& tensor) {
     if (tensor.size() > max_displayed_flat_size) return _as_too_large(tensor);
-    
+
     std::stringstream ss;
     ss << _stringify_metainfo(tensor);
-    
+
     ss << content_indent << "{ ";
     for (std::size_t idx = 0; idx < tensor.size(); ++idx) ss << tensor[idx] << (idx + 1 < tensor.size() ? ", " : "");
     ss << " }\n";
-    
+
     return ss.str();
 }
-    
+
 template <class T, Type type, Ownership ownership, Checking checking, Layout layout>
 std::string as_matrix(const GenericTensor<T, Dimension::MATRIX, type, ownership, checking, layout>& tensor) {
     if (tensor.rows() > max_displayed_rows || tensor.cols() > max_displayed_cols) return _as_too_large(tensor);
-    
+
     // Take care of sparsity using 'fill-ctor + for_each()' - if present, missing elements will just stay "default"
     GenericTensor<std::string, Dimension::MATRIX, Type::DENSE, Ownership::CONTAINER, Checking::NONE, Layout::RC>
         strings(tensor.rows(), tensor.cols(), "-");
@@ -2534,28 +2857,28 @@ std::string as_matrix(const GenericTensor<T, Dimension::MATRIX, type, ownership,
     // Output the formatted result
     std::stringstream ss;
     ss << _stringify_metainfo(tensor);
-    
+
     for (std::size_t i = 0; i < strings.rows(); ++i) {
         ss << content_indent << "[ ";
         for (std::size_t j = 0; j < strings.cols(); ++j)
             ss << std::setw(column_widths[j]) << strings(i, j) << (j + 1 < strings.cols() ? " " : "");
         ss << " ]\n";
     }
-    
+
     return ss.str();
 }
 
 template <class T, Type type, Ownership ownership, Checking checking, Layout layout>
 std::string as_dictionary(const GenericTensor<T, Dimension::MATRIX, type, ownership, checking, layout>& tensor) {
     if (tensor.size() > max_displayed_flat_size) return _as_too_large(tensor);
-    
+
     std::stringstream ss;
     ss << _stringify_metainfo(tensor);
-    
+
     tensor.for_each([&](const T& elem, std::size_t i, std::size_t j) {
         ss << content_indent << "(" << i << ", " << j << ") = " << _ss_stringify(elem) << "\n";
     });
-    
+
     return ss.str();
 }
 
@@ -2570,14 +2893,13 @@ std::string as_raw_text(const GenericTensor<T, Dimension::MATRIX, type, ownershi
 
     // Output the formatted result
     std::stringstream ss;
-    
+
     for (std::size_t i = 0; i < strings.rows(); ++i) {
-        for (std::size_t j = 0; j < strings.cols(); ++j)
-            ss << strings(i, j) << (j + 1 < strings.cols() ? " " : "");
+        for (std::size_t j = 0; j < strings.cols(); ++j) ss << strings(i, j) << (j + 1 < strings.cols() ? " " : "");
         ss << " \n";
     }
     ss << "\n";
-    
+
     return ss.str();
 }
 
@@ -2596,7 +2918,7 @@ std::string as_json_array(const GenericTensor<T, Dimension::MATRIX, type, owners
 
     // Output the formatted result
     std::stringstream ss;
-    
+
     ss << "[\n";
     for (std::size_t i = 0; i < strings.rows(); ++i) {
         ss << "  [ ";
@@ -2605,11 +2927,11 @@ std::string as_json_array(const GenericTensor<T, Dimension::MATRIX, type, owners
         ss << " ]" << (i + 1 < strings.rows() ? "," : "") << " \n";
     }
     ss << "]\n";
-    
+
     return ss.str();
 }
 
-} // namespace formatters
+} // namespace format
 
 // - Clear out internal macros -
 #undef _utl_define_operator_support_type_trait

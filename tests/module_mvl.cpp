@@ -24,6 +24,38 @@
 
 using namespace utl;
 
+// Helper macro for checking whole matrices against a "target" matrix
+template <typename T, mvl::Dimension dimension, mvl::Type type, mvl::Ownership ownership, mvl::Checking checking,
+          mvl::Layout layout>
+bool check_matrix_impl(const mvl::GenericTensor<T, dimension, type, ownership, checking, layout>& checked,
+                       const mvl::Matrix<T>&                                                      target) {
+    // Check rows dim
+    const bool correct_rows = target.rows() == checked.rows();
+    if (!correct_rows)
+        std::cout << "Incorrect rows: target = " << target.rows() << ", checked = " << checked.rows() << "\n";
+
+    // Check cols dim
+    const bool correct_cols = target.cols() == checked.cols();
+    if (!correct_cols)
+        std::cout << "Incorrect cols: target = " << target.cols() << ", checked = " << checked.cols() << "\n";
+
+    // Check tensor contents
+    bool correct_contents = true;
+    // .for_each() takes care of sparse matrices by only comparing their contained elements
+    checked.for_each([&](const T& elem, size_t i, size_t j) {
+        if (elem != target(i, j)) {
+            correct_contents = false;
+            std::cout << "Incorrect contents: target(" << i << ", " << j << ") = " << target(i, j) << ", checked(" << i
+                      << ", " << j << ") = " << elem << "\n";
+        }
+    });
+
+    return correct_rows && correct_cols && correct_contents;
+}
+
+#define CHECK_MATRIX(...) CHECK(check_matrix_impl(__VA_ARGS__))
+
+
 TEST_CASE("Sparse matrix basic functionality test") {
     // Build sparse matrix + insert some more
     mvl::SparseMatrix<int> mat(4, 4,
@@ -570,7 +602,10 @@ TEST_CASE("Col-major ordering and transposition behave as expected") {
             {4, 5,  6,  7},
             {8, 9, 10, 11}
         };
-
+        
+        // TEMP:
+        // Commented out while writing ctors
+        
         // col-major -> row-major
         mvl::Matrix<int, mvl::Checking::NONE, mvl::Layout::RC> row_matrix(initial_col_matrix);
         // row-major -> col-major
@@ -610,7 +645,7 @@ TEST_CASE("Col-major ordering and transposition behave as expected") {
     }
 }
 
-TEST_CASE("Matrix blocking/filtering functionality test") {
+TEST_CASE("Matrix sparse subview test") {
     mvl::Matrix<int> mat = {
         {8, 7, 7, 7, 8, 0}, //
         {7, 8, 0, 0, 8, 0}, //
@@ -618,27 +653,27 @@ TEST_CASE("Matrix blocking/filtering functionality test") {
         {7, 0, 0, 8, 8, 0}, //
         {3, 3, 3, 3, 8, 0}  //
     };
-    
+
     // Test mutable filtering
-    const auto view_1 = mat.filter([](const int &elem){ return elem == 8; }).fill(10);
-    const auto view_2 = mat.filter([](const int &elem){ return elem == 3; }).fill(20);
-    const auto view_3 = mat.filter([](const int &elem){ return elem == 7; }).fill(30);
-    
+    const auto view_1 = mat.filter([](const int& elem) { return elem == 8; }).fill(10);
+    const auto view_2 = mat.filter([](const int& elem) { return elem == 3; }).fill(20);
+    const auto view_3 = mat.filter([](const int& elem) { return elem == 7; }).fill(30);
+
     CHECK(view_1.size() == 9);
     CHECK(view_2.size() == 4);
     CHECK(view_3.size() == 6);
     CHECK(view_1.size() * 10 == view_1.sum());
     CHECK(view_2.size() * 20 == view_2.sum());
     CHECK(view_3.size() * 30 == view_3.sum());
-    
+
     // Test const filtering
-    const auto &cref = mat;
-    
-    const auto const_view_1 = cref.filter([](const int &elem){ return elem == 10; });
-    const auto const_view_2 = cref.filter([](const int &elem){ return elem == 20; });
-    const auto const_view_3 = cref.filter([](const int &elem){ return elem == 30; });
+    const auto& cref = mat;
+
+    const auto const_view_1        = cref.filter([](const int& elem) { return elem == 10; });
+    const auto const_view_2        = cref.filter([](const int& elem) { return elem == 20; });
+    const auto const_view_3        = cref.filter([](const int& elem) { return elem == 30; });
     const auto const_diagonal_view = cref.diagonal();
-    
+
     CHECK(const_view_1.size() == 9);
     CHECK(const_view_2.size() == 4);
     CHECK(const_view_3.size() == 6);
@@ -647,16 +682,76 @@ TEST_CASE("Matrix blocking/filtering functionality test") {
     CHECK(const_view_2.size() * 20 == const_view_2.sum());
     CHECK(const_view_3.size() * 30 == const_view_3.sum());
     CHECK(const_diagonal_view.size() * 10 == const_diagonal_view.sum());
-    
-    // auto middle_block = cref.block(1, 1, 3, 4);
-    // CHECK(middle_block.rows() == 3);
-    // CHECK(middle_block.cols() == 4);
-    // CHECK(middle_block.size() == 12);
-    // CHECK(middle_block(0, 0) == 10);
-    // CHECK(middle_block(1, 1) == 10);
-    // CHECK(middle_block(2, 2) == 10);
-    // CHECK(middle_block(0, 1) == 0);
-    // CHECK(middle_block(0, 2) == 0);
-    // CHECK(middle_block(0, 3) == 10);
-    //const auto eights_diagonal = eights.filter([](const int &, size_t i, size_t j){ return i == j; });
+
+    auto middle_block = cref.block(1, 1, 3, 4);
+    CHECK(middle_block.rows() == 3);
+    CHECK(middle_block.cols() == 4);
+    CHECK(middle_block.size() == 12);
+    CHECK(middle_block(0, 0) == 10);
+    CHECK(middle_block(1, 1) == 10);
+    CHECK(middle_block(2, 2) == 10);
+    CHECK(middle_block(0, 1) == 0);
+    CHECK(middle_block(0, 2) == 0);
+    CHECK(middle_block(0, 3) == 10);
+    // const auto eights_diagonal = eights.filter([](const int &, size_t i, size_t j){ return i == j; });
+}
+
+TEST_CASE("Matrix block subview case") {
+    mvl::Matrix<int> matrix = {
+        { 1,  2,  3,  4,  5, 0}, //
+        { 7,  8,  0,  0, 11, 0}, //
+        {13,  0, 15,  0, 17, 0}, //
+        {19,  0,  0, 22, 23, 0}, //
+        {25, 26, 27, 28, 29, 0}  //
+    };
+
+    // Build a strided view
+    mvl::ConstStridedMatrixView<int> strided_view(3, 3, 1 * matrix.cols(), 2, matrix.data()); // non-trivial strides
+
+    CHECK_MATRIX(strided_view, {
+                                   { 1,  3,  5}, //
+                                   {13, 15, 17}, //
+                                   {25, 27, 29}  //
+    });
+
+    // Check strided view blocking subview
+    auto strided_view_block = strided_view.block(1, 1, 2, 2);
+
+    CHECK_MATRIX(strided_view_block, {
+                                         {15, 17}, //
+                                         {27, 29}  //
+    });
+
+    // Build a sparse view
+    auto sparse_view = matrix.filter([](int elem) { return elem != 0; });
+
+    CHECK_MATRIX(sparse_view, {
+                                  { 1,  2,  3,  4,  5, 0}, //
+                                  { 7,  8,  0,  0, 11, 0}, //
+                                  {13,  0, 15,  0, 17, 0}, //
+                                  {19,  0,  0, 22, 23, 0}, //
+                                  {25, 26, 27, 28, 29, 0}  //
+    });
+
+    // Check sparse blocking subview
+    auto sparse_view_block = sparse_view.block(0, 1, 3, 3);
+
+    CHECK_MATRIX(sparse_view_block, {
+                                        {2,  3, 4}, //
+                                        {8,  0, 0}, //
+                                        {0, 15, 0}, //
+    });
+
+    // Check other block views on the original matrix
+    CHECK_MATRIX(matrix.row(3), {
+                                 {19, 0, 0, 22, 23, 0}
+    });
+
+    CHECK_MATRIX(matrix.col(2), {
+                                 {3},  //
+                                 {0},  //
+                                 {15}, //
+                                 {0},  //
+                                 {27}  //
+                             });
 }

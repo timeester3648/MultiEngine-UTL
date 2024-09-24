@@ -410,6 +410,28 @@ int main(int argc, char* argv[]) {
         // Export formats
         << "\n## as_json_array() ##\n\n" << mvl::format::as_json_array(mat)
         << "\n## as_raw_text() ##\n\n"   << mvl::format::as_raw_text(  mat);
+    
+    {
+        std::random_device rd;    
+        std::default_random_engine gen(rd());
+        std::normal_distribution dist(0., 1.);
+        
+        const auto rand_value = [&]()        { return dist(gen);   };
+        const auto abs        = [&](double x){ return std::abs(x); };
+        
+        auto A = mvl::Matrix<double>(5, 5).fill(rand_value).transform(abs).move();
+        // builds a matrix {a_ij} = |N(0, 1)|
+        
+        //using vertex_t = std::pair<double, double>;
+        auto x         = math::linspace(0., math::PI, math::Intervals(10));
+        auto grid      = mvl::Matrix<double>(11, 11, [&](size_t i, size_t){ return double{ x[i] }; });
+        
+        mvl::Matrix<double> B = A;
+        
+        std::cout << mvl::format::as_matrix(B);
+        std::cout << mvl::format::as_matrix(grid);
+    }
+    
 
     // ### MACRO_PROFILER ###
     std::cout << "\n\n### UTL_PROFILER ###\n\n";
