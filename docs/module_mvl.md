@@ -961,6 +961,11 @@ assert( A.rows()  == 2     );
 assert( A.cols()  == 3     );
 assert( A.size()  == 6     );
 assert( A.empty() == false );
+
+// Declare matrix with enabled bound-checking
+mvl::Matrix<int, Checking::BOUNDS> B = A;
+
+// B(3, 2) = 1; // will throw with message "i (which is 3) >= this->rows() (which is 2)"
 ```
 
 ## Example 2 (IO formats)
@@ -1065,7 +1070,7 @@ Tensor [size = 25] (5 x 5):
 using namespace utl;
 
 // Some raw data
-// (for example, received from external 'C' library)
+// (for example, received from an external 'C' library)
 // (let's also assume it's immutable and uses col-major layout for added challenge)
 const float  data[] = { 1.f, 2.f, 3.f, 4.f, 5.f, 6.f };
 const size_t rows   = 2;
@@ -1130,9 +1135,8 @@ mvl::StridedMatrixView<uint8_t> G(rows, cols, 0, channels, data + 1);
 mvl::StridedMatrixView<uint8_t> B(rows, cols, 0, channels, data + 2);
 
 // Convert image to grayscale using linear formula
-mvl::Matrix grayscale(w, h);
-grayscale.for_each([&](uint8_t &elem, size_t i, size_t j){
-    elem = 0.2126 * R(i, j)  + 0.7152 * G(i, j) + 0.0722 * B(i, j);
+mvl::Matrix<uint8_t> grayscale(w, h, [&](size_t i, size_t j){
+    return 0.2126 * R(i, j)  + 0.7152 * G(i, j) + 0.0722 * B(i, j);
 });
 ```
 
