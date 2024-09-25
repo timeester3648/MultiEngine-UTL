@@ -138,7 +138,8 @@ class GenericTensor {
     
     self transposed() const; // requires MATRIX && DENSE
     
-    self move() &;
+    self clone() const; // requires CONTAINER
+    self move() &; // requires CONTAINER
     
     // - Indexation -
     const_reference front() const;
@@ -455,8 +456,16 @@ Returns a copy of the underlying array as `std::vector`.
 
 Returns [transpose](https://en.wikipedia.org/wiki/Transpose) of the matrix.
 
+```cpp
+self clone() const; // requires CONTAINER
+```
+
+Returns a copy of the tensor.
+
+Useful when chaining mutating operations on a tensor with intent of saving the result to a new variable without modifying the original tensor. For example, `auto s = tensor.clone().transform(f).sum()` will apply function `f` to the tensor and sum the elements into `s` without modifying the original `tensor`.
+
 > ```cpp
-> self move() &;
+> self move() &; // requires CONTAINER
 > ```
 
 Returns `std::move(*this)`. This is useful to avoid a copy when initializing objects with method chaining.
@@ -1100,7 +1109,7 @@ using namespace utl;
 auto A = mvl::Matrix<double>(7, 7, math::kronecker_delta<size_t>);
 
 // Compute ||A||_inf norm
-const auto norm = A.transform(math::abs<double>).sum();
+const auto norm = A.clone().transform(math::abs<double>).sum();
     
 // Compute tr(A)
 const auto tr = A.diagonal().sum();
