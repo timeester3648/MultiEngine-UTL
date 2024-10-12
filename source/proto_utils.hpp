@@ -367,13 +367,9 @@ constexpr FloatType rad_to_deg(FloatType radians) {
 
 
 // --- Memory size estimates ---
-enum class MemoryUnit {
-    BYTE, //
-    KiB, MiB, GiB, TiB, //
-    KB, MB, GB, TB //
-};
+enum class MemoryUnit { BYTE, KiB, MiB, GiB, TiB, KB, MB, GB, TB };
 
-template<typename T, MemoryUnit units = MemoryUnit::MiB>
+template <typename T, MemoryUnit units = MemoryUnit::MiB>
 constexpr double memory_size(std::size_t count) {
     const double size_in_bytes = count * sizeof(T); // cast to double is critical here
     if constexpr (units == MemoryUnit::BYTE) return size_in_bytes;
@@ -385,7 +381,9 @@ constexpr double memory_size(std::size_t count) {
     if constexpr (units == MemoryUnit::MB) return size_in_bytes / 1000. / 1000.;
     if constexpr (units == MemoryUnit::GB) return size_in_bytes / 1000. / 1000. / 1000.;
     if constexpr (units == MemoryUnit::TB) return size_in_bytes / 1000. / 1000. / 1000. / 1000.;
-    return std::numeric_limits<double>::signaling_NaN(); // NOTE: Would exceptions work better here?
+    return std::numeric_limits<double>::signaling_NaN();
+    // NOTE: Would exceptions work better here?
+    // Would it be fine with constexpr?
 }
 
 
@@ -1684,7 +1682,7 @@ public:
         this->for_each([&](const value_type& element, size_type i, size_type j) { res(j, i) = element; });
         return res;
     }
-    
+
     _utl_reqs(ownership == Ownership::CONTAINER)
     self clone() const { return *this; }
 
