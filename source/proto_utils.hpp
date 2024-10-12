@@ -366,6 +366,29 @@ constexpr FloatType rad_to_deg(FloatType radians) {
 }
 
 
+// --- Memory size estimates ---
+enum class MemoryUnit {
+    BYTE, //
+    KiB, MiB, GiB, TiB, //
+    KB, MB, GB, TB //
+};
+
+template<typename T, MemoryUnit units = MemoryUnit::MiB>
+constexpr double memory_size(std::size_t count) {
+    const double size_in_bytes = count * sizeof(T); // cast to double is critical here
+    if constexpr (units == MemoryUnit::BYTE) return size_in_bytes;
+    if constexpr (units == MemoryUnit::KiB) return size_in_bytes / 1024.;
+    if constexpr (units == MemoryUnit::MiB) return size_in_bytes / 1024. / 1024.;
+    if constexpr (units == MemoryUnit::GiB) return size_in_bytes / 1024. / 1024. / 1024.;
+    if constexpr (units == MemoryUnit::TiB) return size_in_bytes / 1024. / 1024. / 1024. / 1024.;
+    if constexpr (units == MemoryUnit::KB) return size_in_bytes / 1000.;
+    if constexpr (units == MemoryUnit::MB) return size_in_bytes / 1000. / 1000.;
+    if constexpr (units == MemoryUnit::GB) return size_in_bytes / 1000. / 1000. / 1000.;
+    if constexpr (units == MemoryUnit::TB) return size_in_bytes / 1000. / 1000. / 1000. / 1000.;
+    return std::numeric_limits<double>::signaling_NaN(); // NOTE: Would exceptions work better here?
+}
+
+
 // --- Meshing ---
 
 // Semantic helpers that allow user to directly pass both interval/point counts for grid subdivision,
@@ -1666,7 +1689,7 @@ public:
     self clone() const { return *this; }
 
     _utl_reqs(ownership == Ownership::CONTAINER)
-    self move() & { return std::move(*this); };
+    self move() & { return std::move(*this); }
 
     template <Type other_type, Ownership other_ownership, Checking other_checking, Layout other_layout>
     bool compare_contents(const GenericTensor<value_type, self::params::dimension, other_type, other_ownership,

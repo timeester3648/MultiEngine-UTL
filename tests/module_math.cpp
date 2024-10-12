@@ -78,6 +78,12 @@ TEST_CASE_TEMPLATE("(math::is_multipliable_by_scalar<T> == false) for T = ", T, 
     CHECK(math::is_multipliable_by_scalar<T>::value == false);
 }
 
+TEST_CASE("(math::memory_size<T, size_t> == ...) for T = ") {
+    using T = std::tuple<uint8_t, uint8_t, uint8_t>;
+    constexpr std::size_t size = 1920 * 1080;
+    CHECK(math::memory_size<T, math::MemoryUnit::MiB>(size) == doctest::Approx(size * 3 / std::pow(1024., 2)));
+}
+
 // Test 'is_function_with_signature' with 1) std::function 2) lambdas 3) functors 4) function pointers
 // while checking that type conversions are respected properly
 using target_arg_t       = const int&;
