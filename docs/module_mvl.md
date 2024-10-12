@@ -309,6 +309,36 @@ namespace format {
     std::string as_raw_text(  const GenericTensor<Args...> &tensor);
     std::string as_json_array(const GenericTensor<Args...> &tensor);
 }
+
+// - Typedefs -
+template <typename T, Checking checking = Checking::NONE, Layout layout = Layout::RC>
+using Matrix = GenericTensor<T, Dimension::MATRIX, Type::DENSE, Ownership::CONTAINER, checking, layout>;
+
+template <typename T, Checking checking = Checking::NONE, Layout layout = Layout::RC>
+using MatrixView = GenericTensor<T, Dimension::MATRIX, Type::DENSE, Ownership::VIEW, checking, layout>;
+
+template <typename T, Checking checking = Checking::NONE, Layout layout = Layout::RC>
+using ConstMatrixView = GenericTensor<T, Dimension::MATRIX, Type::DENSE, Ownership::CONST_VIEW, checking, layout>;
+
+template <typename T, Checking checking = Checking::NONE, Layout layout = Layout::RC>
+using StridedMatrix = GenericTensor<T, Dimension::MATRIX, Type::STRIDED, Ownership::CONTAINER, checking, layout>;
+
+template <typename T, Checking checking = Checking::NONE, Layout layout = Layout::RC>
+using StridedMatrixView = GenericTensor<T, Dimension::MATRIX, Type::STRIDED, Ownership::VIEW, checking, layout>;
+
+template <typename T, Checking checking = Checking::NONE, Layout layout = Layout::RC>
+using ConstStridedMatrixView =
+    GenericTensor<T, Dimension::MATRIX, Type::STRIDED, Ownership::CONST_VIEW, checking, layout>;
+
+template <typename T, Checking checking = Checking::NONE>
+using SparseMatrix = GenericTensor<T, Dimension::MATRIX, Type::SPARSE, Ownership::CONTAINER, checking, Layout::SPARSE>;
+
+template <typename T, Checking checking = Checking::NONE>
+using SparseMatrixView = GenericTensor<T, Dimension::MATRIX, Type::SPARSE, Ownership::VIEW, checking, Layout::SPARSE>;
+
+template <typename T, Checking checking = Checking::NONE>
+using ConstSparseMatrixView =
+    GenericTensor<T, Dimension::MATRIX, Type::SPARSE, Ownership::CONST_VIEW, checking, Layout::SPARSE>;
 ```
 
 > [!Note]
@@ -756,6 +786,8 @@ See corresponding [example](#example-2-IO-formats) to get a better idea of what 
 
 **Note 2:** `as_json_array` assumes that `operator<<(std::ostream&, const T&)` produces a string, corresponding to a valid [JSON object](https://ecma-international.org/publications-and-standards/standards/ecma-404/). By default, `mvl` knows how to properly handle all built-in numeric, logical and string types, user-defined types have to handle their formatting themselves.
 
+**Note 3:** Human-readable formats automatically collapse matrices above a certain "readable" size (70+ rows or 40+ columns for `as_matrix`, 500+ elements for `as_vector` and `as_dictionary`).
+
 ### Constructors
 
 #### Generic constructors
@@ -1006,6 +1038,10 @@ std::cout
     // Export formats
     << "\n## as_raw_text() ##\n\n"   << mvl::format::as_raw_text(  mat)
     << "\n## as_json_array() ##\n\n" << mvl::format::as_json_array(mat);
+
+// Human-readable formats will aumatically collapse matrices above certain size to following format:
+// > Tensor [size = 250000] (500 x 500):
+// >   <hidden due to large size>
 ```
 
 Output:
@@ -1208,10 +1244,10 @@ Tensor [size = 3] (3 x 3):
 
 ## Work in progress
 
-- `Benchmarks` section
-- Specializations with `Dimension::VECTOR` (lots of repetitive work, nothing particularly new)
-- A way of indexing a sparse matrix like a dense one (there exists a solution with next to no additional overhead, but it requires some careful thought on the API) and setting a "default element" that is different from default-initialized
-- Operators `+`, `-`, `*`, `+=`, `-=`, `*=`
-- Some additional algorithms like `sample()`, `shuffle()`, `clamp()`
-- Matrix concat operations
+- `Benchmarks` section (basic ones already done, better style and coverage needed)
+- Specializations with `Dimension::VECTOR` (lots of repetitive work, nothing conceptually new)
+- A way of indexing a sparse matrix like a dense one and setting a "default element" that is different from default-initialized (there exists a solution with next to no additional overhead, but it requires some careful thought on the API)
+- Operators `+`, `-`, `*`, `+=`, `-=`, `*=` (currently considering whether providing these is in spirit of the library)
+- Some additional algorithms like `sample()`, `shuffle()`, `clamp()` (simply not implemented yet)
+- Matrix concatenation functions (simply not implemented yet)
 - Working `[ Run this code ]` links (will be done once API is properly finalized)

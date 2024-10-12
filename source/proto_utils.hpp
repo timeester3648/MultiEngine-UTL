@@ -2814,9 +2814,16 @@ constexpr std::size_t max_displayed_flat_size = 500;
 constexpr auto        content_indent          = "  ";
 
 template <class T, Dimension dimension, Type type, Ownership ownership, Checking checking, Layout layout>
+std::string _stringify_metainfo(const GenericTensor<T, dimension, type, ownership, checking, layout>& tensor) {
+    std::stringstream ss;
+    ss << "Tensor [size = " << tensor.size() << "] (" << tensor.rows() << " x " << tensor.cols() << "):\n";
+    return ss.str();
+}
+
+template <class T, Dimension dimension, Type type, Ownership ownership, Checking checking, Layout layout>
 std::string _as_too_large(const GenericTensor<T, dimension, type, ownership, checking, layout>& tensor) {
     std::stringstream ss;
-    ss << "matrix[ " << tensor.rows() << " x " << tensor.cols() << " ] ->\n<hidden due to large size>\n";
+    ss << _stringify_metainfo(tensor) << content_indent << "<hidden due to large size>\n";
     return ss.str();
 }
 
@@ -2841,13 +2848,6 @@ std::string _ss_stringify_for_json(const T& value) {
         ss << value;
     }
 
-    return ss.str();
-}
-
-template <class T, Dimension dimension, Type type, Ownership ownership, Checking checking, Layout layout>
-std::string _stringify_metainfo(const GenericTensor<T, dimension, type, ownership, checking, layout>& tensor) {
-    std::stringstream ss;
-    ss << "Tensor [size = " << tensor.size() << "] (" << tensor.rows() << " x " << tensor.cols() << "):\n";
     return ss.str();
 }
 

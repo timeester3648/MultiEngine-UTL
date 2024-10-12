@@ -419,7 +419,7 @@ int main(int argc, char* argv[]) {
         const auto rand_value = [&]()        { return dist(gen);   };
         const auto abs        = [&](double x){ return std::abs(x); };
         
-        auto A = mvl::Matrix<double>(5, 5).fill(rand_value).transform(abs).move();
+        auto A = mvl::Matrix<double>(500, 500).fill(rand_value).transform(abs).move();
         // builds a matrix {a_ij} = |N(0, 1)|
         
         //using vertex_t = std::pair<double, double>;
