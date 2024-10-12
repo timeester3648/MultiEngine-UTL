@@ -220,7 +220,7 @@ Faster implementation of `ternary_branchless()` for integers. When second return
 
 > ```cpp
 > template<typename T, MemoryUnit units = MemoryUnit::MiB>
-constexpr double memory_size(std::size_t count);
+> constexpr double memory_size(std::size_t count);
 > ```
 
 Returns size in `units` occupied in memory by `count` elements of type `T`. Useful to estimate memory usage of arrays, matrices and other data structures in a human-readable way.
