@@ -3,9 +3,7 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include "thirdparty/doctest.h"
 
-#define UTL_PICK_MODULES
-#define UTLMODULE_RANDOM
-#include "proto_utils.hpp"
+#include "module_random.hpp"
 
 // ________________ TEST INCLUDES ________________
 

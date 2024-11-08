@@ -35,6 +35,7 @@ path_executable="${directory_build}source/run"
 compiler="g++" # clang++-11
 test_flags="--rerun-failed --output-on-failure --timeout 60"
 build_jobs="6"
+header_merger_script="scripts/create_single_header.sh"
 
 # -----------------------
 # ------ Functions ------
@@ -101,6 +102,13 @@ do
 
     if [ "$var" = "build" ]; then
         echo "# Action: CMake Build"
+        if [ -f "$header_merger_script" ]; then
+            echo "Merging single header include..."
+            bash "$header_merger_script"
+            echo "Merge complete."
+        else
+            echo "# Error: Could not find \"$header_merger_script\"."
+        fi
         cmake_build
         valid_command=true
     fi
@@ -113,6 +121,8 @@ do
 
     if [ "$var" = "run" ]; then
         echo "# Action: run"
+        echo "# Error: This command is temporary disabled during a refactor"
+        break
         executable_run
         valid_command=true
     fi

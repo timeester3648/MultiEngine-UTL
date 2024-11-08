@@ -2,16 +2,14 @@
 
 #include <cstddef>
 #include <numeric>
-#include <pstl/glue_execution_defs.h>
+#include <pstl/glue_execution_defs.h> // TODO: What is that? How did it get here?
 #include <type_traits>
 #include <unordered_map>
 #include <vector>
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include "thirdparty/doctest.h"
 
-#define UTL_PICK_MODULES
-#define UTLMODULE_MVL
-#include "proto_utils.hpp"
+#include "module_mvl.hpp"
 
 // ________________ TEST INCLUDES ________________
 
@@ -253,7 +251,6 @@ TEST_CASE("Matrix constructors & methods derived from storage::AbstractIndexable
             {'a', 'b'},
             {'c', 'd'}
         };
-        matrix.to_std_vector();
         CHECK(matrix.to_std_vector() == std::vector{'a', 'b', 'c', 'd'});
     }
 

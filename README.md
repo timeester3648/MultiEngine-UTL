@@ -6,14 +6,14 @@
 
 This is a collection of various utilities that aim to provide a set of concise "helpers" that allow prototyping with minimal boilerplate. Most of the following modules were created during my work in gamedev, HPC and math research projects.
 
-For ease of integration, this library is distributed in a form of a **single header**, which can be found [here](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/source/proto_utils.hpp).
+For the ease of integration, this library is distributed in a form of a **single header**, which can be found [here](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/include/proto_utils.hpp).
 
 ## Design goals
 
 Implementation of this library sets following design goals:
 
 * **Header only**. Adding library to the project should be as simple as adding a header.
-* **Minimal boilerplate**. Methods must be concise and require minimal boilerplate on user side.
+* **Concise**. Methods must require minimal boilerplate on user side.
 * **Platform agnostic**. Implementation should be based around C++ standard and whenever OS-specific methods are unavoidable select appropriate implementation automatically.
 * **Fully modular**. Every module should be independent of others and reside in a separate namespace. Modules together with their STL dependencies should be toggleable through a `#define`.
 
@@ -27,8 +27,9 @@ Secondary design goals also include:
 
 | Module | Short description |
 | - | - |
-| [**utl::config**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_config.md) | Simple export/import of JSON configs |
+| [**utl::config**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_json.md) | Lightweight JSON parsing and serializing |
 | [**utl::math**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_math.md) | Math-related utilities |
+| [**utl::mvl**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_mvl.md) | Flexible API for vector and matrix operations |
 | [**utl::progressbar**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_progressbar.md) | Configurable progress bars for console apps |
 | [**utl::random**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_random.md) | Convenient random functions |
 | [**utl::shell**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_shell.md) | Command-line related utilities |
@@ -77,20 +78,19 @@ While the library itself consists of a single header, it was built and tested us
 
 ## Work in progress
 
-* `utl::mvl` module;
-* Method for selecting folder for temp file creation in `utl::shell`;
-* `timer::benchmark()` function;
-* `UTL_DEFINE_BITFLAG_ENUM()` macro;
-* `UTL_DEFINE_BITFLAG_COMPAT_CHECK()` macro;
+* Finalizing `utl::json` module;
+* `utl::json` documentation;
+* `utl::mvl` Godbolt links;
+* Vector API in `utl::mvl`;
+* `utl::font` module;
+* Directory selection for temp file creation in `utl::shell`;
+* `timer::benchmark()`;
 * `utl::bitflag` module with shortcuts for various enum bitflag operations;
-* `config::import_json()` function;
 * `stre::centered()` stream modifier;
-* Potentially add `utl::config()` support for TOML and JSON5 with comments declared through `config:comment()` entries;
 * Coordinate transformations in `utl::math`;
 * More type traits in `utl::math`;
-* Async module with functions like `async::run_task()` and `async::await(task)`;
+* Potential `utl::async` module with threadpool implementation and parallel execution methods;
 * `stre::to_str()` implementation for `std::stack` and `std::queue`;
-* Colored text module or color support for log macros that does not involve including `<Windows.h>`, perhaps a full-on `utl::font` module;
 
 ## License
 

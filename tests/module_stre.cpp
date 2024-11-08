@@ -5,9 +5,7 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include "thirdparty/doctest.h"
 
-#define UTL_PICK_MODULES
-#define UTLMODULE_STRE
-#include "proto_utils.hpp"
+#include "module_stre.hpp"
 
 // ________________ TEST INCLUDES ________________
 
