@@ -30,7 +30,7 @@ directory_source="source/"
 directory_build="build/"
 directory_tests="${directory_build}tests/"
 
-path_executable="${directory_build}source/run"
+path_executable="${directory_build}benchmarks/benchmark_json"
 
 compiler="g++" # clang++-11
 test_flags="--rerun-failed --output-on-failure --timeout 60"
@@ -79,6 +79,15 @@ executable_run() {
     ./$path_executable
 }
 
+executable_profile() {
+    check_command_exists "valgrind"
+    check_command_exists "callgrind_annotate"
+    check_command_exists "kcachegrind"
+    valgrind --tool=callgrind --dump-line=yes --callgrind-out-file="${directory_temp}callgrind.latest" ./$path_executable
+    callgrind_annotate --auto=yes --include="source/" "${directory_temp}callgrind.latest" > "${directory_temp}callgrind.annotate.txt"
+    kcachegrind "./${directory_temp}callgrind.latest"
+}
+
 # -----------------------
 # --- Action selector ---
 # -----------------------
@@ -121,9 +130,13 @@ do
 
     if [ "$var" = "run" ]; then
         echo "# Action: run"
-        echo "# Error: This command is temporary disabled during a refactor"
-        break
         executable_run
+        valid_command=true
+    fi
+    
+    if [ "$var" = "profile" ]; then
+        echo "# Action: profile"
+        executable_profile
         valid_command=true
     fi
     

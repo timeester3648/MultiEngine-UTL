@@ -27,7 +27,7 @@ Secondary design goals also include:
 
 | Module | Short description |
 | - | - |
-| [**utl::config**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_json.md) | Lightweight JSON parsing and serializing |
+| [**utl::json**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_json.md) | Lightweight JSON parsing and serializing |
 | [**utl::math**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_math.md) | Math-related utilities |
 | [**utl::mvl**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_mvl.md) | Flexible API for vector and matrix operations |
 | [**utl::progressbar**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_progressbar.md) | Configurable progress bars for console apps |

@@ -2,60 +2,118 @@
 
 [<- back to README.md](https://github.com/DmitriBogdanov/prototyping_utils/tree/master)
 
-**json** module implements a lightweight JSON manipulation API.
+**json** module aims to provide an intuitive JSON manipulation API similar to [nlohmann_json](https://github.com/nlohmann/json) while being a bit more lightweight and explicit about the underlying type conversions. The key difference are:
 
-The main goal of this module is to provide **utl** with a built-in way of managing data exchange and configuration files without introducing large dependencies. In cases where heavy-duty JSON processing is needed, it is advised specialized JSON libraries such as: [nlohmann_json](https://github.com/nlohmann/json), [simdjson](https://github.com/simdjson/simdjson) and [Glaze](https://github.com/stephenberry/glaze).
+- `utl::json` doesn't introduce **any** global identifiers (including macros and operators)
+- Objects support transparent comparators (which means `std::string_view` and `const char*` can be used for lookup)
+- [Decent performance](#benchmarks) without relying on compiler intrinsics (TODO: Format and document benchmarks nicely)
+- All JSON types map to standard library containers, no need to learn custom APIs
+
+> [!Note]
+> Despite rather competitive performance, considerably faster parsing can be achieved with custom formatters, SIMD and unordered key optimizations (see [simdjson](https://github.com/simdjson/simdjson), [Glaze](https://github.com/stephenberry/glaze) and [yyjson](https://github.com/ibireme/yyjson)), this, however often comes at the expense of user convenience or features (such as missing escape sequence handling in *simdjson* and *yyjson*, *Glaze* has it, but requires [C++20](https://en.cppreference.com/w/cpp/20)).
 
 ## Feature Support
 
-| Feature | Implementation |
-| - | - |
-| Parsing | ✔ |
-| Serialization | ✔ |
-| JSON Formatting | ✔ |
-| JSON Validation | **partial** |
-| Unicode Support | ✔ |
-| Escape Sequence Support | ✔ |
-| ISO/IEC 10646 Hexadecimal Support | ✘ |
-| Trait-based Type Conversions | ✔ |
-| Compile-time JSON Schema | ✘ |
+| Feature | Implementation | Notes |
+| - | - | - |
+| Parsing | ✔ |  |
+| Serialization | ✔ |  |
+| JSON Formatting | ✔ |  |
+| JSON Validation | ✔ | Full validation with proper error messages through exceptions |
+| Unicode Support | ✔ | Tested for UTF-8 |
+| Escape Sequence Support | ✔ |  |
+| ISO/IEC 10646 Hexadecimal Support | ✘ | Currently in the works |
+| Trait-based Type Conversions | ✔ |  |
+| Compile-time JSON Schema | ✘ | Requires compiler intrinsics or C++26 to implement |
+| Lazy Node Loading | ✘ | Outside the project scope |
 
 ## Definitions
 
 ```cpp
-// JSON token types
-class Object;
-class Array;
-using String = std::string;
-using Number = double;
-using Bool   = bool;
-class Null;
+// JSON Node
+enum class Format { PRETTY, MINIMIZED };
 
-// Type traits
-template <class T> constexpr bool is_object_like_v;
-template <class T> constexpr bool is_array_like_v;
-template <class T> constexpr bool is_string_like_v
-template <class T> constexpr bool is_numeric_like_v;
-template <class T> constexpr bool is_bool_like_v;
-template <class T> constexpr bool is_null_like_v;
-
-template <class T> constexpr bool is_json_type_convertible_v =
-    is_string_like_v<T> || is_numeric_like_v<T> || is_bool_like_v<T> ||
-    is_null_like_v<T>   || is_object_like_v<T>  || is_array_like_v<T>;
-
-// JSON node
-struct Node {
-    std::string to_string(unsigned int indent_level = 0, bool skip_first_indent = false) const;
+class Node {
+    // - Member Types -
+    using object_type = std::map<std::string, Node, std::less<>>;
+    using array_type  = std::vector<Node>;
+    using string_type = std::string;
+    using bool_type   = bool;
+    using null_type   = class{};
     
-    Node& operator[](const std::string& key);
-}
+    // - Getters -
+    template <class T>       T& get();
+    template <class T> const T& get() const;
+    
+    object_type& get_object();
+    array_type & get_array();
+    string_type& get_string();
+    number_type& get_number();
+    bool_type  & get_bool();
+    null_type  & get_null();
 
-// Import/Export
+    const object_type& get_object() const;
+    const array_type & get_array()  const;
+    const string_type& get_string() const;
+    const number_type& get_number() const;
+    const bool_type  & get_bool()   const;
+    const null_type  & get_null()   const;
+    
+    template <class T> bool is() const;
+    
+    bool is_object() const;
+    bool is_array() const;
+    bool is_string() const;
+    bool is_number() const;
+    bool is_bool() const;
+    bool is_null() const;
+    
+    template <class T>       T* get_if();
+    template <class T> const T* get_if() const;
+    
+    // - Object methods -
+    Node      & operator[](std::string_view key);
+    const Node& operator[](std::string_view key) const;
+    
+    Node      & at(std::string_view key);
+    const Node& at(std::string_view key) const;
+    
+    bool contains(std::string_view key) const;
+    
+    template<class T> value_or(std::string_view key, const T &else_value);
+    
+    // - Assignment -
+    Node& operator=(const Node&) = default;
+    Node& operator=(Node&&)      = default;
+    
+    template <class T> Node& operator=(const T& value); // type-trait based conversion
+    
+    // - Constructors -
+    Node()            = default;
+    Node(const Node&) = default;
+    Node(Node&&)      = default;
+    
+    template <class T> Node(const T& value); // type-trait based conversion
+    
+    // - Other -
+    std::string to_string(Format format = Format::PRETTY) const;
+};
+
+// Typedefs
+using Object = Node::object_type;
+using Array  = Node::array_type;
+using String = Node::string_type;
+using Bool   = Node::bool_type;
+using Null   = Node::null_type;
+
+// Parsing
 Node import_string(const std::string& buffer);
-Node export_string(      std::string& buffer, const Node& node);
+Node import_file(const std::string& filepath);
+Node literals::operator""_utl_json(const char* c_str, std::size_t c_str_size);
 
-Node import_file(const std::string& path);
-void export_file(const std::string& path, const Node& node);
+// Serializing
+void export_string(std::string& buffer, const Node& node, Format format = Format::PRETTY);
+void export_file(const std::string& filepath, const Node& node, Format format = Format::PRETTY);
 ```
 
 ## Methods
@@ -155,13 +213,19 @@ json["string"] = std::string_view("lorem ipsum");
 [ [Run this code]() ]
 ```cpp
 using namespace utl;
+using namespace json::literals;
 
-json::Node json;
-
-json["string"]           = "lorem ipsum";
-json["array"]            = { 1, 2, 3 };
-json["object"]["key_1"]  = 3.14f;
-json["object"]["key_2"]  = 6.28f;
+// Create JSON from literal
+auto json = R"(
+    {
+        "string": "lorem_ipsum",
+        "array": [ 1, 2, 3 ],
+        "object": {
+            "key_1": 3.14,
+            "key_2": 6.28
+        }
+    }
+)"_utl_json;
 
 // Check that node exists
 assert( json.contains("string") );
@@ -216,3 +280,5 @@ Output:
 ```
 TODO:
 ```
+
+## Benchmarks

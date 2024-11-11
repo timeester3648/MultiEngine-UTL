@@ -34,6 +34,8 @@
 // ____________________ DEVELOPER DOCS ____________________
 
 // NOTE: DOCS
+// TEMP:
+// #include "../source/MACRO_PROFILER.hpp"
 
 // ____________________ IMPLEMENTATION ____________________
 
@@ -64,17 +66,6 @@ inline std::string _read_file_to_string(const std::string& path) {
     return chars;
 }
 
-inline bool _is_insignificant_whitespace_char(char c) {
-    // "Insignificant whitespace" according to the JSON spec:
-    // [https://ecma-international.org/wp-content/uploads/ECMA-404.pdf]
-    // constitues following symbols:
-    // - Whitespace      (aka ' ' )
-    // - Tabs            (aka '\t')
-    // - Carriage return (aka '\r')
-    // - Newline         (aka '\n')
-    return c == ' ' || c == '\t' || c == '\r' || c == '\n';
-}
-
 template <typename T>
 constexpr int _log_10_ceil(T num) {
     return num < 10 ? 1 : 1 + _log_10_ceil(num / 10);
@@ -102,8 +93,6 @@ struct _is_assotiative : std::false_type {};
 template <typename Type>
 struct _is_assotiative<Type, std::void_t<typename Type::key_type>, std::void_t<typename Type::mapped_type>>
     : std::true_type {};
-
-constexpr bool t = _is_assotiative<std::pair<int, int>>::value;
 
 // ===================================
 // --- JSON type conversion traits ---
@@ -141,8 +130,10 @@ constexpr bool is_json_type_convertible_v = is_object_like_v<T> || is_array_like
 // --- Node class ---
 // ==================
 
+enum class Format { PRETTY, MINIMIZED };
+
 class Node;
-inline void _serialize_json_to_buffer(std::string& chars, const Node& node, bool prettify);
+inline void _serialize_json_to_buffer(std::string& chars, const Node& node, Format format);
 
 class Node {
 public:
@@ -154,7 +145,8 @@ public:
     using null_type   = _null_type_impl;
 
 private:
-    using variant_type = std::variant<object_type, array_type, string_type, number_type, bool_type, null_type>;
+    using variant_type = std::variant<null_type, object_type, array_type, string_type, number_type, bool_type>;
+    // 'null_type' should go first to ensure default-initialization creates 'null' nodes
 
     variant_type data{};
 
@@ -244,6 +236,15 @@ public:
         const auto& object = this->get_object();
         const auto  it     = object.find(key);
         return it != object.end();
+    }
+    
+    template<class T>
+    [[nodiscard]] T& value_or(std::string_view key, const T &else_value) {
+        const auto& object = this->get_object();
+        const auto  it     = object.find(key);
+        if (it != object.end()) return it->second.get<T>();
+        return else_value;
+        // same thing as 'this->contains(key) ? json.at(key).get<T>() : else_value' but without a second map lookup
     }
 
     // -- Assignment --
@@ -366,9 +367,9 @@ public:
     Node(bool_type value) { this->data = value; }
     Node(null_type value) { this->data = value; }
 
-    [[nodiscard]] std::string to_string() const {
+    [[nodiscard]] std::string to_string(Format format = Format::PRETTY) const {
         std::string buffer;
-        _serialize_json_to_buffer(buffer, *this, true);
+        _serialize_json_to_buffer(buffer, *this, format);
         return buffer;
     }
 };
@@ -381,6 +382,112 @@ using Number = Node::number_type;
 using Bool   = Node::bool_type;
 using Null   = Node::null_type;
 
+// =====================
+// --- Lookup Tables ---
+// =====================
+
+constexpr std::size_t _number_of_char_values =
+    256; // always true since 'sizeof(char) == 1' is guaranteed by the standard
+
+// Lookup table used to check if number should be escaped and get a replacement char on at the same time.
+// This allows us to replace multiple checks and if's with a single array lookup that.
+//
+// Instead of:
+//    if (c == '"') { chars += '"' }
+//    ...
+//    else if (c == '\t') { chars += 't' }
+// we get:
+//    if (const char replacement = _lookup_serialized_escaped_chars[c]) { chars += replacement; }
+//
+// which ends up being quite noticeably faster.
+//
+constexpr std::array<char, _number_of_char_values> _lookup_serialized_escaped_chars = [] {
+    std::array<char, _number_of_char_values> res{};
+    // default-initialized chars get initialized to '\0',
+    // as far as I understand ('\0' == 0) is mandated by the standard,
+    // which is why we can use it inside an 'if' condition
+    res['"']  = '"';
+    res['\\'] = '\\';
+    // res['/']  = '/'; escaping forward slash in JSON is allowed, but redundant
+    res['\b'] = 'b';
+    res['\f'] = 'f';
+    res['\n'] = 'n';
+    res['\r'] = 'r';
+    res['\t'] = 't';
+    return res;
+}();
+
+// Lookup table used to select appropriate node parsing methods based on the first character.
+// This allows us to replace an if-else chain with a ('0' < c && c < '9') check with a single
+// array lookup that selects an option in switch-case. Writing switch-case from the get go is
+// also an option, but it would require either code duplication or fallthrough on '0', ..., '0',
+// '-' and also 't', 'f' which seems suboptimal.
+//
+enum class _json_node_selector_branch {
+    NONE = 0,
+    OBJECT_BRANCH,
+    ARRAY_BRANCH,
+    STRING_BRANCH,
+    NUMBER_BRANCH,
+    BOOL_TRUE_BRANCH,
+    BOOL_FALSE_BRANCH,
+    NULL_BRANCH
+};
+
+constexpr std::array<_json_node_selector_branch, _number_of_char_values> _lookup_node_selector_branch = [] {
+    std::array<_json_node_selector_branch, _number_of_char_values> res{};
+    // default-initialized enums get initialized to 'static_cast<EnumName>(0)',
+    // this is why we need 'NONE = 0' enum member for cases that aren't handled by the selector
+    res['{'] = _json_node_selector_branch::OBJECT_BRANCH;
+    res['['] = _json_node_selector_branch::ARRAY_BRANCH;
+    res['"'] = _json_node_selector_branch::STRING_BRANCH;
+    res['0'] = _json_node_selector_branch::NUMBER_BRANCH;
+    res['1'] = _json_node_selector_branch::NUMBER_BRANCH;
+    res['2'] = _json_node_selector_branch::NUMBER_BRANCH;
+    res['3'] = _json_node_selector_branch::NUMBER_BRANCH;
+    res['4'] = _json_node_selector_branch::NUMBER_BRANCH;
+    res['5'] = _json_node_selector_branch::NUMBER_BRANCH;
+    res['6'] = _json_node_selector_branch::NUMBER_BRANCH;
+    res['7'] = _json_node_selector_branch::NUMBER_BRANCH;
+    res['8'] = _json_node_selector_branch::NUMBER_BRANCH;
+    res['9'] = _json_node_selector_branch::NUMBER_BRANCH;
+    res['-'] = _json_node_selector_branch::NUMBER_BRANCH;
+    res['t'] = _json_node_selector_branch::BOOL_TRUE_BRANCH;
+    res['f'] = _json_node_selector_branch::BOOL_FALSE_BRANCH;
+    res['n'] = _json_node_selector_branch::NULL_BRANCH;
+    return res;
+}();
+
+constexpr std::array<bool, _number_of_char_values> _lookup_whitespace_chars = [] {
+    std::array<bool, _number_of_char_values> res{};
+    // "Insignificant whitespace" according to the JSON spec:
+    // [https://ecma-international.org/wp-content/uploads/ECMA-404.pdf]
+    // constitues following symbols:
+    // - Whitespace      (aka ' ' )
+    // - Tabs            (aka '\t')
+    // - Carriage return (aka '\r')
+    // - Newline         (aka '\n')
+    res[' ']  = true;
+    res['\t'] = true;
+    res['\r'] = true;
+    res['\n'] = true;
+    return res;
+}();
+
+// Lookup table used to get an appropriate char for the escaped char in a 2-char JSON escape sequence.
+// Allows us to avoid a chain of 8 if-else'es which ends up beings faster.
+constexpr std::array<char, _number_of_char_values> _lookup_parsed_escaped_chars = [] {
+    std::array<char, _number_of_char_values> res{};
+    res['"']  = '"';
+    res['\\'] = '\\';
+    res['/']  = '/';
+    res['b']  = '\b';
+    res['f']  = '\f';
+    res['n']  = '\n';
+    res['r']  = '\r';
+    res['t']  = '\t';
+    return res;
+}();
 
 // ====================
 // --- JSON Parsing ---
@@ -397,7 +504,7 @@ struct _parser {
         using namespace std::string_literals;
 
         while (cursor < this->chars.size()) {
-            if (!_is_insignificant_whitespace_char(this->chars[cursor])) return cursor;
+            if (!_lookup_whitespace_chars[this->chars[cursor]]) return cursor;
             ++cursor;
         }
 
@@ -415,19 +522,42 @@ struct _parser {
         const char c = this->chars[cursor];
 
         // Assuming valid JSON, we can determine node type based on a single first character
+        // switch (_lookup_node_selector_branch[c]) {
+        // case _json_node_selector_branch::OBJECT_BRANCH: return this->parse_object(cursor);
+        // case _json_node_selector_branch::ARRAY_BRANCH: return this->parse_array(cursor);
+        // case _json_node_selector_branch::STRING_BRANCH: return this->parse_string(cursor);
+        // case _json_node_selector_branch::NUMBER_BRANCH: return this->parse_number(cursor);
+        // case _json_node_selector_branch::BOOL_TRUE_BRANCH: return this->parse_true(cursor);
+        // case _json_node_selector_branch::BOOL_FALSE_BRANCH: return this->parse_false(cursor);
+        // case _json_node_selector_branch::NULL_BRANCH: return this->parse_null(cursor);
+        // default:
+        //     throw std::runtime_error("JSON node selector encountered unexpected marker symbol {"s +
+        //     this->chars[cursor] +
+        //                                      "} at pos "s + std::to_string(cursor) + " (should be one of
+        //                                      {0123456789{[\"tfn})."s);
+        // }
+        // Seems to be even a little slower
+
         if (c == '{') {
+            // UTL_PROFILER_LABELED("Objects")
             return this->parse_object(cursor);
         } else if (c == '[') {
+            // UTL_PROFILER_LABELED("Arrays")
             return this->parse_array(cursor);
         } else if (c == '"') {
+            // UTL_PROFILER_LABELED("Strings")
             return this->parse_string(cursor);
-        } else if (('0' < c && c < '9') || (c == '-')) {
+        } else if (('0' <= c && c <= '9') || (c == '-')) {
+            // UTL_PROFILER_LABELED("Numbers")
             return this->parse_number(cursor);
         } else if (c == 't') {
+            // UTL_PROFILER_LABELED("Trues")
             return this->parse_true(cursor);
         } else if (c == 'f') {
+            // UTL_PROFILER_LABELED("Falses")
             return this->parse_false(cursor);
         } else if (c == 'n') {
+            // UTL_PROFILER_LABELED("Nulls")
             return this->parse_null(cursor);
         }
         throw std::runtime_error("JSON node selector encountered unexpected marker symbol {"s + this->chars[cursor] +
@@ -440,7 +570,7 @@ struct _parser {
         // Object pair parser assumes it is starting at a '"'
 
         // Parse pair key
-        std::string key;
+        std::string key; // allocating a string here is fine since we will std::move() into a map key
         std::tie(cursor, key) = this->parse_string(cursor); // may point 'this->current_node' to a new node
 
         // Handle stuff inbetween
@@ -455,7 +585,7 @@ struct _parser {
         Node value;
         std::tie(cursor, value) = this->parse_node(cursor);
 
-        parent[key] = std::move(value);
+        parent.emplace(std::pair{std::move(key), std::move(value)});
 
         return cursor;
     }
@@ -474,7 +604,7 @@ struct _parser {
             cursor = this->parse_object_pair(cursor, object_value);
         } else {
             ++cursor; // move past the closing brace '}'
-            return {cursor, object_value};
+            return {cursor, std::move(object_value)};
         }
 
         // Handle other pairs
@@ -501,7 +631,7 @@ struct _parser {
                 cursor = this->parse_object_pair(cursor, object_value);
             } else if (c == '}') {
                 ++cursor; // move past the closing brace '}'
-                return {cursor, object_value};
+                return {cursor, std::move(object_value)};
             }
         }
 
@@ -536,7 +666,7 @@ struct _parser {
             cursor = this->parse_array_element(cursor, array_value);
         } else {
             ++cursor; // move past the closing bracket ']'
-            return {cursor, array_value};
+            return {cursor, std::move(array_value)};
         }
 
         // Handle other pairs
@@ -551,7 +681,7 @@ struct _parser {
                 cursor = this->parse_array_element(cursor, array_value);
             } else if (c == ']') {
                 ++cursor; // move past the closing bracket ']'
-                return {cursor, array_value};
+                return {cursor, std::move(array_value)};
             }
         }
 
@@ -579,15 +709,22 @@ struct _parser {
 
                 const char escaped_char = this->chars[cursor];
 
-                // Some character are added as is
-                if (escaped_char == '"' || escaped_char == '\\' || escaped_char == '/') string_value += escaped_char;
-                // Some are interpreted based specifically on the 2-character escape
-                else if (escaped_char == 'b') string_value += '/';
-                else if (escaped_char == 'b') string_value += '\b';
-                else if (escaped_char == 'f') string_value += '\f';
-                else if (escaped_char == 'n') string_value += '\n';
-                else if (escaped_char == 'r') string_value += '\r';
-                else if (escaped_char == 't') string_value += '\t';
+                // // Some character are added as is
+                // if (escaped_char == '"' || escaped_char == '\\' || escaped_char == '/') string_value += escaped_char;
+                // // Some are interpreted based specifically on the 2-character escape
+                // else if (escaped_char == 'b') string_value += '\b';
+                // else if (escaped_char == 'f') string_value += '\f';
+                // else if (escaped_char == 'n') string_value += '\n';
+                // else if (escaped_char == 'r') string_value += '\r';
+                // else if (escaped_char == 't') string_value += '\t';
+
+                if (const char replacement_char = _lookup_parsed_escaped_chars[escaped_char])
+                    string_value += replacement_char;
+                // Escaped unicode codepoints (=> another 4 escaped characters after the current)
+                else if (escaped_char == 'u')
+                    throw std::runtime_error(
+                        "JSON string node encountered unicode hex value while parsing an escape sequence at pos "s +
+                        std::to_string(cursor) + ", which is not currently supported."s);
                 else
                     throw std::runtime_error("JSON string node encountered unexpected character {"s + escaped_char +
                                              "} while parsing an escape sequence at pos "s + std::to_string(cursor) +
@@ -705,18 +842,6 @@ struct _parser {
 // --- JSON Serializing ---
 // ========================
 
-constexpr int _float_serializing_buffer_size = 4 + std::numeric_limits<Number>::max_digits10 +
-                                               std::max(2, _log_10_ceil(std::numeric_limits<Number>::max_exponent10));
-// should be the smallest buffer size to account for all possible 'std::to_chars()' outputs,
-// see [https://stackoverflow.com/questions/68472720/stdto-chars-minimal-floating-point-buffer-size]
-
-struct _json_serializer {
-    std::string&                                     chars;
-    std::array<char, _float_serializing_buffer_size> float_serializing_buffer;
-    std::string                                      single_indent_level;
-    std::string                                      indent;
-};
-
 template <bool prettify>
 inline void _serialize_json_recursion(const Node& node, std::string& chars, unsigned int indent_level = 0,
                                       bool skip_first_indent = false) {
@@ -762,20 +887,26 @@ inline void _serialize_json_recursion(const Node& node, std::string& chars, unsi
     if (auto* ptr = node.get_if<Object>()) {
         const auto& object_value = *ptr;
 
+        // Skip all logic for empty objects
+        if (object_value.empty()) {
+            chars += "{}";
+            return;
+        }
+
         chars += '{';
         if constexpr (prettify) chars += '\n';
 
-        for (auto it = object_value.cbegin(); it != object_value.cend(); ++it) {
+        for (auto it = object_value.cbegin(); it != object_value.cend();) {
             if constexpr (prettify) chars.append(indent_size + indent_level_size, ' ');
             // Key
-            chars += "\"";
+            chars += '"';
             chars += it->first;
             if constexpr (prettify) chars += "\": ";
             else chars += "\":";
             // Value
             _serialize_json_recursion<prettify>(it->second, chars, indent_level + 1, true);
             // Comma
-            if (std::next(it) != object_value.cend()) chars += ','; // prevents trailing comma
+            if (++it != object_value.cend()) chars += ','; // prevents trailing comma
             if constexpr (prettify) chars += '\n';
         }
 
@@ -786,14 +917,20 @@ inline void _serialize_json_recursion(const Node& node, std::string& chars, unsi
     else if (auto* ptr = node.get_if<Array>()) {
         const auto& array_value = *ptr;
 
+        // Skip all logic for empty arrays
+        if (array_value.empty()) {
+            chars += "[]";
+            return;
+        }
+
         chars += '[';
         if constexpr (prettify) chars += '\n';
 
-        for (auto it = array_value.cbegin(); it != array_value.cend(); ++it) {
+        for (auto it = array_value.cbegin(); it != array_value.cend();) {
             // Node
             _serialize_json_recursion<prettify>(*it, chars, indent_level + 1);
             // Comma
-            if (std::next(it) != array_value.cend()) chars += ','; // prevents trailing comma
+            if (++it != array_value.cend()) chars += ','; // prevents trailing comma
             if constexpr (prettify) chars += '\n';
         }
         if constexpr (prettify) chars.append(indent_size, ' ');
@@ -804,7 +941,25 @@ inline void _serialize_json_recursion(const Node& node, std::string& chars, unsi
         const auto& string_value = *ptr;
 
         chars += '"';
-        chars += string_value;
+
+        // Serialize string while handling escape sequences.
+        /// Without escape sequences we could just do 'chars += string_value'.
+        //
+        // Since appending individual characters is ~twice as slow as appending the whole string, we use a
+        // "buffered" way of appending, appending whole segments up to the currently escaped char.
+        // Strings with no escaped chars get appended in a single call.
+        //
+        std::size_t segment_start = 0;
+        for (std::size_t i = 0; i < string_value.size(); ++i) {
+            if (const char escaped_char_replacement = _lookup_serialized_escaped_chars[string_value[i]]) {
+                chars.append(string_value.data() + segment_start, i - segment_start);
+                chars += '\\';
+                chars += escaped_char_replacement;
+                segment_start = i + 1; // skip over the "actual" technical character in the string
+            }
+        }
+        chars.append(string_value.data() + segment_start, string_value.size() - segment_start);
+
         chars += '"';
     }
     // Number
@@ -831,10 +986,10 @@ inline void _serialize_json_recursion(const Node& node, std::string& chars, unsi
         // Save NaN/Inf cases as strings, since JSON spec doesn't include IEEE 754.
         // (!) May result in non-homogenous arrays like [ 1.0, "inf" , 3.0, 4.0, "nan" ]
         if (std::isfinite(number_value)) {
-            chars += number_string;
+            chars.append(buffer.data(), number_end_ptr - buffer.data());
         } else {
             chars += '"';
-            chars += number_string;
+            chars.append(buffer.data(), number_end_ptr - buffer.data());
             chars += '"';
         }
     }
@@ -849,40 +1004,46 @@ inline void _serialize_json_recursion(const Node& node, std::string& chars, unsi
     }
 }
 
-inline void _serialize_json_to_buffer(std::string& chars, const Node& node, bool prettify) {
-    if (prettify) _serialize_json_recursion<true>(node, chars);
+inline void _serialize_json_to_buffer(std::string& chars, const Node& node, Format format) {
+    if (format == Format::PRETTY) _serialize_json_recursion<true>(node, chars);
     else _serialize_json_recursion<false>(node, chars);
 }
-
 
 // ==========================================
 // --- Parsing / Serializing API wrappers ---
 // ==========================================
 
-inline Node import_string(const std::string& chars) {
-    _parser           parser(chars);
+inline Node import_string(const std::string& buffer) {
+    _parser           parser(buffer);
     const std::size_t json_start = parser.skip_nonsignificant_whitespace(0); // skip leading whitespace
     auto result_node = parser.parse_node(json_start).second; // starts parsing recursively from the root node
 
     return result_node;
 }
 
-inline void export_string(std::string& chars, const Node& node, bool prettify = true) {
-    _serialize_json_to_buffer(chars, node, prettify);
+inline void export_string(std::string& buffer, const Node& node, Format format = Format::PRETTY) {
+    _serialize_json_to_buffer(buffer, node, format);
     // NOTE: Allocating here kinda defeats the whole purpose of saving to a pre-existing buffer,
     // but for now I'll keep it for the sake of having a more uniform API
 }
 
-inline Node import_file(const std::string& path) {
-    const std::string chars = _read_file_to_string(path);
+inline Node import_file(const std::string& filepath) {
+    const std::string chars = _read_file_to_string(filepath);
 
     return import_string(chars);
 }
 
-inline void export_file(const std::string& path, const Node& node) {
-    std::ofstream file(path);
-    file << node.to_string();
+inline void export_file(const std::string& filepath, const Node& node, Format format = Format::PRETTY) {
+    auto chars = node.to_string(format);
+    std::ofstream(filepath).write(chars.data(), chars.size());
+    // a little faster than doing 'std::ofstream(path) << node.to_string(format)'
 }
+
+namespace literals {
+inline Node operator""_utl_json(const char* c_str, std::size_t c_str_size) {
+    return import_string(std::string(c_str, c_str_size));
+}
+} // namespace literals
 
 } // namespace utl::json
 

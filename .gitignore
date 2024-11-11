@@ -27,6 +27,7 @@
 .cache/
 build/
 temp/
+snippets/
 
 # Ignore benhmarks until they are properly implemented
 benchmarks/
