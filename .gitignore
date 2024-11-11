@@ -3,8 +3,9 @@
 
 # Whitelist directories
 !*/
-# Whitelist itself
+# Whitelist git config
 !.gitignore
+!.gitattributes
 # Whitelist toolchain configuration files
 !.clang-format
 !.clang-tidy

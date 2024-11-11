@@ -1,0 +1,6 @@
+# Exclude dependencies from GitHub 'Languages' repository statistic
+thirdparty/** linguist-vendored
+
+# Source diff format
+*.cpp   text diff=cpp
+*.hpp   text diff=cpp
