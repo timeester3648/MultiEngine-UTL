@@ -75,6 +75,10 @@ While the library itself consists of a single header, it was built and tested us
 | - | - | - | - |
 | [doctest](https://github.com/doctest/doctest) | **v.2.4.11** | Unit testing | ✔ |
 | [nanobench](https://github.com/martinus/nanobench) | **v.4.3.11** | Benchmarking | ✔ |
+| [nlohmann json](https://github.com/nlohmann/json) | **v.3.11.3** | Benchmark comparison | ✔ |
+| [PicoJSON](https://github.com/kazuho/picojson) | **v.1.3.0** | Benchmark comparison | ✔ |
+| [RapidJSON](https://github.com/Tencent/rapidjson) | **v.1.1.0** | Benchmark comparison | ✔ |
+
 
 ## Work in progress
 

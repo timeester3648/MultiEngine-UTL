@@ -35,7 +35,6 @@
 
 // NOTE: DOCS
 // TEMP:
-// #include "../source/MACRO_PROFILER.hpp"
 
 // ____________________ IMPLEMENTATION ____________________
 
@@ -237,9 +236,9 @@ public:
         const auto  it     = object.find(key);
         return it != object.end();
     }
-    
-    template<class T>
-    [[nodiscard]] T& value_or(std::string_view key, const T &else_value) {
+
+    template <class T>
+    [[nodiscard]] T& value_or(std::string_view key, const T& else_value) {
         const auto& object = this->get_object();
         const auto  it     = object.find(key);
         if (it != object.end()) return it->second.get<T>();
@@ -386,8 +385,8 @@ using Null   = Node::null_type;
 // --- Lookup Tables ---
 // =====================
 
-constexpr std::size_t _number_of_char_values =
-    256; // always true since 'sizeof(char) == 1' is guaranteed by the standard
+constexpr std::size_t _number_of_char_values = 256;
+// always true since 'sizeof(char) == 1' is guaranteed by the standard
 
 // Lookup table used to check if number should be escaped and get a replacement char on at the same time.
 // This allows us to replace multiple checks and if's with a single array lookup that.
@@ -417,47 +416,9 @@ constexpr std::array<char, _number_of_char_values> _lookup_serialized_escaped_ch
     return res;
 }();
 
-// Lookup table used to select appropriate node parsing methods based on the first character.
-// This allows us to replace an if-else chain with a ('0' < c && c < '9') check with a single
-// array lookup that selects an option in switch-case. Writing switch-case from the get go is
-// also an option, but it would require either code duplication or fallthrough on '0', ..., '0',
-// '-' and also 't', 'f' which seems suboptimal.
-//
-enum class _json_node_selector_branch {
-    NONE = 0,
-    OBJECT_BRANCH,
-    ARRAY_BRANCH,
-    STRING_BRANCH,
-    NUMBER_BRANCH,
-    BOOL_TRUE_BRANCH,
-    BOOL_FALSE_BRANCH,
-    NULL_BRANCH
-};
-
-constexpr std::array<_json_node_selector_branch, _number_of_char_values> _lookup_node_selector_branch = [] {
-    std::array<_json_node_selector_branch, _number_of_char_values> res{};
-    // default-initialized enums get initialized to 'static_cast<EnumName>(0)',
-    // this is why we need 'NONE = 0' enum member for cases that aren't handled by the selector
-    res['{'] = _json_node_selector_branch::OBJECT_BRANCH;
-    res['['] = _json_node_selector_branch::ARRAY_BRANCH;
-    res['"'] = _json_node_selector_branch::STRING_BRANCH;
-    res['0'] = _json_node_selector_branch::NUMBER_BRANCH;
-    res['1'] = _json_node_selector_branch::NUMBER_BRANCH;
-    res['2'] = _json_node_selector_branch::NUMBER_BRANCH;
-    res['3'] = _json_node_selector_branch::NUMBER_BRANCH;
-    res['4'] = _json_node_selector_branch::NUMBER_BRANCH;
-    res['5'] = _json_node_selector_branch::NUMBER_BRANCH;
-    res['6'] = _json_node_selector_branch::NUMBER_BRANCH;
-    res['7'] = _json_node_selector_branch::NUMBER_BRANCH;
-    res['8'] = _json_node_selector_branch::NUMBER_BRANCH;
-    res['9'] = _json_node_selector_branch::NUMBER_BRANCH;
-    res['-'] = _json_node_selector_branch::NUMBER_BRANCH;
-    res['t'] = _json_node_selector_branch::BOOL_TRUE_BRANCH;
-    res['f'] = _json_node_selector_branch::BOOL_FALSE_BRANCH;
-    res['n'] = _json_node_selector_branch::NULL_BRANCH;
-    return res;
-}();
-
+// Lookup table used to determine "insignificant whitespace" characters when
+// skipping whitespace during parser. Seems to be either similar or marginally
+// faster in performance than a regular condition check.
 constexpr std::array<bool, _number_of_char_values> _lookup_whitespace_chars = [] {
     std::array<bool, _number_of_char_values> res{};
     // "Insignificant whitespace" according to the JSON spec:
@@ -522,22 +483,6 @@ struct _parser {
         const char c = this->chars[cursor];
 
         // Assuming valid JSON, we can determine node type based on a single first character
-        // switch (_lookup_node_selector_branch[c]) {
-        // case _json_node_selector_branch::OBJECT_BRANCH: return this->parse_object(cursor);
-        // case _json_node_selector_branch::ARRAY_BRANCH: return this->parse_array(cursor);
-        // case _json_node_selector_branch::STRING_BRANCH: return this->parse_string(cursor);
-        // case _json_node_selector_branch::NUMBER_BRANCH: return this->parse_number(cursor);
-        // case _json_node_selector_branch::BOOL_TRUE_BRANCH: return this->parse_true(cursor);
-        // case _json_node_selector_branch::BOOL_FALSE_BRANCH: return this->parse_false(cursor);
-        // case _json_node_selector_branch::NULL_BRANCH: return this->parse_null(cursor);
-        // default:
-        //     throw std::runtime_error("JSON node selector encountered unexpected marker symbol {"s +
-        //     this->chars[cursor] +
-        //                                      "} at pos "s + std::to_string(cursor) + " (should be one of
-        //                                      {0123456789{[\"tfn})."s);
-        // }
-        // Seems to be even a little slower
-
         if (c == '{') {
             // UTL_PROFILER_LABELED("Objects")
             return this->parse_object(cursor);
@@ -562,6 +507,8 @@ struct _parser {
         }
         throw std::runtime_error("JSON node selector encountered unexpected marker symbol {"s + this->chars[cursor] +
                                  "} at pos "s + std::to_string(cursor) + " (should be one of {0123456789{[\"tfn})."s);
+
+        // Note: using a lookup table instead of an 'if' chain doesn't seem to offer any performance benefits here
     }
 
     std::size_t parse_object_pair(std::size_t cursor, Object& parent) {
@@ -584,7 +531,7 @@ struct _parser {
         // Parse pair value
         Node value;
         std::tie(cursor, value) = this->parse_node(cursor);
-
+        
         parent.emplace(std::pair{std::move(key), std::move(value)});
 
         return cursor;
@@ -696,35 +643,42 @@ struct _parser {
 
         ++cursor; // move past the opening quote '"'
 
-        while (cursor < this->chars.size()) {
+        // Serialize string while handling escape sequences.
+        //
+        // Doing 'string_value += c' for every char is ~50-60% slower than appending whole string at once,
+        // which is why we 'buffer' appends by keeping track of 'segment_start' and 'cursor', and appending
+        // whole chunks of the buffer to 'string_value' when we encounter an escape sequence or end of the string.
+        //
+        for (std::size_t segment_start = cursor; cursor < this->chars.size(); ++cursor) {
             const char c = this->chars[cursor];
 
             // Handle escape sequences inside the string
             if (c == '\\') {
                 ++cursor; // move past the backslash '\'
-                if (cursor >= this->chars.size())
-                    throw std::runtime_error(
-                        "JSON string node reached the end of buffer while parsing an escape sequence at pos "s +
-                        std::to_string(cursor) + "."s);
 
                 const char escaped_char = this->chars[cursor];
 
-                // // Some character are added as is
-                // if (escaped_char == '"' || escaped_char == '\\' || escaped_char == '/') string_value += escaped_char;
-                // // Some are interpreted based specifically on the 2-character escape
-                // else if (escaped_char == 'b') string_value += '\b';
-                // else if (escaped_char == 'f') string_value += '\f';
-                // else if (escaped_char == 'n') string_value += '\n';
-                // else if (escaped_char == 'r') string_value += '\r';
-                // else if (escaped_char == 't') string_value += '\t';
+                // 2-character escape sequences
+                if (const char replacement_char = _lookup_parsed_escaped_chars[escaped_char]) {
+                    if (cursor >= this->chars.size())
+                        throw std::runtime_error("JSON string node reached the end of buffer while"s +
+                                                 "parsing a 2-character escape sequence at pos "s +
+                                                 std::to_string(cursor) + "."s);
 
-                if (const char replacement_char = _lookup_parsed_escaped_chars[escaped_char])
+                    string_value.append(this->chars.data() + segment_start, cursor - segment_start - 1);
                     string_value += replacement_char;
-                // Escaped unicode codepoints (=> another 4 escaped characters after the current)
+                }
+                // 5-character escape sequences (escaped unicode HEX codepoints)
                 else if (escaped_char == 'u')
-                    throw std::runtime_error(
-                        "JSON string node encountered unicode hex value while parsing an escape sequence at pos "s +
-                        std::to_string(cursor) + ", which is not currently supported."s);
+                    if (cursor >= this->chars.size() + 4)
+                        throw std::runtime_error("JSON string node reached the end of buffer while"s +
+                                                 "parsing a 5-character escape sequence at pos "s +
+                                                 std::to_string(cursor) + "."s);
+                    // TODO:
+                    else
+                        throw std::runtime_error(
+                            "JSON string node encountered unicode hex value while parsing an escape sequence at pos "s +
+                            std::to_string(cursor) + ", which is not currently supported."s);
                 else
                     throw std::runtime_error("JSON string node encountered unexpected character {"s + escaped_char +
                                              "} while parsing an escape sequence at pos "s + std::to_string(cursor) +
@@ -733,19 +687,18 @@ struct _parser {
                 // This covers all non-hex escape sequences according to ECMA-404 specification
                 // [https://ecma-international.org/wp-content/uploads/ECMA-404.pdf] (page 4)
 
-                ++cursor; // move past the escaped character
+                // moving past the escaped character will be done by the loop '++cursor'
+                segment_start = cursor + 1;
                 continue;
             }
             // NOTE: Hex escape sequences are not supported yet
 
             // Reached the end of the string
             if (c == '"') {
+                string_value.append(this->chars.data() + segment_start, cursor - segment_start);
                 ++cursor; // move past the closing quote '"'
-                return {cursor, string_value};
+                return {cursor, std::move(string_value)};
             }
-
-            string_value += c;
-            ++cursor;
         }
 
         throw std::runtime_error("JSON string node reached the end of buffer while parsing string contents.");
@@ -941,7 +894,7 @@ inline void _serialize_json_recursion(const Node& node, std::string& chars, unsi
         const auto& string_value = *ptr;
 
         chars += '"';
-
+        
         // Serialize string while handling escape sequences.
         /// Without escape sequences we could just do 'chars += string_value'.
         //

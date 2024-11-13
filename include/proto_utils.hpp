@@ -353,23 +353,25 @@ inline void _utl_log_print(std::string_view file, int line, std::string_view fun
 //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+#include <functional>
 #if !defined(UTL_PICK_MODULES) || defined(UTLMACRO_PROFILER)
 #ifndef UTLHEADERGUARD_PROFILER
 #define UTLHEADERGUARD_PROFILER
 
 // _______________________ INCLUDES _______________________
 
+#include <algorithm>   // sort()
 #include <chrono>      // chrono::steady_clock, chrono::duration_cast<>, std::chrono::milliseconds
 #include <cstdlib>     // atexit()
 #include <fstream>     // ofstream
 #include <iomanip>     // setprecision(), setw()
 #include <ios>         // streamsize, fixed,
 #include <iostream>    // cout
-#include <map>         // map<>
 #include <ostream>     // ostream
 #include <sstream>     // ostringstream
 #include <string>      // string
 #include <string_view> // string_view
+#include <vector>      // vector<>
 
 // ____________________ DEVELOPER DOCS ____________________
 
@@ -395,55 +397,57 @@ inline void _utl_log_print(std::string_view file, int line, std::string_view fun
 
 // ____________________ IMPLEMENTATION ____________________
 
+namespace utl::profiler {
+
 // ==========================
 // --- Profiler Internals ---
 // ==========================
 
-inline std::string _utl_profiler_reroute_to_filepath = "";
-
-#define UTL_PROFILER_REROUTE_TO_FILE(filepath_) _utl_profiler_reroute_to_filepath = filepath_;
-
-using _utl_profiler_clock         = std::chrono::steady_clock;
-using _utl_profiler_time_duration = _utl_profiler_clock::duration;
-using _utl_profiler_time_point    = _utl_profiler_clock::time_point;
-
-inline const _utl_profiler_time_point _utl_profiler_program_init_time_point = _utl_profiler_clock::now();
-// automatically gets program launch time so we can compute total runtime later
-
-inline std::string _utl_profiler_format_call_site(std::string_view file, int line, std::string_view func) {
+inline std::string _format_call_site(std::string_view file, int line, std::string_view func) {
     const std::string_view filename = file.substr(file.find_last_of("/\\") + 1);
 
-    std::ostringstream ss;
-    ss << filename << ":" << line << ", " << func << "()";
-    return ss.str();
+    return (std::ostringstream() << filename << ":" << line << ", " << func << "()").str();
 }
 
-struct _utl_profiler_record {
-    std::string                 label;
-    _utl_profiler_time_duration duration;
+using _clock      = std::chrono::steady_clock;
+using _duration   = _clock::duration;
+using _time_point = _clock::time_point;
+
+inline const _time_point _program_entry_time_point = _clock::now();
+
+struct _record {
+    const char* file;
+    int         line;
+    const char* func;
+    const char* label;
+    _duration   accumulated_time;
 };
 
-inline void _utl_profiler_atexit(); // predeclare, it needs '_utl_profiler' but used by '_utl_profiler'
+inline void _utl_profiler_atexit(); // predeclaration, implementation has circular dependency with 'RecordManager'
 
-class _utl_profiler {
+// =========================
+// --- Profiler Classess ---
+// =========================
+
+class RecordManager {
 private:
-    std::string              call_site;
-    std::string              label;
-    _utl_profiler_time_point construction_time_point;
+    _record data;
 
 public:
-    inline static std::map<std::string, _utl_profiler_record>
-        records; // std::map because we do WANT sorting by call-site name
+    inline static std::vector<_record> records;
+    bool                               busy;
 
-    operator bool() const { return true; } // needed so we can use 'if (auto x = _utl_profiler())' construct
+    void add_time(_duration time) noexcept { this->data.accumulated_time += time; }
 
-public:
-    _utl_profiler(std::string_view file, int line, std::string_view func, std::string_view label) {
-        this->call_site               = _utl_profiler_format_call_site(file, line, func);
-        this->label                   = label;
-        this->construction_time_point = _utl_profiler_clock::now();
+    RecordManager() = delete;
 
-        // If profiler ever gets called => registed results output at std::exit()
+    RecordManager(const char* file, int line, const char* func, const char* label)
+        : data({file, line, func, label, _duration(0)}), busy(false) {
+        // 'file', 'func', 'label' are guaranteed to be string literals, since we want to
+        // have as little overhead as possible during runtime, we can just save raw pointers
+        // and convert them to nicer types like 'std::string_view' later in the formatting stage
+
+        // Profiler ever gets called => register result output at std::exit()
         static bool first_call = true;
         if (first_call) {
             std::atexit(_utl_profiler_atexit);
@@ -451,45 +455,51 @@ public:
         }
     }
 
-    ~_utl_profiler() {
-        const auto it                = _utl_profiler::records.find(this->call_site);
-        const auto profiled_duration = _utl_profiler_clock::now() - this->construction_time_point;
+    ~RecordManager() { records.emplace_back(this->data); }
+};
 
-        // Record with the same callsite exists => accumulate duration
-        if (it != _utl_profiler::records.end()) {
-            (*it).second.duration += profiled_duration;
+class ScopeTimer {
+private:
+    _time_point    start;
+    RecordManager* record_manager;
+    // we could use 'std::optional<std::reference_wrapper<RecordManager>>',
+    // but that would inctroduce more dependencies for no real reason
+
+public:
+    constexpr operator bool() const noexcept { return true; }
+    // we needed so we can use 'if constexpr (const auto x = ScopeTimer())' construct
+
+    ScopeTimer(RecordManager* manager) {
+        // Busy manager => we're in recursion, don't count time
+        if (manager->busy) {
+            this->record_manager = nullptr;
+            return;
         }
-        // Otherwise => add new record with duration
-        else {
-            _utl_profiler::records.insert({
-                std::string(this->call_site), _utl_profiler_record{this->label, profiled_duration}
-            });
-        }
+        this->record_manager       = manager;
+        this->record_manager->busy = true;
+        this->start                = _clock::now();
+    }
+
+    ~ScopeTimer() {
+        if (!this->record_manager) return;
+        this->record_manager->add_time(_clock::now() - this->start);
+        this->record_manager->busy = false;
     }
 };
 
-// =================================
-// --- Profiler Table Formatting ---
-// =================================
+// ==================================
+// --- Profiler Exit & Formatting ---
+// ==================================
 
 inline void _utl_profiler_atexit() {
-    namespace chr = std::chrono;
 
-    const auto total_runtime = _utl_profiler_clock::now() - _utl_profiler_program_init_time_point;
-    // const auto total_runtime = std::chrono::duration_cast<std::chrono::milliseconds>();
+    const auto total_runtime = _clock::now() - _program_entry_time_point;
 
-    // Choose whether to print or reroute output to file
     std::ostream* ostr = &std::cout;
-    std::ofstream output_file;
-
-    if (!_utl_profiler_reroute_to_filepath.empty()) {
-        output_file.open(_utl_profiler_reroute_to_filepath);
-        ostr = &output_file;
-    }
 
     // Convenience functions
-    const auto duration_to_sec = [](_utl_profiler_time_duration duration) -> double {
-        return chr::duration_cast<chr::nanoseconds>(duration).count() / 1e9;
+    const auto duration_to_sec = [](_duration duration) -> double {
+        return std::chrono::duration_cast<std::chrono::nanoseconds>(duration).count() / 1e9;
     };
 
     const auto duration_percentage = [&](double duration_sec) -> double {
@@ -516,6 +526,10 @@ inline void _utl_profiler_atexit() {
     constexpr auto             percentage_format    = std::fixed;
     constexpr std::string_view percentage_postfix   = "%";
 
+    // Sort records by their accumulated time
+    std::sort(RecordManager::records.begin(), RecordManager::records.end(),
+              [](const _record& l, const _record& r) { return l.accumulated_time < r.accumulated_time; });
+
     // Collect max length of each column (for proper formatting)
     constexpr std::string_view column_name_call_site  = "Call Site";
     constexpr std::string_view column_name_label      = "Label";
@@ -527,10 +541,10 @@ inline void _utl_profiler_atexit() {
     std::streamsize max_length_duration   = column_name_duration.size();
     std::streamsize max_length_percentage = column_name_percentage.size();
 
-    for (const auto& record : _utl_profiler::records) {
-        const auto&  call_site    = record.first;
-        const auto&  label        = record.second.label;
-        const double duration_sec = duration_to_sec(record.second.duration);
+    for (const auto& record : RecordManager::records) {
+        const std::string call_site    = _format_call_site(record.file, record.line, record.func);
+        const std::string label        = record.label;
+        const double      duration_sec = duration_to_sec(record.accumulated_time);
 
         // 'Call Site' column
         const std::streamsize length_call_site = call_site.size();
@@ -587,13 +601,13 @@ inline void _utl_profiler_atexit() {
 
 
     // Print formatted table contents
-    for (const auto& record : _utl_profiler::records) {
-        const auto&  call_site    = record.first;
-        const auto&  label        = record.second.label;
-        const double duration_sec = duration_to_sec(record.second.duration);
-        const double percentage   = duration_percentage(duration_sec);
+    for (const auto& record : RecordManager::records) {
+        const std::string call_site    = _format_call_site(record.file, record.line, record.func);
+        const std::string label        = record.label;
+        const double      duration_sec = duration_to_sec(record.accumulated_time);
+        const double      percentage   = duration_percentage(duration_sec);
 
-        // Joint floats with their postfixes into a single string so they are properly handled by std::setw()
+        // Join floats with their postfixes into a single string so they are properly handled by std::setw()
         // (which only affects the first value leading to a table misaligned by postfix size)
         std::ostringstream ss_duration;
         ss_duration << std::setprecision(duration_precision) << duration_format << duration_sec << duration_postfix;
@@ -614,7 +628,7 @@ inline void _utl_profiler_atexit() {
 
 #define _utl_profiler_concat_tokens(a, b) a##b
 #define _utl_profiler_concat_tokens_wrapper(a, b) _utl_profiler_concat_tokens(a, b)
-#define _utl_profiler_add_line_number_to_variable_name(varname_) _utl_profiler_concat_tokens_wrapper(varname_, __LINE__)
+#define _utl_profiler_add_uuid(varname_) _utl_profiler_concat_tokens_wrapper(varname_, __LINE__)
 // This macro creates token 'varname_##__LINE__' from 'varname_'.
 //
 // The reason we can't just write it as is, is that function-macros only expands their macro-arguments
@@ -627,18 +641,47 @@ inline void _utl_profiler_atexit() {
 // '__LINE__' gets expanded in '_utl_profiler_concat_tokens_wrapper()'
 // and then tokenized and concatenated in '_utl_profiler_concat_tokens()'
 
-#define UTL_PROFILER_LABELED(label_)                                                                                   \
-    if (auto _utl_profiler_add_line_number_to_variable_name(profiler_) =                                               \
-            _utl_profiler(__FILE__, __LINE__, __func__, label_))
-// We add line number to profiler variable name to prevent nested profiler scopes from shadowing
-// each other's 'profiler_' variable. While such shadowing has no effect on an actual behavior,
-// it does cause a warning from most compilers.
+#define UTL_PROFILER(label_)                                                                                           \
+    constexpr bool _utl_profiler_add_uuid(utl_profiler_macro_guard_) = true;                                           \
+                                                                                                                       \
+    static_assert(_utl_profiler_add_uuid(utl_profiler_macro_guard_), "UTL_PROFILE is a multi-line macro.");            \
+                                                                                                                       \
+    static utl::profiler::RecordManager _utl_profiler_add_uuid(utl_profiler_record_manager_)(__FILE__, __LINE__,       \
+                                                                                             __func__, label_);        \
+                                                                                                                       \
+    if constexpr (const utl::profiler::ScopeTimer _utl_profiler_add_uuid(utl_profiler_scope_timer_){                   \
+                      &_utl_profiler_add_uuid(utl_profiler_record_manager_)})
+// Note 1:
 //
-// Such solution isn't perfect (2 scopes can be nested on the same line in deffirent files), but it
-// is good enough and there is no way to get a better 'unique varname' without resorting to
-// specific compiler extensions.
+//    constexpr bool ... = true;
+//    static_assert(..., "UTL_PROFILE is a multi-line macro.");
+//
+// is reponsible for preventing accidental errors caused by using macro like this:
+//
+//    for (...) UTL_PROFILER("") function(); // will only loop the first line of the multi-line macro
+//
+// If someone tries to write it like this, the constexpr bool variable will be "pulled" into a narrower scope,
+// causing 'static_assert()' to fail due to using undeclared identifier. Since the line with undeclared identifier
+// gets expanded, user will be able to see the assert message.
+//
+// Note 2:
+//
+// By separating "record management" into a static variable and "actual timing" into a non-static one,
+// we can avoid additional overhead from having to locate the record, corresponding to the profiled source location.
+// (an operation that require a non-trivial vector/map lookup with string comparisons)
+//
+// Static variable initializes its record once and timer does the bare minimum of work - 2 calls to 'now()' to get
+// timing, one addition to accumulated time and a check for recursion (so it can skip time appropriately).
+//
+//  Note 3:
+//
+// _utl_profiler_add_uuid(...) ensures no identifier collisions when several profilers exist in a single scope.
+// Since in this context 'uuid' is a line number, the only case in which ids can collide is when multiple profilers
+// are declated on the same line, which I assume no sane person would do. And even if they would, that would simply
+// lead to a compiler error. Can't really do better than that without resorting to non-standard macros like
+// '__COUNTER__' for 'uuid' creation
 
-#define UTL_PROFILER UTL_PROFILER_LABELED("<NONE>")
+} // namespace utl::profiler
 
 #endif
 #endif // macro-module UTL_PROFILER
@@ -685,7 +728,6 @@ inline void _utl_profiler_atexit() {
 
 // NOTE: DOCS
 // TEMP:
-// #include "../source/MACRO_PROFILER.hpp"
 
 // ____________________ IMPLEMENTATION ____________________
 
@@ -887,9 +929,9 @@ public:
         const auto  it     = object.find(key);
         return it != object.end();
     }
-    
-    template<class T>
-    [[nodiscard]] T& value_or(std::string_view key, const T &else_value) {
+
+    template <class T>
+    [[nodiscard]] T& value_or(std::string_view key, const T& else_value) {
         const auto& object = this->get_object();
         const auto  it     = object.find(key);
         if (it != object.end()) return it->second.get<T>();
@@ -1032,14 +1074,12 @@ using Number = Node::number_type;
 using Bool   = Node::bool_type;
 using Null   = Node::null_type;
 
-using empty = class{};
-
 // =====================
 // --- Lookup Tables ---
 // =====================
 
-constexpr std::size_t _number_of_char_values =
-    256; // always true since 'sizeof(char) == 1' is guaranteed by the standard
+constexpr std::size_t _number_of_char_values = 256;
+// always true since 'sizeof(char) == 1' is guaranteed by the standard
 
 // Lookup table used to check if number should be escaped and get a replacement char on at the same time.
 // This allows us to replace multiple checks and if's with a single array lookup that.
@@ -1069,47 +1109,9 @@ constexpr std::array<char, _number_of_char_values> _lookup_serialized_escaped_ch
     return res;
 }();
 
-// Lookup table used to select appropriate node parsing methods based on the first character.
-// This allows us to replace an if-else chain with a ('0' < c && c < '9') check with a single
-// array lookup that selects an option in switch-case. Writing switch-case from the get go is
-// also an option, but it would require either code duplication or fallthrough on '0', ..., '0',
-// '-' and also 't', 'f' which seems suboptimal.
-//
-enum class _json_node_selector_branch {
-    NONE = 0,
-    OBJECT_BRANCH,
-    ARRAY_BRANCH,
-    STRING_BRANCH,
-    NUMBER_BRANCH,
-    BOOL_TRUE_BRANCH,
-    BOOL_FALSE_BRANCH,
-    NULL_BRANCH
-};
-
-constexpr std::array<_json_node_selector_branch, _number_of_char_values> _lookup_node_selector_branch = [] {
-    std::array<_json_node_selector_branch, _number_of_char_values> res{};
-    // default-initialized enums get initialized to 'static_cast<EnumName>(0)',
-    // this is why we need 'NONE = 0' enum member for cases that aren't handled by the selector
-    res['{'] = _json_node_selector_branch::OBJECT_BRANCH;
-    res['['] = _json_node_selector_branch::ARRAY_BRANCH;
-    res['"'] = _json_node_selector_branch::STRING_BRANCH;
-    res['0'] = _json_node_selector_branch::NUMBER_BRANCH;
-    res['1'] = _json_node_selector_branch::NUMBER_BRANCH;
-    res['2'] = _json_node_selector_branch::NUMBER_BRANCH;
-    res['3'] = _json_node_selector_branch::NUMBER_BRANCH;
-    res['4'] = _json_node_selector_branch::NUMBER_BRANCH;
-    res['5'] = _json_node_selector_branch::NUMBER_BRANCH;
-    res['6'] = _json_node_selector_branch::NUMBER_BRANCH;
-    res['7'] = _json_node_selector_branch::NUMBER_BRANCH;
-    res['8'] = _json_node_selector_branch::NUMBER_BRANCH;
-    res['9'] = _json_node_selector_branch::NUMBER_BRANCH;
-    res['-'] = _json_node_selector_branch::NUMBER_BRANCH;
-    res['t'] = _json_node_selector_branch::BOOL_TRUE_BRANCH;
-    res['f'] = _json_node_selector_branch::BOOL_FALSE_BRANCH;
-    res['n'] = _json_node_selector_branch::NULL_BRANCH;
-    return res;
-}();
-
+// Lookup table used to determine "insignificant whitespace" characters when
+// skipping whitespace during parser. Seems to be either similar or marginally
+// faster in performance than a regular condition check.
 constexpr std::array<bool, _number_of_char_values> _lookup_whitespace_chars = [] {
     std::array<bool, _number_of_char_values> res{};
     // "Insignificant whitespace" according to the JSON spec:
@@ -1174,22 +1176,6 @@ struct _parser {
         const char c = this->chars[cursor];
 
         // Assuming valid JSON, we can determine node type based on a single first character
-        // switch (_lookup_node_selector_branch[c]) {
-        // case _json_node_selector_branch::OBJECT_BRANCH: return this->parse_object(cursor);
-        // case _json_node_selector_branch::ARRAY_BRANCH: return this->parse_array(cursor);
-        // case _json_node_selector_branch::STRING_BRANCH: return this->parse_string(cursor);
-        // case _json_node_selector_branch::NUMBER_BRANCH: return this->parse_number(cursor);
-        // case _json_node_selector_branch::BOOL_TRUE_BRANCH: return this->parse_true(cursor);
-        // case _json_node_selector_branch::BOOL_FALSE_BRANCH: return this->parse_false(cursor);
-        // case _json_node_selector_branch::NULL_BRANCH: return this->parse_null(cursor);
-        // default:
-        //     throw std::runtime_error("JSON node selector encountered unexpected marker symbol {"s +
-        //     this->chars[cursor] +
-        //                                      "} at pos "s + std::to_string(cursor) + " (should be one of
-        //                                      {0123456789{[\"tfn})."s);
-        // }
-        // Seems to be even a little slower
-
         if (c == '{') {
             // UTL_PROFILER_LABELED("Objects")
             return this->parse_object(cursor);
@@ -1214,6 +1200,8 @@ struct _parser {
         }
         throw std::runtime_error("JSON node selector encountered unexpected marker symbol {"s + this->chars[cursor] +
                                  "} at pos "s + std::to_string(cursor) + " (should be one of {0123456789{[\"tfn})."s);
+
+        // Note: using a lookup table instead of an 'if' chain doesn't seem to offer any performance benefits here
     }
 
     std::size_t parse_object_pair(std::size_t cursor, Object& parent) {
@@ -1236,7 +1224,7 @@ struct _parser {
         // Parse pair value
         Node value;
         std::tie(cursor, value) = this->parse_node(cursor);
-
+        
         parent.emplace(std::pair{std::move(key), std::move(value)});
 
         return cursor;
@@ -1348,35 +1336,42 @@ struct _parser {
 
         ++cursor; // move past the opening quote '"'
 
-        while (cursor < this->chars.size()) {
+        // Serialize string while handling escape sequences.
+        //
+        // Doing 'string_value += c' for every char is ~50-60% slower than appending whole string at once,
+        // which is why we 'buffer' appends by keeping track of 'segment_start' and 'cursor', and appending
+        // whole chunks of the buffer to 'string_value' when we encounter an escape sequence or end of the string.
+        //
+        for (std::size_t segment_start = cursor; cursor < this->chars.size(); ++cursor) {
             const char c = this->chars[cursor];
 
             // Handle escape sequences inside the string
             if (c == '\\') {
                 ++cursor; // move past the backslash '\'
-                if (cursor >= this->chars.size())
-                    throw std::runtime_error(
-                        "JSON string node reached the end of buffer while parsing an escape sequence at pos "s +
-                        std::to_string(cursor) + "."s);
 
                 const char escaped_char = this->chars[cursor];
 
-                // // Some character are added as is
-                // if (escaped_char == '"' || escaped_char == '\\' || escaped_char == '/') string_value += escaped_char;
-                // // Some are interpreted based specifically on the 2-character escape
-                // else if (escaped_char == 'b') string_value += '\b';
-                // else if (escaped_char == 'f') string_value += '\f';
-                // else if (escaped_char == 'n') string_value += '\n';
-                // else if (escaped_char == 'r') string_value += '\r';
-                // else if (escaped_char == 't') string_value += '\t';
+                // 2-character escape sequences
+                if (const char replacement_char = _lookup_parsed_escaped_chars[escaped_char]) {
+                    if (cursor >= this->chars.size())
+                        throw std::runtime_error("JSON string node reached the end of buffer while"s +
+                                                 "parsing a 2-character escape sequence at pos "s +
+                                                 std::to_string(cursor) + "."s);
 
-                if (const char replacement_char = _lookup_parsed_escaped_chars[escaped_char])
+                    string_value.append(this->chars.data() + segment_start, cursor - segment_start - 1);
                     string_value += replacement_char;
-                // Escaped unicode codepoints (=> another 4 escaped characters after the current)
+                }
+                // 5-character escape sequences (escaped unicode HEX codepoints)
                 else if (escaped_char == 'u')
-                    throw std::runtime_error(
-                        "JSON string node encountered unicode hex value while parsing an escape sequence at pos "s +
-                        std::to_string(cursor) + ", which is not currently supported."s);
+                    if (cursor >= this->chars.size() + 4)
+                        throw std::runtime_error("JSON string node reached the end of buffer while"s +
+                                                 "parsing a 5-character escape sequence at pos "s +
+                                                 std::to_string(cursor) + "."s);
+                    // TODO:
+                    else
+                        throw std::runtime_error(
+                            "JSON string node encountered unicode hex value while parsing an escape sequence at pos "s +
+                            std::to_string(cursor) + ", which is not currently supported."s);
                 else
                     throw std::runtime_error("JSON string node encountered unexpected character {"s + escaped_char +
                                              "} while parsing an escape sequence at pos "s + std::to_string(cursor) +
@@ -1385,19 +1380,18 @@ struct _parser {
                 // This covers all non-hex escape sequences according to ECMA-404 specification
                 // [https://ecma-international.org/wp-content/uploads/ECMA-404.pdf] (page 4)
 
-                ++cursor; // move past the escaped character
+                // moving past the escaped character will be done by the loop '++cursor'
+                segment_start = cursor + 1;
                 continue;
             }
             // NOTE: Hex escape sequences are not supported yet
 
             // Reached the end of the string
             if (c == '"') {
+                string_value.append(this->chars.data() + segment_start, cursor - segment_start);
                 ++cursor; // move past the closing quote '"'
-                return {cursor, string_value};
+                return {cursor, std::move(string_value)};
             }
-
-            string_value += c;
-            ++cursor;
         }
 
         throw std::runtime_error("JSON string node reached the end of buffer while parsing string contents.");
@@ -1593,7 +1587,7 @@ inline void _serialize_json_recursion(const Node& node, std::string& chars, unsi
         const auto& string_value = *ptr;
 
         chars += '"';
-
+        
         // Serialize string while handling escape sequences.
         /// Without escape sequences we could just do 'chars += string_value'.
         //
@@ -1665,29 +1659,29 @@ inline void _serialize_json_to_buffer(std::string& chars, const Node& node, Form
 // --- Parsing / Serializing API wrappers ---
 // ==========================================
 
-inline Node import_string(const std::string& chars) {
-    _parser           parser(chars);
+inline Node import_string(const std::string& buffer) {
+    _parser           parser(buffer);
     const std::size_t json_start = parser.skip_nonsignificant_whitespace(0); // skip leading whitespace
     auto result_node = parser.parse_node(json_start).second; // starts parsing recursively from the root node
 
     return result_node;
 }
 
-inline void export_string(std::string& chars, const Node& node, Format format = Format::PRETTY) {
-    _serialize_json_to_buffer(chars, node, format);
+inline void export_string(std::string& buffer, const Node& node, Format format = Format::PRETTY) {
+    _serialize_json_to_buffer(buffer, node, format);
     // NOTE: Allocating here kinda defeats the whole purpose of saving to a pre-existing buffer,
     // but for now I'll keep it for the sake of having a more uniform API
 }
 
-inline Node import_file(const std::string& path) {
-    const std::string chars = _read_file_to_string(path);
+inline Node import_file(const std::string& filepath) {
+    const std::string chars = _read_file_to_string(filepath);
 
     return import_string(chars);
 }
 
-inline void export_file(const std::string& path, const Node& node, Format format = Format::PRETTY) {
+inline void export_file(const std::string& filepath, const Node& node, Format format = Format::PRETTY) {
     auto chars = node.to_string(format);
-    std::ofstream(path).write(chars.data(), chars.size());
+    std::ofstream(filepath).write(chars.data(), chars.size());
     // a little faster than doing 'std::ofstream(path) << node.to_string(format)'
 }
 

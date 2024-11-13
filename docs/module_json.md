@@ -1,4 +1,4 @@
-# utl::config
+# utl::json
 
 [<- back to README.md](https://github.com/DmitriBogdanov/prototyping_utils/tree/master)
 
@@ -12,6 +12,9 @@
 > [!Note]
 > Despite rather competitive performance, considerably faster parsing can be achieved with custom formatters, SIMD and unordered key optimizations (see [simdjson](https://github.com/simdjson/simdjson), [Glaze](https://github.com/stephenberry/glaze) and [yyjson](https://github.com/ibireme/yyjson)), this, however often comes at the expense of user convenience or features (such as missing escape sequence handling in *simdjson* and *yyjson*, *Glaze* has it, but requires [C++20](https://en.cppreference.com/w/cpp/20)).
 
+> [!Tip]
+> Use GitHub's built-in [table of contents](https://github.blog/changelog/2021-04-13-table-of-contents-support-in-markdown-files/) to navigate this page.
+
 ## Feature Support
 
 | Feature | Implementation | Notes |
@@ -24,7 +27,8 @@
 | Escape Sequence Support | ✔ |  |
 | ISO/IEC 10646 Hexadecimal Support | ✘ | Currently in the works |
 | Trait-based Type Conversions | ✔ |  |
-| Compile-time JSON Schema | ✘ | Requires compiler intrinsics or C++26 to implement |
+| Structure Reflection | ✘ | Requires compiler intrinsics or C++26 to implement |
+| Compile-time JSON Schema | ✘ | Outside the project scope |
 | Lazy Node Loading | ✘ | Outside the project scope |
 
 ## Definitions
@@ -118,19 +122,165 @@ void export_file(const std::string& filepath, const Node& node, Format format = 
 
 ## Methods
 
-> ```cpp
-> config::export_json(std::string_view path, const Types... entries);
-> ```
+### `Node` Class
 
-Creates JSON at `path` with given `entries`. Entries can be specified using `config::entry(key, value)`. Corresponding to the JSON standard, `value` can be an **integer**, **float**, **string** or **bool** (or any of the similar types). Arrays and nested arrays are also supported as long as their types are homogenous.
+#### Member types
 
 > ```cpp
-> std::tuple<std::string_view, T> config::entry(std::string_view key, T value);
+> using object_type = std::map<std::string, Node, std::less<>>;
+> using array_type  = std::vector<Node>;
+> using string_type = std::string;
+> using bool_type   = bool;
+> using null_type   = class{};
 > ```
 
-Specifies a config entry.
+Definitions of the types, corresponding to all possible JSON values: objects, arrays, strings, numbers, booleans and null.
 
-Performs type resolution on `value` which helps other functions resolve a proper JSON datatype without being manually specified by user.
+#### Getters
+
+> ```cpp
+> template <class T>       T& get();
+> template <class T> const T& get() const;
+> ```
+
+If JSON node holds the value of a type `T`, returns a reference to the value, otherwise, throws [std::bad_variant_access](https://en.cppreference.com/w/cpp/utility/variant/bad_variant_access).
+
+**Note:** Similar to [std::get](https://en.cppreference.com/w/cpp/utility/variant/get).
+
+> ```cpp
+> object_type& get_object();
+> array_type & get_array();
+> string_type& get_string();
+> number_type& get_number();
+> bool_type  & get_bool();
+> null_type  & get_null();
+> 
+> const object_type& get_object() const;
+> const array_type & get_array()  const;
+> const string_type& get_string() const;
+> const number_type& get_number() const;
+> const bool_type  & get_bool()   const;
+> const null_type  & get_null()   const;
+> ```
+
+Shortcut versions of `T& get<T>()` for all possible value types.
+
+> ```cpp
+> template <class T> bool is() const;
+> ```
+
+Returns whether JSON node contains a value of a type `T`.
+
+**Note:** Similar to [std::holds_alternative](https://en.cppreference.com/w/cpp/utility/variant/holds_alternative).
+
+> ```cpp
+> bool is_object() const;
+> bool is_array() const;
+> bool is_string() const;
+> bool is_number() const;
+> bool is_bool() const;
+> bool is_null() const;
+> ```
+
+Shortcut versions of `T& is<T>()` for all possible value types.
+
+> ```cpp
+> template <class T>       T* get_if();
+> template <class T> const T* get_if() const;
+> ```
+
+Returns a `T*` pointer to the value stored at the JSON node, if stored value has a different type than `T`, returns [nullptr](https://en.cppreference.com/w/cpp/language/nullptr).
+
+**Note:** Similar to [std::get_if](https://en.cppreference.com/w/cpp/utility/variant/get_if).
+
+#### Object methods
+
+> [!Important]
+> Object methods can only be called for nodes that contain an object, incorrect node type will cause methods below to throw an exception.
+
+> ```cpp
+> Node      & operator[](std::string_view key);
+> const Node& operator[](std::string_view key) const;
+> ```
+
+Returns a reference to the node corresponding to a given `key` in the JSON object, performs an insertion if such key does not already exist. 
+
+> ```cpp
+> Node      & at(std::string_view key);
+> const Node& at(std::string_view key) const;
+> ```
+
+Returns a reference to the node corresponding to a given `key` in the JSON object, throws an exception if such key does not exist. 
+
+> ```cpp
+> bool contains(std::string_view key) const;
+> ```
+
+Returns whether JSON object node contains an entry with given `key`.
+
+> ```cpp
+> template<class T> value_or(std::string_view key, const T &else_value);
+> ```
+
+Returns value stored at given `key` in the JSON object, if no such key can be found returns `else_value`.
+
+**Note:** Logically equivalent to `object.contains(key) ? object.at(key).get<T>() : else_value`, but faster.
+
+#### Assignment & Constructors
+
+> ```cpp
+> template <class T> Node& operator=(const T& value);
+> template <class T> Node(const T& value);
+> ```
+
+Converting assignment & constructors. Tries to convert `T` to one of the possible JSON types based on `T` traits, conversions and provided methods. If no such conversion is possible, SFINAE rejects the overload.
+
+### Typedefs
+
+> ```cpp
+> using Object = Node::object_type;
+> using Array  = Node::array_type;
+> using String = Node::string_type;
+> using Bool   = Node::bool_type;
+> using Null   = Node::null_type;
+> ```
+
+Shorter typedefs for all existing JSON value types.
+
+### Parsing
+
+> ```cpp
+> Node import_string(const std::string& buffer);
+> ```
+
+Imports JSON from a given string `buffer`.
+
+> ```cpp
+> Node import_file(const std::string& filepath);
+> ```
+
+Imports JSON from the file at `filepath`.
+
+> ```cpp
+> Node literals::operator""_utl_json(const char* c_str, std::size_t c_str_size);
+> ```
+
+`json::Node` custom literals.
+
+### Serializing
+
+> ```cpp
+> void export_string(std::string& buffer, const Node& node, Format format = Format::PRETTY);
+> ```
+
+Exports JSON `node` to the target `buffer` using a given `format`. If serialization runs out of preallocated buffer, it is allowed to reallocate with more space.
+
+> ```cpp
+> void export_file(const std::string& filepath, const Node& node, Format format = Format::PRETTY);
+> ```
+> 
+
+Exports JSON `node` to the file at `filepath` using a given `format`.
 
 ## Example 1 (importing/exporting JSON)
 
@@ -282,3 +432,23 @@ TODO:
 ```
 
 ## Benchmarks
+
+Benchmarks for parsing and serializing of minimized JSON data corresponding to various entries in the [test suite](TODO:). 
+
+```
+|               ns/op |                op/s |    err% |     total | benchmark
+|--------------------:|--------------------:|--------:|----------:|:----------
+|        7,192,296.48 |              139.04 |    0.6% |      1.75 | `strings.json # Serializing # utl::json`
+|       11,756,307.76 |               85.06 |    1.1% |      2.82 | `strings.json # Parsing     # utl::json`
+|       11,161,407.10 |               89.59 |    1.0% |      2.68 | `strings.json # Serializing # nlohmann `
+|       23,488,798.65 |               42.57 |    0.4% |      5.64 | `strings.json # Parsing     # nlohmann `
+|        4,004,559.75 |              249.72 |    0.8% |      0.96 | `numbers.json # Serializing # utl::json`
+|        3,470,066.09 |              288.18 |    0.2% |      0.83 | `numbers.json # Parsing     # utl::json`
+|        6,748,506.95 |              148.18 |    0.4% |      1.62 | `numbers.json # Serializing # nlohmann `
+|       16,767,746.74 |               59.64 |    0.5% |      4.01 | `numbers.json # Parsing     # nlohmann `
+|        2,235,215.38 |              447.38 |    0.3% |      0.56 | `database.json # Serializing # utl::json`
+|        8,446,221.52 |              118.40 |    1.4% |      2.03 | `database.json # Parsing     # utl::json`
+|        4,989,242.17 |              200.43 |    0.7% |      1.21 | `database.json # Serializing # nlohmann `
+|       12,777,209.48 |               78.26 |    0.3% |      3.06 | `database.json # Parsing     # nlohmann `
+```
+

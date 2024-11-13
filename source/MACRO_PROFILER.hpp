@@ -8,23 +8,25 @@
 //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+#include <functional>
 #if !defined(UTL_PICK_MODULES) || defined(UTLMACRO_PROFILER)
 #ifndef UTLHEADERGUARD_PROFILER
 #define UTLHEADERGUARD_PROFILER
 
 // _______________________ INCLUDES _______________________
 
+#include <algorithm>   // sort()
 #include <chrono>      // chrono::steady_clock, chrono::duration_cast<>, std::chrono::milliseconds
 #include <cstdlib>     // atexit()
 #include <fstream>     // ofstream
 #include <iomanip>     // setprecision(), setw()
 #include <ios>         // streamsize, fixed,
 #include <iostream>    // cout
-#include <map>         // map<>
 #include <ostream>     // ostream
 #include <sstream>     // ostringstream
 #include <string>      // string
 #include <string_view> // string_view
+#include <vector>      // vector<>
 
 // ____________________ DEVELOPER DOCS ____________________
 
@@ -50,55 +52,57 @@
 
 // ____________________ IMPLEMENTATION ____________________
 
+namespace utl::profiler {
+
 // ==========================
 // --- Profiler Internals ---
 // ==========================
 
-inline std::string _utl_profiler_reroute_to_filepath = "";
-
-#define UTL_PROFILER_REROUTE_TO_FILE(filepath_) _utl_profiler_reroute_to_filepath = filepath_;
-
-using _utl_profiler_clock         = std::chrono::steady_clock;
-using _utl_profiler_time_duration = _utl_profiler_clock::duration;
-using _utl_profiler_time_point    = _utl_profiler_clock::time_point;
-
-inline const _utl_profiler_time_point _utl_profiler_program_init_time_point = _utl_profiler_clock::now();
-// automatically gets program launch time so we can compute total runtime later
-
-inline std::string _utl_profiler_format_call_site(std::string_view file, int line, std::string_view func) {
+inline std::string _format_call_site(std::string_view file, int line, std::string_view func) {
     const std::string_view filename = file.substr(file.find_last_of("/\\") + 1);
 
-    std::ostringstream ss;
-    ss << filename << ":" << line << ", " << func << "()";
-    return ss.str();
+    return (std::ostringstream() << filename << ":" << line << ", " << func << "()").str();
 }
 
-struct _utl_profiler_record {
-    std::string                 label;
-    _utl_profiler_time_duration duration;
+using _clock      = std::chrono::steady_clock;
+using _duration   = _clock::duration;
+using _time_point = _clock::time_point;
+
+inline const _time_point _program_entry_time_point = _clock::now();
+
+struct _record {
+    const char* file;
+    int         line;
+    const char* func;
+    const char* label;
+    _duration   accumulated_time;
 };
 
-inline void _utl_profiler_atexit(); // predeclare, it needs '_utl_profiler' but used by '_utl_profiler'
+inline void _utl_profiler_atexit(); // predeclaration, implementation has circular dependency with 'RecordManager'
 
-class _utl_profiler {
+// =========================
+// --- Profiler Classess ---
+// =========================
+
+class RecordManager {
 private:
-    std::string              call_site;
-    std::string              label;
-    _utl_profiler_time_point construction_time_point;
+    _record data;
 
 public:
-    inline static std::map<std::string, _utl_profiler_record>
-        records; // std::map because we do WANT sorting by call-site name
+    inline static std::vector<_record> records;
+    bool                               busy;
 
-    operator bool() const { return true; } // needed so we can use 'if (auto x = _utl_profiler())' construct
+    void add_time(_duration time) noexcept { this->data.accumulated_time += time; }
 
-public:
-    _utl_profiler(std::string_view file, int line, std::string_view func, std::string_view label) {
-        this->call_site               = _utl_profiler_format_call_site(file, line, func);
-        this->label                   = label;
-        this->construction_time_point = _utl_profiler_clock::now();
+    RecordManager() = delete;
 
-        // If profiler ever gets called => registed results output at std::exit()
+    RecordManager(const char* file, int line, const char* func, const char* label)
+        : data({file, line, func, label, _duration(0)}), busy(false) {
+        // 'file', 'func', 'label' are guaranteed to be string literals, since we want to
+        // have as little overhead as possible during runtime, we can just save raw pointers
+        // and convert them to nicer types like 'std::string_view' later in the formatting stage
+
+        // Profiler ever gets called => register result output at std::exit()
         static bool first_call = true;
         if (first_call) {
             std::atexit(_utl_profiler_atexit);
@@ -106,45 +110,51 @@ public:
         }
     }
 
-    ~_utl_profiler() {
-        const auto it                = _utl_profiler::records.find(this->call_site);
-        const auto profiled_duration = _utl_profiler_clock::now() - this->construction_time_point;
+    ~RecordManager() { records.emplace_back(this->data); }
+};
 
-        // Record with the same callsite exists => accumulate duration
-        if (it != _utl_profiler::records.end()) {
-            (*it).second.duration += profiled_duration;
+class ScopeTimer {
+private:
+    _time_point    start;
+    RecordManager* record_manager;
+    // we could use 'std::optional<std::reference_wrapper<RecordManager>>',
+    // but that would inctroduce more dependencies for no real reason
+
+public:
+    constexpr operator bool() const noexcept { return true; }
+    // we needed so we can use 'if constexpr (const auto x = ScopeTimer())' construct
+
+    ScopeTimer(RecordManager* manager) {
+        // Busy manager => we're in recursion, don't count time
+        if (manager->busy) {
+            this->record_manager = nullptr;
+            return;
         }
-        // Otherwise => add new record with duration
-        else {
-            _utl_profiler::records.insert({
-                std::string(this->call_site), _utl_profiler_record{this->label, profiled_duration}
-            });
-        }
+        this->record_manager       = manager;
+        this->record_manager->busy = true;
+        this->start                = _clock::now();
+    }
+
+    ~ScopeTimer() {
+        if (!this->record_manager) return;
+        this->record_manager->add_time(_clock::now() - this->start);
+        this->record_manager->busy = false;
     }
 };
 
-// =================================
-// --- Profiler Table Formatting ---
-// =================================
+// ==================================
+// --- Profiler Exit & Formatting ---
+// ==================================
 
 inline void _utl_profiler_atexit() {
-    namespace chr = std::chrono;
 
-    const auto total_runtime = _utl_profiler_clock::now() - _utl_profiler_program_init_time_point;
-    // const auto total_runtime = std::chrono::duration_cast<std::chrono::milliseconds>();
+    const auto total_runtime = _clock::now() - _program_entry_time_point;
 
-    // Choose whether to print or reroute output to file
     std::ostream* ostr = &std::cout;
-    std::ofstream output_file;
-
-    if (!_utl_profiler_reroute_to_filepath.empty()) {
-        output_file.open(_utl_profiler_reroute_to_filepath);
-        ostr = &output_file;
-    }
 
     // Convenience functions
-    const auto duration_to_sec = [](_utl_profiler_time_duration duration) -> double {
-        return chr::duration_cast<chr::nanoseconds>(duration).count() / 1e9;
+    const auto duration_to_sec = [](_duration duration) -> double {
+        return std::chrono::duration_cast<std::chrono::nanoseconds>(duration).count() / 1e9;
     };
 
     const auto duration_percentage = [&](double duration_sec) -> double {
@@ -171,6 +181,10 @@ inline void _utl_profiler_atexit() {
     constexpr auto             percentage_format    = std::fixed;
     constexpr std::string_view percentage_postfix   = "%";
 
+    // Sort records by their accumulated time
+    std::sort(RecordManager::records.begin(), RecordManager::records.end(),
+              [](const _record& l, const _record& r) { return l.accumulated_time < r.accumulated_time; });
+
     // Collect max length of each column (for proper formatting)
     constexpr std::string_view column_name_call_site  = "Call Site";
     constexpr std::string_view column_name_label      = "Label";
@@ -182,10 +196,10 @@ inline void _utl_profiler_atexit() {
     std::streamsize max_length_duration   = column_name_duration.size();
     std::streamsize max_length_percentage = column_name_percentage.size();
 
-    for (const auto& record : _utl_profiler::records) {
-        const auto&  call_site    = record.first;
-        const auto&  label        = record.second.label;
-        const double duration_sec = duration_to_sec(record.second.duration);
+    for (const auto& record : RecordManager::records) {
+        const std::string call_site    = _format_call_site(record.file, record.line, record.func);
+        const std::string label        = record.label;
+        const double      duration_sec = duration_to_sec(record.accumulated_time);
 
         // 'Call Site' column
         const std::streamsize length_call_site = call_site.size();
@@ -242,13 +256,13 @@ inline void _utl_profiler_atexit() {
 
 
     // Print formatted table contents
-    for (const auto& record : _utl_profiler::records) {
-        const auto&  call_site    = record.first;
-        const auto&  label        = record.second.label;
-        const double duration_sec = duration_to_sec(record.second.duration);
-        const double percentage   = duration_percentage(duration_sec);
+    for (const auto& record : RecordManager::records) {
+        const std::string call_site    = _format_call_site(record.file, record.line, record.func);
+        const std::string label        = record.label;
+        const double      duration_sec = duration_to_sec(record.accumulated_time);
+        const double      percentage   = duration_percentage(duration_sec);
 
-        // Joint floats with their postfixes into a single string so they are properly handled by std::setw()
+        // Join floats with their postfixes into a single string so they are properly handled by std::setw()
         // (which only affects the first value leading to a table misaligned by postfix size)
         std::ostringstream ss_duration;
         ss_duration << std::setprecision(duration_precision) << duration_format << duration_sec << duration_postfix;
@@ -269,7 +283,7 @@ inline void _utl_profiler_atexit() {
 
 #define _utl_profiler_concat_tokens(a, b) a##b
 #define _utl_profiler_concat_tokens_wrapper(a, b) _utl_profiler_concat_tokens(a, b)
-#define _utl_profiler_add_line_number_to_variable_name(varname_) _utl_profiler_concat_tokens_wrapper(varname_, __LINE__)
+#define _utl_profiler_add_uuid(varname_) _utl_profiler_concat_tokens_wrapper(varname_, __LINE__)
 // This macro creates token 'varname_##__LINE__' from 'varname_'.
 //
 // The reason we can't just write it as is, is that function-macros only expands their macro-arguments
@@ -282,18 +296,47 @@ inline void _utl_profiler_atexit() {
 // '__LINE__' gets expanded in '_utl_profiler_concat_tokens_wrapper()'
 // and then tokenized and concatenated in '_utl_profiler_concat_tokens()'
 
-#define UTL_PROFILER_LABELED(label_)                                                                                   \
-    if (auto _utl_profiler_add_line_number_to_variable_name(profiler_) =                                               \
-            _utl_profiler(__FILE__, __LINE__, __func__, label_))
-// We add line number to profiler variable name to prevent nested profiler scopes from shadowing
-// each other's 'profiler_' variable. While such shadowing has no effect on an actual behavior,
-// it does cause a warning from most compilers.
+#define UTL_PROFILER(label_)                                                                                           \
+    constexpr bool _utl_profiler_add_uuid(utl_profiler_macro_guard_) = true;                                           \
+                                                                                                                       \
+    static_assert(_utl_profiler_add_uuid(utl_profiler_macro_guard_), "UTL_PROFILE is a multi-line macro.");            \
+                                                                                                                       \
+    static utl::profiler::RecordManager _utl_profiler_add_uuid(utl_profiler_record_manager_)(__FILE__, __LINE__,       \
+                                                                                             __func__, label_);        \
+                                                                                                                       \
+    if constexpr (const utl::profiler::ScopeTimer _utl_profiler_add_uuid(utl_profiler_scope_timer_){                   \
+                      &_utl_profiler_add_uuid(utl_profiler_record_manager_)})
+// Note 1:
 //
-// Such solution isn't perfect (2 scopes can be nested on the same line in deffirent files), but it
-// is good enough and there is no way to get a better 'unique varname' without resorting to
-// specific compiler extensions.
+//    constexpr bool ... = true;
+//    static_assert(..., "UTL_PROFILE is a multi-line macro.");
+//
+// is reponsible for preventing accidental errors caused by using macro like this:
+//
+//    for (...) UTL_PROFILER("") function(); // will only loop the first line of the multi-line macro
+//
+// If someone tries to write it like this, the constexpr bool variable will be "pulled" into a narrower scope,
+// causing 'static_assert()' to fail due to using undeclared identifier. Since the line with undeclared identifier
+// gets expanded, user will be able to see the assert message.
+//
+// Note 2:
+//
+// By separating "record management" into a static variable and "actual timing" into a non-static one,
+// we can avoid additional overhead from having to locate the record, corresponding to the profiled source location.
+// (an operation that require a non-trivial vector/map lookup with string comparisons)
+//
+// Static variable initializes its record once and timer does the bare minimum of work - 2 calls to 'now()' to get
+// timing, one addition to accumulated time and a check for recursion (so it can skip time appropriately).
+//
+//  Note 3:
+//
+// _utl_profiler_add_uuid(...) ensures no identifier collisions when several profilers exist in a single scope.
+// Since in this context 'uuid' is a line number, the only case in which ids can collide is when multiple profilers
+// are declated on the same line, which I assume no sane person would do. And even if they would, that would simply
+// lead to a compiler error. Can't really do better than that without resorting to non-standard macros like
+// '__COUNTER__' for 'uuid' creation
 
-#define UTL_PROFILER UTL_PROFILER_LABELED("<NONE>")
+} // namespace utl::profiler
 
 #endif
 #endif // macro-module UTL_PROFILER

@@ -2,15 +2,15 @@ include(CTest)
 enable_testing()
 
 # Macro for defining a test with proper doctest args
-# NOTE: Adding '--force-colors' to 'add_test()' allows doctest coloring in terminal but messes up CTest logs formatting
-macro(doctest modulename)
-    add_executable(${modulename} ${modulename}.cpp)
-    add_test(NAME ${modulename} COMMAND ${modulename} --no-intro --no-path-filenames --force-colors)
+# Note: Adding '--force-colors' to 'add_test()' allows doctest coloring in terminal but messes up CTest logs formatting
+macro(add_utl_test filename)
+    add_executable(${filename} ${filename}.cpp)
+    add_test(NAME ${filename} COMMAND ${filename} --no-intro --no-path-filenames --force-colors)
 endmacro()
 
 # Tests
-doctest(MACRO_LOG)
-doctest(module_math)
-doctest(module_mvl)
-doctest(module_random)
-doctest(module_stre)
+add_utl_test(MACRO_LOG)
+add_utl_test(module_math)
+add_utl_test(module_mvl)
+add_utl_test(module_random)
+add_utl_test(module_stre)
