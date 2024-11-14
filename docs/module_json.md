@@ -330,7 +330,7 @@ Output:
 
 ### Setters & Type Conversions
 
-[ [Run this code](https://godbolt.org/#z:OYLghAFBqd5QCxAYwPYBMCmBRdBLAF1QCcAaPECAMzwBtMA7AQwFtMQByARg9KtQYEAysib0QXACx8BBAKoBnTAAUAHpwAMvAFYTStJg1DIApACYAQuYukl9ZATwDKjdAGFUtAK4sGISdKuADJ4DJgAcj4ARpjEIGYapAAOqAqETgwe3r7%2B0ilpjgIhYZEsMXEJtpj2hQxCBEzEBFk%2BfgFVNRn1jQTFEdGx8YkKDU0tOe0jPX2l5UMAlLaoXsTI7BzmAMyhyN5YANQmm24IBARJCiAA9FfETADuAHTAhAheUV5Kq7KMBI9oLCuABEWIRiHgLKhgOhDKgAG5XJLEVBEAgATySoWAAH0vI5aAoriwmCNYlcdntMIjkURcfiFI8EEkkkdsCYNABBdkc0IEfbE0IQXn7RrAZCkfbIBCNfYAKllorh80OAHYrJz9pr9p8sftmGwFEkmGttQRaEd1VyNVrtApnCBwhhMPtbQILdzuVr9jd9gB1JhohT7IgihRpYAMEX7ABSQgA8uF9qgotpMA5PTa7QwTABWKxmMzJ1Ppgu5oG5/NmADWmDR2K45jMZcOmyB%2Bwbm0tXtd2bzjaLaYIjbLFcbNbrTdLObbRzbTc7Gc1PdHBYHJab069W5bbe3e/3B%2B3JjVqoshwL4/rjYlXFVQIlx7PY9r2MnZglZjvd/d1qXWZXhYpoOw6bges6HhB3ZZiAIBxkB6Yno%2B57Vi%2BDYFjed4PohF4vm%2BH5fse5YLr%2BLr/n2q7wUOU67vu4GHiM6AwcSLLHAxMEjOCRgSryrJIXxOF1mh77tphp7IZeeH7J%2BhHfsRHJQW65GAcWVEbjRe7gWxIBeAwJBYMQmDoNizFHG4WkcVi3GCLxiHYShgnXiJhFYU%2BAmvo50kqjOXk/la8laj6/qBsGqChuGkZMDG8aJo0dxooupGKZWsUBiBM6tpBSFcB%2BEqbLJXaZkljYpfF1E7olfggByxBxVlOX7HlhG%2BQpvbJTVqVlZpBCMSAcKDiQdVSbl%2BUJcuSklWl5WalptB4CMg3CY1PlyS1AETZ1GVauZmBDie2VDQ1I2cglgUBkGIYkuFUaxgm%2BwWUYo1kZW93AJNdGQV6ja0CQmAsPseAXD4jYtgVf5FQWL1vZthWVfUnHABAX0/X9AMKEDBbzM1MMAZDG3qdN3XsQQ8OIwW30GSjgMsI2mMrdjSm42p5XmcTWLYnCeCYPcpNmOTv3/VTNO%2BSdVz7I84uGOgd2hQIIoMFLdr7PwTQIPs9yvEmBAILEwYYpgCgSgorDOlrurq1rkqfEQf1oIITChLEDIi/sHK0LQkoGGG%2BuSoYkoCH1TShvs31GEHWu1vsSLwngBwMQAtLNNYu8oACSjweiRBkECskYaMLPmchwiy0JwOa8H4HBaKQqCcG41jWNLKwmlsPCkAQmhF4sVYgCqXCPL3KoABybFIg9mAAbAAnFwGg5vonCSOXHfV5wvCXIk7eV0XpBwLAMCICgqAsJi9BkBQEAAifgy7IYwBcOPGiJDQtAEI7lBRMvUShI0aKcK3X/MGIGiOCKk/68ABGwQQcYGC0F/lvUgWAPjADcGIAkYCEG/VvuIeB%2BADIODwH1S48DMCqDTHidYVdeTVGXrNKIdwgEeCwMvVmLB0EByiKkTAQJMFGFmkYDuiwqAGGAAoAAapze4cYkiMHQfwQQIgxDsCkDIQQigVDqHgbobKBh%2BGmEsNYfQeAoiXEgIsVASRahELjgxWcej8wWC4CqfYcc4xmF4PCWI4IsAmIgIsOwg4MguHluMPw2VggO1mIMbK%2BR0gCBCXoGJtQZgDDiNlfx%2BCBDdDGJ4Voeh0m1Cyb0CJKS8mjGaDknIaSynJLKFEvxyxVhKOLqXJe8Ca4cH2KoQe4847j0kB7W%2B7Zx6PA0CM/YEBcCEBIOeEe8xeCby0PMRY2smD6UoM0jgi9SCsJzIkCuVd2lrxABvARO994QCQMsc4eJyCUEvnQWI4RjacC6T0vpAzQ73xGSM3ghkpleL0HI4QohxDKKBWotQy8tGkHuHcJIYCNll1IPs9xnA4x4iSHiJMVBOndN6f0m%2BnzhmjI0OMjwx8HnEBmVwOZbcBFd38MMqekgzBcG6bPSevd77z02bwHZezl6HNsMculW8lmkG7mYQejwpWsvHoPHMjjNgaEHpPSQ48eWbFaQc1eorFkbLcciwVuqFmd1IAHNIzhJBAA) ]
+[ [Run this code](https://godbolt.org/#z:OYLghAFBqd5QCxAYwPYBMCmBRdBLAF1QCcAaPECAMzwBtMA7AQwFtMQByARg9KtQYEAysib0QXACx8BBAKoBnTAAUAHpwAMvAFYTStJg1DIApACYAQuYukl9ZATwDKjdAGFUtAK4sGe1wAyeAyYAHI%2BAEaYxCAArKQADqgKhE4MHt6%2BekkpjgJBIeEsUTHxdpgOaUIETMQEGT5%2BXLaY9nkM1bUEBWGR0XG2NXUNWc0KQ93BvcX9sQCUtqhexMjsHOYAzMHI3lgA1CYbbggEBAkKIAD0l8RMAO4AdMCECF4RXkorsowED2gslwAIixCMQ8BZUMB0IZUAA3S4JYioIgEACeCWCwAA%2Bl5HLQFJcWExxtFLttdpgEUiiDi8QoHggEglDtgTBoAIJszlmLYMHZefaHNy0PDjFlczbkgWYA5HJQEcUcrnBAh7InBCAqva1YDIUh7ZAIWp7ABUJp1sLmBwA7FYOXsHXsPpi9sw2AoEkxVk6CLRDnbOfbHdoFM4QKEMDKQwJ/RKgw7rnsAOpMVEKPZEbUKFLABjavYAKSEAHlQntUBFtBUFfG9tGGCZYlYzGYK1WHOYzI3AY3m2YANaYVFYrid7uywF7UcbAOOuuhhtNztt6tj2I9pctwfDrst8eHSddmdcuf13vLyurvfrue3id3h%2BPp8Pky2m0WA5bocjzv6rg2wF9VfD9O23LFdzMfUzAAgDY1rM9N1bS8O2vScnwPZ9MNPBcQBAYtkIVN9gM/Adv1HFs/wAoCiK/Hdfz2aDX0nJi4PZbCY0QlcUK7G90I2NCn3GdBcKJZk5QIYSQHGMEjH1FVxSImjSOHcjIKnKj3xIsCIKgmCWOPeCF3PFsuIVVDnwwoTcK8BgSCwYhMHQLFRKFKypIIGTgDkwQFJApSwNUyimOokDaPA%2BjGOtZiotYk9HUTFM0wzVAsxzPMmELEsy1qW5UTih0EL7HLUzXZj%2BKw4jmgY/UNlggy2ODIzEOKvLzIw%2BtcPZYhcsqqCarq2dGo4orupKtryrc2FqxIXrqr2Wr9MGgqmpGnrxoEtyRTFN8qrUhaYvq9jF1WsaeLKgS9jc%2BVZr2ga4wahNLmTVN00zYk0vzItS0ujzMXy%2Bdhs7aS/vWrC707WgSEwFg9jwc4fE7WUloB46gd%2BoxSvvI7cOqTyIAhqGYbhhQEZbOZWKO4yzGBjHQdvK70eAfGW0hhyifhlhO3Jw6htRlsaeATHLIk3CBaxWE8EwO5mbMVnodhjmudi2tEweNXDHQS6UoEbUGE10M9n4OoED2O4XnLAgEGiDN0UwBR9QUVgZUtl0zctg0PiIGG0EEJgpmIel/sTdlaFoA0DGzO2DUMA0BCmuosz2SGjETy2hz2RE4TwfYhIAWhFQc9nZZQAEkHnuucHIIZY8w0WKYo5DgFloThYl4PwOC0UhUE4NxrGsLXlm9TYeFIAhNCbhZ%2BxAa0uAeWfrQADg2KRF7MAA2ABOLgNHiFuOEkduJ%2B7zheAuDQx4nhY4FgGBEBQVAWAxegyAoCB/mf/odkMYAuHXjQL40FoAQaIFwIARGPhEYItRUScFHlA5gxBUT4XbOPbgvB/hsEEMWBgtBYGd14Fgd4wA3BiHxHAwh0Mf7iAIaQfADlKhTQuLQzAqgKi4jWF3FUrRj4igiLcJBHgsDH1%2BiwChpB44RGSJgQEVCjAiiMFfPgBhgAKAAGqSzuMWBIjBxH8EECIMQ7ApAyEEIoFQ6haG6GaAYRRphLDWH0HgCIFxIALFQAkdozDc5CQPPY5sFguDWj2LnYsZheBwmiGCLAriIALHKJUZwEBXAjCaKQQIUwiglGyMkVIAhUk5NyGkHoWT%2BhjFaNWKoEwCnlLaFUroJS%2BgxDGNUzwjQ9DjAaZkppEh4lLBWMY5urcj60J7hwPYqhF7r1zuvSQ4cf5TnXg8DQyy9gQFwIQEgn4V5zF4GgrQcwFhWyYPZSgQyD68DEbEC%2BHcu5jLPiAC%2B%2Bym6kBvvfJYZxcTkEoB/Og0RQhO04JM6Zsz5kpz/ss5ZvBHKbOiXofRwhRDiBMQi8xahj7WNIHcW4CQKHnLbqQW5ETODFlxAkXE5YqATKmTMuZ39wVLJWRoNZHgn5/OINsrguzL4EMOaQaekgllb0kGYLgUzd6b1nn/fQnBD6kCuTc4%2B9zbCPJ5QcqeIAzCLweFq0V69F6xCCRsDQi9N6CplRwDYIy7mnzVZPC14TCVKttc8vl8cUjOEkEAA) ]
 ```cpp
 using namespace utl;
 
@@ -363,7 +363,7 @@ json["string"] = std::string_view("lorem ipsum");
 
 ### Getters
 
-[ [Run this code](https://godbolt.org/#g:!((g:!((g:!((h:codeEditor,i:(filename:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,selection:(endColumn:37,endLineNumber:10,positionColumn:37,positionLineNumber:10,selectionStartColumn:37,selectionStartLineNumber:10,startColumn:37,startLineNumber:10),source:'%23include+%3Chttps://raw.githubusercontent.com/DmitriBogdanov/prototyping_utils/master/include/proto_utils.hpp%3E%0A%0Aint+main(int+argc,+char+**argv)+%7B%0A++++using+namespace+utl%3B%0A++++using+namespace+json::literals%3B%0A%0A++++//+Create+JSON+from+literal%0A++++auto+json+%3D+R%22(%0A++++++++%7B%0A++++++++++++%22string%22:+%22lorem_ipsum%22,%0A++++++++++++%22array%22:+%5B+1,+2,+3+%5D,%0A++++++++++++%22object%22:+%7B%0A++++++++++++++++%22key_1%22:+3.14,%0A++++++++++++++++%22key_2%22:+6.28%0A++++++++++++%7D%0A++++++++%7D%0A++++)%22_utl_json%3B%0A%0A++++//+Check+that+node+exists%0A++++assert(+json.contains(%22string%22)+)%3B%0A%0A++++//+Check+the+type+of+a+JSON+node%0A++++assert(+json%5B%22string%22%5D.is_string()+)%3B%0A%0A++++//+Get+typed+value+from+a+JSON+node%0A++++const+auto+str+%3D+json.at(%22string%22).get_string()%3B+//+!'.at(key)!'+and+!'%5Bkey%5D!'+are+both+valid%0A%0A++++//+Iterate+over+a+JSON+object+node%0A++++for+(const+auto+%26%5Bkey,+value%5D+:+json.at(%22object%22).get_object())%0A++++++++assert(+key.front()+%3D%3D+!'k!'+%26%26+value+%3E+0+)%3B%0A%0A++++//+Iterate+over+a+JSON+array+node%0A++++for+(const+auto+%26element+:+json.at(%22array%22).get_array())%0A++++++++assert(+element+%3E+0+)%3B%0A%0A++++return+0%3B%0A%7D%0A'),l:'5',n:'0',o:'C%2B%2B+source+%231',t:'0')),k:71.71783148269105,l:'4',n:'0',o:'',s:0,t:'0'),(g:!((g:!((h:compiler,i:(compiler:clang1600,filters:(b:'0',binary:'1',binaryObject:'1',commentOnly:'0',debugCalls:'1',demangle:'0',directives:'0',execute:'0',intel:'0',libraryCode:'0',trim:'1',verboseDemangling:'0'),flagsViewOpen:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,libs:!(),options:'-std%3Dc%2B%2B17+-O2',overrides:!(),selection:(endColumn:1,endLineNumber:1,positionColumn:1,positionLineNumber:1,selectionStartColumn:1,selectionStartLineNumber:1,startColumn:1,startLineNumber:1),source:1),l:'5',n:'0',o:'+x86-64+clang+16.0.0+(Editor+%231)',t:'0')),header:(),l:'4',m:50,n:'0',o:'',s:0,t:'0'),(g:!((h:output,i:(compilerName:'x86-64+clang+16.0.0',editorid:1,fontScale:14,fontUsePx:'0',j:1,wrap:'1'),l:'5',n:'0',o:'Output+of+x86-64+clang+16.0.0+(Compiler+%231)',t:'0')),k:46.69421860597116,l:'4',m:50,n:'0',o:'',s:0,t:'0')),k:28.282168517308946,l:'3',n:'0',o:'',t:'0')),l:'2',n:'0',o:'',t:'0')),version:4) ]
+[ [Run this code](https://godbolt.org/#g:!((g:!((g:!((h:codeEditor,i:(filename:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,selection:(endColumn:44,endLineNumber:34,positionColumn:44,positionLineNumber:34,selectionStartColumn:44,selectionStartLineNumber:34,startColumn:44,startLineNumber:34),source:'%23include+%3Chttps://raw.githubusercontent.com/DmitriBogdanov/prototyping_utils/master/include/proto_utils.hpp%3E%0A%0Aint+main(int+argc,+char+**argv)+%7B%0A++++using+namespace+utl%3B%0A++++using+namespace+json::literals%3B%0A%0A++++//+Create+JSON+from+literal%0A++++auto+json+%3D+R%22(%0A++++++++%7B%0A++++++++++++%22string%22:+%22lorem_ipsum%22,%0A++++++++++++%22array%22:+%5B+1,+2,+3+%5D,%0A++++++++++++%22object%22:+%7B%0A++++++++++++++++%22key_1%22:+3.14,%0A++++++++++++++++%22key_2%22:+6.28%0A++++++++++++%7D%0A++++++++%7D%0A++++)%22_utl_json%3B%0A%0A++++//+Check+that+node+exists%0A++++assert(+json.contains(%22string%22)+)%3B%0A%0A++++//+Check+the+type+of+a+JSON+node%0A++++assert(+json%5B%22string%22%5D.is_string()+)%3B%0A%0A++++//+Get+typed+value+from+a+JSON+node%0A++++const+auto+str+%3D+json.at(%22string%22).get_string()%3B+//+!'.at(key)!'+and+!'%5Bkey%5D!'+are+both+valid%0A%0A++++//+Iterate+over+a+JSON+object+node%0A++++for+(const+auto+%26%5Bkey,+value%5D+:+json.at(%22object%22).get_object())%0A++++++++assert(+key.front()+%3D%3D+!'k!'+%26%26+value.get_number()+%3E+0+)%3B%0A%0A++++//+Iterate+over+a+JSON+array+node%0A++++for+(const+auto+%26element+:+json.at(%22array%22).get_array())%0A++++++++assert(+element.get_number()+%3E+0+)%3B%0A%0A++++return+0%3B%0A%7D%0A'),l:'5',n:'0',o:'C%2B%2B+source+%231',t:'0')),k:71.71783148269105,l:'4',n:'0',o:'',s:0,t:'0'),(g:!((g:!((h:compiler,i:(compiler:clang1600,filters:(b:'0',binary:'1',binaryObject:'1',commentOnly:'0',debugCalls:'1',demangle:'0',directives:'0',execute:'0',intel:'0',libraryCode:'0',trim:'1',verboseDemangling:'0'),flagsViewOpen:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,libs:!(),options:'-std%3Dc%2B%2B17+-O2',overrides:!(),selection:(endColumn:1,endLineNumber:1,positionColumn:1,positionLineNumber:1,selectionStartColumn:1,selectionStartLineNumber:1,startColumn:1,startLineNumber:1),source:1),l:'5',n:'0',o:'+x86-64+clang+16.0.0+(Editor+%231)',t:'0')),header:(),l:'4',m:50,n:'0',o:'',s:0,t:'0'),(g:!((h:output,i:(compilerName:'x86-64+clang+16.0.0',editorid:1,fontScale:14,fontUsePx:'0',j:1,wrap:'1'),l:'5',n:'0',o:'Output+of+x86-64+clang+16.0.0+(Compiler+%231)',t:'0')),k:46.69421860597116,l:'4',m:50,n:'0',o:'',s:0,t:'0')),k:28.282168517308946,l:'3',n:'0',o:'',t:'0')),l:'2',n:'0',o:'',t:'0')),version:4) ]
 ```cpp
 using namespace utl;
 using namespace json::literals;
@@ -391,16 +391,17 @@ const auto str = json.at("string").get_string(); // '.at(key)' and '[key]' are b
 
 // Iterate over a JSON object node
 for (const auto &[key, value] : json.at("object").get_object())
-    assert( key.front() == 'k' && value > 0 );
+    assert( key.front() == 'k' && value.get_number() > 0 );
 
 // Iterate over a JSON array node
 for (const auto &element : json.at("array").get_array())
-    assert( element > 0 );
+    assert( element.get_number() > 0 );
 ```
 
 ### Formatting
 
-[ [Run this code](https://godbolt.org/#g:!((g:!((g:!((h:codeEditor,i:(filename:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,selection:(endColumn:1,endLineNumber:7,positionColumn:1,positionLineNumber:7,selectionStartColumn:1,selectionStartLineNumber:7,startColumn:1,startLineNumber:7),source:'%23include+%3Chttps://raw.githubusercontent.com/DmitriBogdanov/prototyping_utils/master/include/proto_utils.hpp%3E%0A%0Aint+main(int+argc,+char+**argv)+%7B%0A++++using+namespace+utl%3B%0A%0A++++json::Node+json%3B%0A%0A++++json%5B%22string%22%5D+++++++++++%3D+%22lorem+ipsum%22%3B%0A++++json%5B%22array%22%5D++++++++++++%3D+%7B+1,+2,+3+%7D%3B+%0A++++json%5B%22object%22%5D%5B%22key_1%22%5D++%3D+3.14f%3B+%0A++++json%5B%22object%22%5D%5B%22key_2%22%5D++%3D+6.28f%3B%0A%0A++++//+Prettified+JSON%0A++++std::cout%0A++++++++%3C%3C+%22---+Prettified+JSON+---%22%0A++++++++%3C%3C+json.to_string()%0A++++++++%3C%3C+%22%5Cn%5Cn%22%3B%0A++++++++%0A++++//+Minimized+JSON%0A++++std::cout%0A++++++++%3C%3C+%22---+Minimized+JSON+---%22%0A++++++++%3C%3C+json.to_string(json::Format::MINIMIZED)%0A++++++++%3C%3C+%22%5Cn%5Cn%22%3B%0A%0A++++//+Serialize+JSON+to+pre-allocated+buffer%0A++++std::string+buffer%3B%0A++++buffer.reserve(1200)%3B%0A++++json::export_string(buffer,+json,+json::Format::MINIMIZED)%3B%0A%0A++++return+0%3B%0A%7D%0A'),l:'5',n:'0',o:'C%2B%2B+source+%231',t:'0')),k:71.71783148269105,l:'4',n:'0',o:'',s:0,t:'0'),(g:!((g:!((h:compiler,i:(compiler:clang1600,filters:(b:'0',binary:'1',binaryObject:'1',commentOnly:'0',debugCalls:'1',demangle:'0',directives:'0',execute:'0',intel:'0',libraryCode:'0',trim:'1',verboseDemangling:'0'),flagsViewOpen:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,libs:!(),options:'-std%3Dc%2B%2B17+-O2',overrides:!(),selection:(endColumn:1,endLineNumber:1,positionColumn:1,positionLineNumber:1,selectionStartColumn:1,selectionStartLineNumber:1,startColumn:1,startLineNumber:1),source:1),l:'5',n:'0',o:'+x86-64+clang+16.0.0+(Editor+%231)',t:'0')),header:(),l:'4',m:50,n:'0',o:'',s:0,t:'0'),(g:!((h:output,i:(compilerName:'x86-64+clang+16.0.0',editorid:1,fontScale:14,fontUsePx:'0',j:1,wrap:'1'),l:'5',n:'0',o:'Output+of+x86-64+clang+16.0.0+(Compiler+%231)',t:'0')),k:46.69421860597116,l:'4',m:50,n:'0',o:'',s:0,t:'0')),k:28.282168517308946,l:'3',n:'0',o:'',t:'0')),l:'2',n:'0',o:'',t:'0')),version:4) ]
+[ [Run this code](https://godbolt.org/#g:!((g:!((g:!((h:codeEditor,i:(filename:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,selection:(endColumn:28,endLineNumber:13,positionColumn:28,positionLineNumber:13,selectionStartColumn:28,selectionStartLineNumber:13,startColumn:28,startLineNumber:13),source:'%23include+%3Chttps://raw.githubusercontent.com/DmitriBogdanov/prototyping_utils/master/include/proto_utils.hpp%3E%0A%0Aint+main(int+argc,+char+**argv)+%7B%0A++++using+namespace+utl%3B%0A%0A++++json::Node+json%3B%0A%0A++++json%5B%22string%22%5D+++++++++++%3D+%22lorem+ipsum%22%3B%0A++++json%5B%22array%22%5D++++++++++++%3D+%7B+1,+2,+3+%7D%3B+%0A++++json%5B%22object%22%5D%5B%22key_1%22%5D++%3D+3.14%3B+%0A++++json%5B%22object%22%5D%5B%22key_2%22%5D++%3D+6.28%3B%0A%0A++++//+Prettified/Minimized+JSON%0A++++std::cout%0A++++++++%3C%3C+%22---+Prettified+JSON+---%22%0A++++++++%3C%3C+%22%5Cn%5Cn%22%0A++++++++%3C%3C+json.to_string()%0A++++++++%3C%3C+%22%5Cn%5Cn%22%0A++++++++%3C%3C+%22---+Minimized+JSON+---%22%0A++++++++%3C%3C+%22%5Cn%5Cn%22%0A++++++++%3C%3C+json.to_string(json::Format::MINIMIZED)%3B%0A%0A++++//+Serialize+JSON+to+pre-allocated+buffer%0A++++std::string+buffer%3B%0A++++buffer.reserve(1200)%3B%0A++++json::export_string(buffer,+json,+json::Format::MINIMIZED)%3B%0A%0A++++return+0%3B%0A%7D%0A'),l:'5',n:'0',o:'C%2B%2B+source+%231',t:'0')),k:71.71783148269105,l:'4',n:'0',o:'',s:0,t:'0'),(g:!((g:!((h:compiler,i:(compiler:clang1600,filters:(b:'0',binary:'1',binaryObject:'1',commentOnly:'0',debugCalls:'1',demangle:'0',directives:'0',execute:'0',intel:'0',libraryCode:'0',trim:'1',verboseDemangling:'0'),flagsViewOpen:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,libs:!(),options:'-std%3Dc%2B%2B17+-O2',overrides:!(),selection:(endColumn:1,endLineNumber:1,positionColumn:1,positionLineNumber:1,selectionStartColumn:1,selectionStartLineNumber:1,startColumn:1,startLineNumber:1),source:1),l:'5',n:'0',o:'+x86-64+clang+16.0.0+(Editor+%231)',t:'0')),header:(),l:'4',m:50,n:'0',o:'',s:0,t:'0'),(g:!((h:output,i:(compilerName:'x86-64+clang+16.0.0',editorid:1,fontScale:14,fontUsePx:'0',j:1,wrap:'1'),l:'5',n:'0',o:'Output+of+x86-64+clang+16.0.0+(Compiler+%231)',t:'0')),k:46.69421860597116,l:'4',m:50,n:'0',o:'',s:0,t:'0')),k:28.282168517308946,l:'3',n:'0',o:'',t:'0')),l:'2',n:'0',o:'',t:'0')),version:4) ]
+
 ```cpp
 using namespace utl;
 
@@ -408,20 +409,18 @@ json::Node json;
 
 json["string"]           = "lorem ipsum";
 json["array"]            = { 1, 2, 3 }; 
-json["object"]["key_1"]  = 3.14f; 
-json["object"]["key_2"]  = 6.28f;
+json["object"]["key_1"]  = 3.14; 
+json["object"]["key_2"]  = 6.28;
 
-// Prettified JSON
+// Prettified/Minimized JSON
 std::cout
     << "--- Prettified JSON ---"
+    << "\n\n"
     << json.to_string()
-    << "\n\n";
-    
-// Minimized JSON
-std::cout
+    << "\n\n"
     << "--- Minimized JSON ---"
-    << json.to_string(json::Format::MINIMIZED)
-    << "\n\n";
+    << "\n\n"
+    << json.to_string(json::Format::MINIMIZED);
 
 // Serialize JSON to pre-allocated buffer
 std::string buffer;
@@ -431,14 +430,31 @@ json::export_string(buffer, json, json::Format::MINIMIZED);
 
 Output:
 ```
-TODO:
+--- Prettified JSON ---
+
+{
+    "array": [
+        1,
+        2,
+        3
+    ],
+    "object": {
+        "key_1": 3.14,
+        "key_2": 6.28
+    },
+    "string": "lorem ipsum"
+}
+
+--- Minimized JSON ---
+
+{"array":[1,2,3],"object":{"key_1":3.14,"key_2":6.28},"string":"lorem ipsum"}
 ```
 
 ## Benchmarks
 
 [Benchmarks](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/benchmarks/benchmark_json.cpp) for parsing and serializing of minimized JSON data corresponding to various entries in the [test suite](https://github.com/DmitriBogdanov/prototyping_utils/tree/master/benchmarks/data). 
 
-```
+```c
 ====== BENCHMARKING ON DATA: `strings.json` ======
 
 | relative |               ms/op |                op/s |    err% |     total | Parsing minimized JSON
@@ -540,7 +556,7 @@ Unfortunately, the issue is mostly caused by `std::map` insertion, which dominat
 
 Flat maps and async maps seem like the way to go, slotting in a custom flat map implementation into `json::_object_type_impl` allowed `utl::json` to beat `RapidJSON` on all serializing tasks and brought `database.json` parsing a more or less even ground:
 
-```
+```c
 // Using associative API wrapper for std::vector of pairs instead of std::map we can bridge the performance gap
 // General-case usage however suffers, which is why this decision was reled agains
 
