@@ -454,7 +454,7 @@ Output:
 
 [Benchmarks](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/benchmarks/benchmark_json.cpp) for parsing and serializing of minimized JSON data corresponding to various entries in the [test suite](https://github.com/DmitriBogdanov/prototyping_utils/tree/master/benchmarks/data). 
 
-```c
+```
 ====== BENCHMARKING ON DATA: `strings.json` ======
 
 | relative |               ms/op |                op/s |    err% |     total | Parsing minimized JSON
@@ -556,7 +556,7 @@ Unfortunately, the issue is mostly caused by `std::map` insertion, which dominat
 
 Flat maps and async maps seem like the way to go, slotting in a custom flat map implementation into `json::_object_type_impl` allowed `utl::json` to beat `RapidJSON` on all serializing tasks and brought `database.json` parsing a more or less even ground:
 
-```c
+```
 // Using associative API wrapper for std::vector of pairs instead of std::map we can bridge the performance gap
 // General-case usage however suffers, which is why this decision was reled agains
 
