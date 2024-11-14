@@ -207,8 +207,8 @@ public:
         // support heterogeneous lookup, we have to reimplement them manually
         if (this->is_null()) this->data = object_type(); // only 'null' converts to object automatically on 'json[key]'
         auto& object = this->get_object();
-        auto  it     = object.find(key);
-        if (it == object.end()) it = object.insert(std::make_pair(std::string(key), Node{})).first;
+        auto  it     = object.find(std::string(key));
+        if (it == object.end()) it = object.emplace(std::string(key), Node{}).first;
         return it->second;
     }
 
@@ -216,7 +216,7 @@ public:
         // 'std::map<K, V>::operator[]()' and 'std::map<K, V>::at()' don't support
         // support heterogeneous lookup, we have to reimplement them manually
         const auto& object = this->get_object();
-        const auto  it     = object.find(key);
+        const auto  it     = object.find(std::string(key));
         if (it == object.end()) throw std::runtime_error("Accessing non-existent key in JSON object.");
         return it->second;
     }
@@ -224,7 +224,7 @@ public:
     [[nodiscard]] Node& at(std::string_view key) {
         // Non-const 'operator[]' inserts non-existent keys, '.at()' should throw instead
         auto&      object = this->get_object();
-        const auto it     = object.find(key);
+        const auto it     = object.find(std::string(key));
         if (it == object.end()) throw std::runtime_error("Accessing non-existent key in JSON object.");
         return it->second;
     }
@@ -233,14 +233,14 @@ public:
 
     [[nodiscard]] bool contains(std::string_view key) const {
         const auto& object = this->get_object();
-        const auto  it     = object.find(key);
+        const auto  it     = object.find(std::string(key));
         return it != object.end();
     }
 
     template <class T>
     [[nodiscard]] T& value_or(std::string_view key, const T& else_value) {
         const auto& object = this->get_object();
-        const auto  it     = object.find(key);
+        const auto  it     = object.find(std::string(key));
         if (it != object.end()) return it->second.get<T>();
         return else_value;
         // same thing as 'this->contains(key) ? json.at(key).get<T>() : else_value' but without a second map lookup
@@ -531,8 +531,8 @@ struct _parser {
         // Parse pair value
         Node value;
         std::tie(cursor, value) = this->parse_node(cursor);
-        
-        parent.emplace(std::pair{std::move(key), std::move(value)});
+
+        parent.emplace(std::move(key), std::move(value));
 
         return cursor;
     }
@@ -894,7 +894,7 @@ inline void _serialize_json_recursion(const Node& node, std::string& chars, unsi
         const auto& string_value = *ptr;
 
         chars += '"';
-        
+
         // Serialize string while handling escape sequences.
         /// Without escape sequences we could just do 'chars += string_value'.
         //
