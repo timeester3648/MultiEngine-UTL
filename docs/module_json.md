@@ -43,6 +43,7 @@ class Node {
     using object_type = std::map<std::string, Node, std::less<>>;
     using array_type  = std::vector<Node>;
     using string_type = std::string;
+    using number_type = double;
     using bool_type   = bool;
     using null_type   = class{};
     
@@ -108,6 +109,7 @@ class Node {
 using Object = Node::object_type;
 using Array  = Node::array_type;
 using String = Node::string_type;
+using Number = Node::number_type;
 using Bool   = Node::bool_type;
 using Null   = Node::null_type;
 
@@ -131,11 +133,12 @@ void export_file(const std::string& filepath, const Node& node, Format format = 
 > using object_type = std::map<std::string, Node, std::less<>>;
 > using array_type  = std::vector<Node>;
 > using string_type = std::string;
+> using number_type = double;
 > using bool_type   = bool;
 > using null_type   = class{};
 > ```
 
-Definitions of the types, corresponding to all possible JSON values: objects, arrays, strings, numbers, booleans and null.
+Definitions of the types, corresponding to all possible JSON values according to [ECMA-404 specification](https://ecma-international.org/wp-content/uploads/ECMA-404.pdf): objects, arrays, strings, numbers, booleans and null.
 
 #### Getters
 
@@ -242,6 +245,7 @@ Converting assignment & constructors. Tries to convert `T` to one of the possibl
 > using Object = Node::object_type;
 > using Array  = Node::array_type;
 > using String = Node::string_type;
+> using Number = Node::number_type;
 > using Bool   = Node::bool_type;
 > using Null   = Node::null_type;
 > ```
