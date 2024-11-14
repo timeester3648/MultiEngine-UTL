@@ -701,6 +701,7 @@ inline void _utl_profiler_atexit() {
 //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+#include <sstream>
 #if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_JSON)
 #ifndef UTLHEADERGUARD_JSON
 #define UTLHEADERGUARD_JSON
@@ -728,6 +729,7 @@ inline void _utl_profiler_atexit() {
 
 // NOTE: DOCS
 // TEMP:
+#include <unordered_flatmap.hpp>
 
 // ____________________ IMPLEMENTATION ____________________
 
@@ -791,7 +793,7 @@ struct _is_assotiative<Type, std::void_t<typename Type::key_type>, std::void_t<t
 // ===================================
 
 template <class T>
-using _object_type_impl = std::map<std::string, T, std::less<>>;
+using _object_type_impl = AssociativeVectorWrapper<std::string, T>;//std::map<std::string, T, std::less<>>;
 // 'std::less<>' declares map as transparent, which means we can `.find()` for `std::string_view` keys
 template <class T>
 using _array_type_impl  = std::vector<T>;
@@ -1224,8 +1226,9 @@ struct _parser {
         // Parse pair value
         Node value;
         std::tie(cursor, value) = this->parse_node(cursor);
-
+        
         parent.emplace(std::move(key), std::move(value));
+        //parent.emplace_hint(parent.cend(), std::move(key), std::move(value));
 
         return cursor;
     }
@@ -1674,8 +1677,8 @@ inline void export_string(std::string& buffer, const Node& node, Format format =
 }
 
 inline Node import_file(const std::string& filepath) {
-    const std::string chars = _read_file_to_string(filepath);
-
+    //const std::string chars = _read_file_to_string(filepath);
+    const std::string chars = (std::ostringstream() << std::ifstream(filepath).rdbuf()).str();
     return import_string(chars);
 }
 
@@ -1691,11 +1694,14 @@ inline Node operator""_utl_json(const char* c_str, std::size_t c_str_size) {
 }
 } // namespace literals
 
+// inline std::ofstream& operator<<(std::ofstream &os) {
+    
+// }
+
 } // namespace utl::json
 
 #endif
 #endif // module utl::json
-
 
 
 
@@ -5296,6 +5302,174 @@ inline VoidStream    vout;
 #endif
 #endif // module utl::voidstream
 
+
+
+
+
+
+#include <algorithm>
+#include <cstddef>
+#include <stdexcept>
+#include <tuple>
+#include <utility>
+#include <vector>
+
+#include <string>
+#include <string_view>
+
+// ================================
+// --- AssotiaviteVectorWrapper ---
+// ================================
+
+// Thin wrapper around 'std::vector' of pairs that exposes assotiavite container API similar to 'std::map'.
+// Faster than 'std::map' below ~50-100 elements (implementation and hardware dependent). Slower asymptotically.
+// Doesn't sort elements, preserves the insertion order.
+
+// | Parameter               | `std::map`                   | `AssotiaviteVectorWrapper` |
+// | ----------------------- | ---------------------------- | -------------------------- |
+// | Size                    | ~48 bytes                    | ~24 bytes                  |
+// | Ordering                | Sorted                       | Preserves insertion order  |
+// | Keys                    | Unique                       | Duplicates Allowed         |
+// | Transparent Comparators | ✔ (when using `std::less<>`) | ✔                          |
+// | Incomplete Type Support | Implementation dependent     | ✔                          |
+//
+// | Operation       | `std::map` | `AssotiaviteVectorWrapper` |
+// | --------------- | ---------- | -------------------------- |
+// | Insertion       | O(log(N))  | Amortized O(1)             |
+// | Erasure         | O(log(N))  | O(N)                       |
+// | Key Lookup      | O(log(N))  | O(N)                       |
+// | Index Lookup    | O(N)       | O(1)                       |
+// | Iteration Speed | Horrific   | Same as std vector         |
+
+// This is NOT a good replacement for a generic map, however it lends itself decently
+// well to the common JSON use cases due to following reasons:
+//
+// - Being able to quickly emplace new data *drastically* improves object parsing performance.
+//
+// - Being able to quickly iterate data noticeably improves object serializing performance.
+//
+// - Smaller memory footprint reduces the size of the whole 'std::variant', making 'Node' go from ~48 bytes to ~24
+// bytes.
+//
+// - JSON objects *tend* to not contain too many keys, repeated data is usually stored in arrays as many small objects.
+//   The main exception to this rule is large dictionaries serialized as JSON and intended to be used again as
+//   such after deserialization. Some databases do that.
+//
+template <class KeyType, class MappedType, class UnderlyingContainer = std::vector<std::pair<KeyType, MappedType>>>
+struct AssociativeVectorWrapper {
+    using key_type             = KeyType;
+    using mapped_type          = MappedType;
+    using underlying_container = UnderlyingContainer;
+
+    using value_type             = typename underlying_container::value_type;
+    using size_type              = typename underlying_container::size_type;
+    using difference_type        = typename underlying_container::difference_type;
+    using allocator_type         = typename underlying_container::allocator_type;
+    using reference              = typename underlying_container::reference;
+    using const_reference        = typename underlying_container::const_reference;
+    using pointer                = typename underlying_container::pointer;
+    using const_pointer          = typename underlying_container::const_pointer;
+    using iterator               = typename underlying_container::iterator;
+    using const_iterator         = typename underlying_container::const_iterator;
+    using reverse_iterator       = typename underlying_container::reverse_iterator;
+    using const_reverse_iterator = typename underlying_container::const_reverse_iterator;
+
+    underlying_container data;
+
+    // --- Constructors ---
+    // --------------------
+
+    AssociativeVectorWrapper()                                = default;
+    AssociativeVectorWrapper(const AssociativeVectorWrapper&) = default;
+    AssociativeVectorWrapper(AssociativeVectorWrapper&&)      = default;
+
+    AssociativeVectorWrapper& operator=(const AssociativeVectorWrapper&) = default;
+    AssociativeVectorWrapper& operator=(AssociativeVectorWrapper&&)      = default;
+
+    // --- Element access ---
+    // ----------------------
+
+    template <class K>
+    [[nodiscard]] mapped_type& at(const K& key) {
+        const auto it = this->find(key);
+        if (it != this->end()) return it->second;
+        throw std::out_of_range("Out of bounds error.");
+    }
+
+    template <class K>
+    [[nodiscard]] const mapped_type& at(const K& key) const {
+        const auto it = this->find(key);
+        if (it != this->end()) return it->second;
+        throw std::out_of_range("Out of bounds error.");
+    }
+
+    template <class K>
+    mapped_type& operator[](const K& key) {
+        const auto it = this->find(key);
+        // Key found
+        if (it != this->data.end()) return it->second;
+        // Key not found => insert
+        this->data.emplace_back(key, mapped_type());
+    }
+
+    // --- Iterators ---
+    // -----------------
+
+    [[nodiscard]] iterator               begin() noexcept { return this->data.begin(); }
+    [[nodiscard]] iterator               end() noexcept { return this->data.end(); }
+    [[nodiscard]] reverse_iterator       rbegin() noexcept { return this->data.rbegin(); }
+    [[nodiscard]] reverse_iterator       rend() noexcept { return this->data.rend(); }
+    [[nodiscard]] const_iterator         cbegin() const noexcept { return this->data.cbegin(); }
+    [[nodiscard]] const_iterator         cend() const noexcept { return this->data.end(); }
+    [[nodiscard]] const_iterator         begin() const noexcept { return this->data.begin(); }
+    [[nodiscard]] const_iterator         end() const noexcept { return this->data.end(); }
+    [[nodiscard]] const_reverse_iterator crbegin() const noexcept { return this->data.crbegin(); }
+    [[nodiscard]] const_reverse_iterator crend() const noexcept { return this->data.crend(); }
+    [[nodiscard]] const_reverse_iterator rbegin() const noexcept { return this->data.crbegin(); }
+    [[nodiscard]] const_reverse_iterator rend() const noexcept { return this->data.rend(); }
+
+    // --- Capacity ---
+    // ----------------
+
+    [[nodiscard]] size_type size() const noexcept { return this->data.size(); }
+    [[nodiscard]] size_type empty() const noexcept { return this->data.empty(); }
+    [[nodiscard]] size_type max_size() const noexcept { return this->data.max_size(); }
+    void                    reserve(size_type new_capacity) { this->data.reserve(new_capacity); }
+
+    // --- Modifier ---
+    // ----------------
+
+    void clear() noexcept { this->data.clear(); }
+
+    template <class T>
+    std::pair<iterator, bool> insert(T&& value) {
+        this->data.push_back(std::forward<T>(value));
+        return {this->end() - 1, true};
+    }
+
+    template <class... Args>
+    std::pair<iterator, bool> emplace(Args&&... args) {
+        this->data.emplace_back(std::forward<Args>(args)...);
+        return {this->end() - 1, true};
+    }
+
+    // --- Lookup ---
+    // --------------
+
+    template <class K>
+    [[nodiscard]] iterator find(const K& key) {
+        for (auto it = this->begin(); it < this->end(); ++it)
+            if (it->first == key) return it;
+        return this->end();
+    }
+
+    template <class K>
+    [[nodiscard]] const_iterator find(const K& key) const {
+        for (auto it = this->begin(); it < this->end(); ++it)
+            if (it->first == key) return it;
+        return this->end();
+    }
+};
 
 
 

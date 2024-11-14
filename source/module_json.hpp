@@ -8,6 +8,7 @@
 //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+#include <sstream>
 #if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_JSON)
 #ifndef UTLHEADERGUARD_JSON
 #define UTLHEADERGUARD_JSON
@@ -35,6 +36,7 @@
 
 // NOTE: DOCS
 // TEMP:
+#include <unordered_flatmap.hpp>
 
 // ____________________ IMPLEMENTATION ____________________
 
@@ -98,7 +100,7 @@ struct _is_assotiative<Type, std::void_t<typename Type::key_type>, std::void_t<t
 // ===================================
 
 template <class T>
-using _object_type_impl = std::map<std::string, T, std::less<>>;
+using _object_type_impl = AssociativeVectorWrapper<std::string, T>;//std::map<std::string, T, std::less<>>;
 // 'std::less<>' declares map as transparent, which means we can `.find()` for `std::string_view` keys
 template <class T>
 using _array_type_impl  = std::vector<T>;
@@ -531,8 +533,9 @@ struct _parser {
         // Parse pair value
         Node value;
         std::tie(cursor, value) = this->parse_node(cursor);
-
+        
         parent.emplace(std::move(key), std::move(value));
+        //parent.emplace_hint(parent.cend(), std::move(key), std::move(value));
 
         return cursor;
     }
@@ -982,7 +985,6 @@ inline void export_string(std::string& buffer, const Node& node, Format format =
 
 inline Node import_file(const std::string& filepath) {
     const std::string chars = _read_file_to_string(filepath);
-
     return import_string(chars);
 }
 

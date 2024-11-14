@@ -6,12 +6,12 @@
 
 - `utl::json` doesn't introduce **any** global identifiers (including macros and operators)
 - Objects support transparent comparators (which means `std::string_view` and `const char*` can be used for lookup)
-- [Decent performance](#benchmarks) without relying on compiler intrinsics (TODO: Format and document benchmarks nicely)
+- [Decent performance](#benchmarks) without relying on compiler intrinsics
 - All JSON types map to standard library containers, no need to learn custom APIs
-- Simple integration (single header, less that a `1k` lines)
+- Simple integration (single header, less that `1k` lines)
 
 > [!Note]
-> Despite rather competitive performance, considerably faster parsing can be achieved with custom formatters, SIMD and unordered key optimizations (see [simdjson](https://github.com/simdjson/simdjson), [Glaze](https://github.com/stephenberry/glaze), [RapidJSON](https://github.com/Tencent/rapidjson)  and [yyjson](https://github.com/ibireme/yyjson)), this, however often comes at the expense of user convenience (like RapidJSON) or features (such as missing escape sequence handling in *simdjson* and *yyjson*, *Glaze* has it, but requires [C++20](https://en.cppreference.com/w/cpp/20)).
+> Despite rather competitive performance, considerably faster parsing can be achieved with custom formatters, SIMD and unordered key optimizations (see [simdjson](https://github.com/simdjson/simdjson), [Glaze](https://github.com/stephenberry/glaze), [RapidJSON](https://github.com/Tencent/rapidjson)  and [yyjson](https://github.com/ibireme/yyjson)), this, however often comes at the expense of user convenience (like with *RapidJSON*) or features (such as missing escape sequence handling in *simdjson* and *yyjson*, *Glaze* has it all, but requires [C++23](https://en.cppreference.com/w/cpp/23)).
 
 > [!Tip]
 > Use GitHub's built-in [table of contents](https://github.blog/changelog/2021-04-13-table-of-contents-support-in-markdown-files/) to navigate this page.
@@ -23,7 +23,7 @@
 | Parsing | ✔ |  |
 | Serialization | ✔ |  |
 | JSON Formatting | ✔ |  |
-| JSON Validation | ✔ | Full validation with proper error messages through exceptions |
+| JSON Validation | ✔ | Almost complete validation with proper error messages through exceptions |
 | Unicode Support | ✔ | Tested for UTF-8 |
 | Escape Sequence Support | ✔ |  |
 | ISO/IEC 10646 Hexadecimal Support | ✘ | Currently in the works |
@@ -283,7 +283,9 @@ Exports JSON `node` to the target `buffer` using a given `format`. If serializat
 
 Exports JSON `node` to the file at `filepath` using a given `format`.
 
-## Example 1 (importing/exporting JSON)
+## Examples 
+
+### Import/Export JSON
 
 [ [Run this code]() ]
 ```cpp
@@ -306,6 +308,10 @@ json::export_file("config.json", config);
 json::Node parsed_config = json::import_file("config.json");
 
 std::cout << parsed_config.to_string();
+
+// Stream syntax is also supported
+std::ofstream("config.json") << config; // export
+std::ifstream("config.json") >> config; // import
 ```
 
 Output:
@@ -326,7 +332,7 @@ Output:
 }
 ```
 
-## Example 2 (setters & type conversions)
+### Setters & Type Conversions
 
 [ [Run this code]() ]
 ```cpp
@@ -359,7 +365,7 @@ json["string"] = std::string_view("lorem ipsum");
 // All classes can convert as long as they provide std-like API.
 ```
 
-## Example 3 (getters)
+### Getters
 
 [ [Run this code]() ]
 ```cpp
@@ -396,7 +402,7 @@ for (const auto &element : json.at("array").get_array())
     assert( element > 0 );
 ```
 
-## Example 4 (formatting)
+### Formatting
 
 [ [Run this code]() ]
 ```cpp
@@ -441,129 +447,135 @@ Benchmarks for parsing and serializing of minimized JSON data corresponding to v
 
 | relative |               ms/op |                op/s |    err% |     total | Parsing minimized JSON
 |---------:|--------------------:|--------------------:|--------:|----------:|:-----------------------
-|   100.0% |               18.95 |               52.78 |    2.2% |      1.37 | `utl::json`
-|    31.0% |               61.12 |               16.36 |    0.6% |      4.35 | `nlohmann`
-|    57.4% |               32.99 |               30.31 |    0.3% |      2.34 | `PicoJSON`
-|   127.3% |               14.89 |               67.18 |    1.5% |      1.06 | `RapidJSON`
+|   100.0% |               19.14 |               52.24 |    0.3% |      1.38 | `utl::json`
+|    32.4% |               59.05 |               16.93 |    0.4% |      4.26 | `nlohmann`
+|    54.5% |               35.15 |               28.45 |    0.8% |      2.53 | `PicoJSON`
+|   118.7% |               16.13 |               62.00 |    0.2% |      1.16 | `RapidJSON`
 
 | relative |               ms/op |                op/s |    err% |     total | Parsing prettified JSON
 |---------:|--------------------:|--------------------:|--------:|----------:|:------------------------
-|   100.0% |               19.32 |               51.76 |    0.5% |      1.40 | `utl::json`
-|    29.5% |               65.52 |               15.26 |    2.5% |      4.64 | `nlohmann`
-|    54.9% |               35.19 |               28.42 |    1.2% |      2.50 | `PicoJSON`
-|   105.9% |               18.24 |               54.81 |    0.5% |      1.30 | `RapidJSON`
+|   100.0% |               19.49 |               51.31 |    0.4% |      1.40 | `utl::json`
+|    32.2% |               60.52 |               16.52 |    0.5% |      4.37 | `nlohmann`
+|    55.8% |               34.92 |               28.64 |    0.3% |      2.52 | `PicoJSON`
+|   121.7% |               16.01 |               62.45 |    0.1% |      1.15 | `RapidJSON`
 
 | relative |               ms/op |                op/s |    err% |     total | Serializing minimized JSON
 |---------:|--------------------:|--------------------:|--------:|----------:|:---------------------------
-|   100.0% |               12.81 |               78.06 |    0.5% |      0.91 | `utl::json`
-|    44.5% |               28.78 |               34.74 |    0.4% |      2.06 | `nlohmann`
-|    33.6% |               38.17 |               26.20 |    0.4% |      2.74 | `PicoJSON`
-|    74.3% |               17.24 |               58.02 |    3.8% |      1.20 | `RapidJSON`
+|   100.0% |               12.45 |               80.34 |    0.1% |      0.91 | `utl::json`
+|    43.8% |               28.45 |               35.15 |    0.2% |      2.05 | `nlohmann`
+|    33.3% |               37.38 |               26.75 |    0.2% |      2.69 | `PicoJSON`
+|    81.3% |               15.32 |               65.28 |    0.2% |      1.11 | `RapidJSON`
 
 | relative |               ms/op |                op/s |    err% |     total | Serializing prettified JSON
 |---------:|--------------------:|--------------------:|--------:|----------:|:----------------------------
-|   100.0% |               16.61 |               60.22 |    2.0% |      1.17 | `utl::json`
-|    53.1% |               31.28 |               31.97 |    2.7% |      2.21 | `nlohmann`
-|    41.8% |               39.73 |               25.17 |    0.5% |      2.84 | `PicoJSON`
-|    95.1% |               17.46 |               57.26 |    1.9% |      1.26 | `RapidJSON`
+|   100.0% |               15.45 |               64.72 |    0.6% |      1.12 | `utl::json`
+|    51.2% |               30.16 |               33.15 |    0.2% |      2.18 | `nlohmann`
+|    39.2% |               39.41 |               25.38 |    0.2% |      2.84 | `PicoJSON`
+|    95.1% |               16.26 |               61.51 |    0.2% |      1.17 | `RapidJSON`
 
 
 ====== BENCHMARKING ON DATA: `numbers.json` ======
 
 | relative |               ms/op |                op/s |    err% |     total | Parsing minimized JSON
 |---------:|--------------------:|--------------------:|--------:|----------:|:-----------------------
-|   100.0% |               10.67 |               93.70 |    0.2% |      0.76 | `utl::json`
-|    21.1% |               50.68 |               19.73 |    0.8% |      3.61 | `nlohmann`
-|    25.9% |               41.29 |               24.22 |    1.7% |      2.94 | `PicoJSON`
-|   119.6% |                8.93 |              112.03 |    1.3% |      0.63 | `RapidJSON`
+|   100.0% |               10.82 |               92.46 |    0.5% |      0.78 | `utl::json`
+|    23.6% |               45.80 |               21.84 |    0.1% |      3.30 | `nlohmann`
+|    28.1% |               38.51 |               25.97 |    0.2% |      2.77 | `PicoJSON`
+|   144.4% |                7.49 |              133.47 |    0.1% |      0.54 | `RapidJSON`
 
 | relative |               ms/op |                op/s |    err% |     total | Parsing prettified JSON
 |---------:|--------------------:|--------------------:|--------:|----------:|:------------------------
-|   100.0% |               12.17 |               82.14 |    1.0% |      0.86 | `utl::json`
-|    23.2% |               52.37 |               19.09 |    0.5% |      3.74 | `nlohmann`
-|    27.7% |               44.00 |               22.73 |    0.8% |      3.13 | `PicoJSON`
-|   129.6% |                9.40 |              106.42 |    1.3% |      0.66 | `RapidJSON`
+|   100.0% |               11.17 |               89.56 |    0.1% |      0.80 | `utl::json`
+|    23.1% |               48.29 |               20.71 |    0.2% |      3.48 | `nlohmann`
+|    27.3% |               40.89 |               24.45 |    0.2% |      2.95 | `PicoJSON`
+|   126.3% |                8.84 |              113.14 |    0.4% |      0.64 | `RapidJSON`
 
 | relative |               ms/op |                op/s |    err% |     total | Serializing minimized JSON
 |---------:|--------------------:|--------------------:|--------:|----------:|:---------------------------
-|   100.0% |               11.08 |               90.25 |    0.4% |      0.80 | `utl::json`
-|    63.3% |               17.50 |               57.15 |    0.5% |      1.25 | `nlohmann`
-|    13.8% |               80.21 |               12.47 |    0.3% |      5.70 | `PicoJSON`
-|    61.1% |               18.13 |               55.15 |    2.4% |      1.28 | `RapidJSON`
+|   100.0% |               10.93 |               91.52 |    0.4% |      0.83 | `utl::json`
+|    65.2% |               16.77 |               59.63 |    0.7% |      1.24 | `nlohmann`
+|    13.5% |               80.96 |               12.35 |    0.9% |      5.93 | `PicoJSON`
+|    64.2% |               17.02 |               58.77 |    0.2% |      1.23 | `RapidJSON`
 
 | relative |               ms/op |                op/s |    err% |     total | Serializing prettified JSON
 |---------:|--------------------:|--------------------:|--------:|----------:|:----------------------------
-|   100.0% |               14.12 |               70.82 |    3.4% |      1.00 | `utl::json`
-|    69.7% |               20.26 |               49.37 |    1.0% |      1.44 | `nlohmann`
-|    16.5% |               85.42 |               11.71 |    2.5% |      6.13 | `PicoJSON`
-|    73.3% |               19.27 |               51.89 |    1.4% |      1.42 | `RapidJSON`
+|   100.0% |               13.11 |               76.29 |    0.2% |      0.94 | `utl::json`
+|    65.8% |               19.93 |               50.18 |    0.3% |      1.44 | `nlohmann`
+|    15.7% |               83.44 |               11.98 |    0.2% |      6.05 | `PicoJSON`
+|    68.8% |               19.05 |               52.50 |    0.1% |      1.37 | `RapidJSON`
 
 
 ====== BENCHMARKING ON DATA: `database.json` ======
 
 | relative |               ms/op |                op/s |    err% |     total | Parsing minimized JSON
 |---------:|--------------------:|--------------------:|--------:|----------:|:-----------------------
-|   100.0% |               24.79 |               40.35 |    6.7% |      1.81 | `utl::json`
-|    46.8% |               53.01 |               18.87 |    3.4% |      3.80 | `nlohmann`
-|    64.3% |               38.57 |               25.92 |    8.6% |      2.71 | `PicoJSON`
-|   256.1% |                9.68 |              103.34 |    4.1% |      0.70 | `RapidJSON`
+|   100.0% |               20.31 |               49.25 |    1.0% |      1.48 | `utl::json`
+|    42.6% |               47.66 |               20.98 |    0.3% |      3.44 | `nlohmann`
+|    62.5% |               32.51 |               30.76 |    0.5% |      2.35 | `PicoJSON`
+|   206.4% |                9.84 |              101.62 |    0.3% |      0.71 | `RapidJSON`
 
 | relative |               ms/op |                op/s |    err% |     total | Parsing prettified JSON
 |---------:|--------------------:|--------------------:|--------:|----------:|:------------------------
-|   100.0% |               26.92 |               37.15 |    4.9% |      1.92 | `utl::json`
-|    46.3% |               58.11 |               17.21 |    6.1% |      4.11 | `nlohmann`
-|    64.3% |               41.86 |               23.89 |    9.5% |      2.96 | `PicoJSON`
-|   230.4% |               11.68 |               85.59 |    0.7% |      0.85 | `RapidJSON`
+|   100.0% |               21.43 |               46.65 |    0.7% |      1.54 | `utl::json`
+|    42.2% |               50.77 |               19.70 |    0.2% |      3.66 | `nlohmann`
+|    61.3% |               34.96 |               28.61 |    1.2% |      2.51 | `PicoJSON`
+|   194.5% |               11.02 |               90.74 |    0.2% |      0.79 | `RapidJSON`
 
 | relative |               ms/op |                op/s |    err% |     total | Serializing minimized JSON
 |---------:|--------------------:|--------------------:|--------:|----------:|:---------------------------
-|   100.0% |               11.77 |               84.94 |    2.7% |      0.87 | `utl::json`
-|    49.6% |               23.74 |               42.12 |    0.2% |      1.69 | `nlohmann`
-|    33.1% |               35.54 |               28.13 |    1.1% |      2.55 | `PicoJSON`
-|   114.9% |               10.25 |               97.60 |    3.2% |      0.71 | `RapidJSON`
+|   100.0% |               11.69 |               85.54 |    1.0% |      0.84 | `utl::json`
+|    50.3% |               23.24 |               43.04 |    0.4% |      1.68 | `nlohmann`
+|    33.2% |               35.22 |               28.39 |    0.2% |      2.54 | `PicoJSON`
+|   116.9% |               10.00 |              100.04 |    0.3% |      0.72 | `RapidJSON`
 
 | relative |               ms/op |                op/s |    err% |     total | Serializing prettified JSON
 |---------:|--------------------:|--------------------:|--------:|----------:|:----------------------------
-|   100.0% |               13.86 |               72.14 |    6.0% |      1.03 | `utl::json`
-|    53.5% |               25.91 |               38.59 |    1.5% |      1.87 | `nlohmann`
-|    37.0% |               37.42 |               26.72 |    0.4% |      2.67 | `PicoJSON`
-|   128.1% |               10.82 |               92.42 |    0.2% |      0.77 | `RapidJSON`
+|   100.0% |               13.70 |               72.98 |    0.3% |      1.01 | `utl::json`
+|    52.6% |               26.03 |               38.41 |    0.2% |      1.88 | `nlohmann`
+|    36.4% |               37.63 |               26.57 |    0.4% |      2.70 | `PicoJSON`
+|   114.2% |               12.00 |               83.32 |    0.2% |      0.87 | `RapidJSON`
+```
 
+### Some thoughts on implementation
 
-====== BENCHMARKING ON DATA: `unordered_object.json` ======
+The main weak-point of `utl::json` from the performance point of view is parsing of large JSON dictionaries.
+
+Unfortunately, the issue is mostly caused by `std::map` insertion, which dominates the runtime. A truly suitable for the purpose container doesn't really exist in the standard library, and would need a custom implementation like in `RapidJSON`, which would reduce the standard library interoperability thus going against the main purpose of this library which is simplicity of use.
+
+Flat maps and async maps seem like the way to go, slotting in a custom flat map implementation into `json::_object_type_impl` allowed `utl::json` to beat `RapidJSON` on all serializing tasks and brought `database.json` parsing a more or less even ground:
+
+```
+// Using associative API wrapper for std::vector of pairs instead of std::map we can bridge the performance gap
+// General-case usage however suffers, which is why this decision was reled agains
+
+====== BENCHMARKING ON DATA: `database.json` ======
 
 | relative |               ms/op |                op/s |    err% |     total | Parsing minimized JSON
 |---------:|--------------------:|--------------------:|--------:|----------:|:-----------------------
-|   100.0% |               19.99 |               50.02 |    1.0% |      1.48 | `utl::json`
-|    65.3% |               30.63 |               32.65 |    3.0% |      2.21 | `nlohmann`
-|    94.7% |               21.10 |               47.39 |    2.6% |      1.51 | `PicoJSON`
-|   454.8% |                4.40 |              227.46 |    0.5% |      0.32 | `RapidJSON`
+|   100.0% |               13.22 |               75.65 |    0.6% |      0.95 | `utl::json`
+|    24.7% |               53.57 |               18.67 |    3.6% |      3.93 | `nlohmann`
+|    43.5% |               30.42 |               32.87 |    0.7% |      2.19 | `PicoJSON`
+|   139.5% |                9.48 |              105.51 |    0.2% |      0.68 | `RapidJSON`
 
 | relative |               ms/op |                op/s |    err% |     total | Parsing prettified JSON
 |---------:|--------------------:|--------------------:|--------:|----------:|:------------------------
-|   100.0% |               20.04 |               49.90 |    2.1% |      1.50 | `utl::json`
-|    62.4% |               32.12 |               31.13 |    2.7% |      2.29 | `nlohmann`
-|    93.1% |               21.53 |               46.44 |    1.1% |      1.54 | `PicoJSON`
-|   347.5% |                5.77 |              173.41 |    0.2% |      0.41 | `RapidJSON`
+|   100.0% |               14.28 |               70.02 |    0.5% |      1.03 | `utl::json`
+|    25.8% |               55.36 |               18.06 |    0.5% |      3.99 | `nlohmann`
+|    41.1% |               34.75 |               28.78 |    0.2% |      2.50 | `PicoJSON`
+|   130.4% |               10.95 |               91.33 |    0.4% |      0.79 | `RapidJSON`
 
 | relative |               ms/op |                op/s |    err% |     total | Serializing minimized JSON
 |---------:|--------------------:|--------------------:|--------:|----------:|:---------------------------
-|   100.0% |               12.57 |               79.57 |    5.5% |      0.86 | `utl::json`
-|   129.9% |                9.67 |              103.40 |    6.3% |      0.77 | `nlohmann`
-|   109.0% |               11.53 |               86.76 |    5.3% |      0.90 | `PicoJSON`
-|   348.4% |                3.61 |              277.26 |    0.2% |      0.26 | `RapidJSON`
+|   100.0% |                8.47 |              118.00 |    0.2% |      0.61 | `utl::json`
+|    35.7% |               23.74 |               42.12 |    0.3% |      1.71 | `nlohmann`
+|    23.6% |               35.85 |               27.89 |    0.4% |      2.57 | `PicoJSON`
+|    94.4% |                8.97 |              111.43 |    0.3% |      0.65 | `RapidJSON`
 
 | relative |               ms/op |                op/s |    err% |     total | Serializing prettified JSON
 |---------:|--------------------:|--------------------:|--------:|----------:|:----------------------------
-|   100.0% |               13.98 |               71.52 |    7.2% |      0.90 | `utl::json`
-|    92.1% |               15.18 |               65.89 |    7.1% |      1.08 | `nlohmann`
-|   104.4% |               13.40 |               74.65 |    5.7% |      1.00 | `PicoJSON`
-|   263.3% |                5.31 |              188.31 |    0.2% |      0.38 | `RapidJSON`
+|   100.0% |               10.09 |               99.12 |    0.4% |      0.73 | `utl::json`
+|    39.2% |               25.74 |               38.85 |    0.5% |      1.85 | `nlohmann`
+|    26.8% |               37.61 |               26.59 |    0.4% |      2.71 | `PicoJSON`
+|    93.7% |               10.77 |               92.87 |    0.2% |      0.78 | `RapidJSON`
 ```
 
-> [!Note]
-> The main weak-point of `utl::json` from the performance standpoint is parsing of JSON objects that contain a large amount of keys.
->
-> Unfortunately, the issue is mostly caused by `std::map` insertion and iteration speed, which dominates the runtime. A truly proper container for JSON object representation doesn't really exist in the standard library.
->
-> Perhaps I'll find a way to implement one that can be "slotted into" the implementation as a template parameter that allows us to trade a standard API for even better performance.
