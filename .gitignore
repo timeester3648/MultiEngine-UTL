@@ -23,12 +23,11 @@
 !*.md
 !*.svg
 !*.jpg
+# > Data
+!*.json
 
 # Ignore build & temporary directories regarless of their contents
 .cache/
 build/
 temp/
 snippets/
-
-# Ignore benhmarks until they are properly implemented
-benchmarks/
