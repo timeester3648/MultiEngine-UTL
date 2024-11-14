@@ -305,13 +305,9 @@ config["time_period"]          = 1.24709e+2;
 json::export_file("config.json", config);
 
 // Import JSON
-json::Node parsed_config = json::import_file("config.json");
+config = json::import_file("config.json");
 
-std::cout << parsed_config.to_string();
-
-// Stream syntax is also supported
-std::ofstream("config.json") << config; // export
-std::ifstream("config.json") >> config; // import
+std::cout << config.to_string();
 ```
 
 Output:
