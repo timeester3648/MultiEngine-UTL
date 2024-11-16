@@ -207,8 +207,8 @@ public:
         // support heterogeneous lookup, we have to reimplement them manually
         if (this->is_null()) this->data = object_type(); // only 'null' converts to object automatically on 'json[key]'
         auto& object = this->get_object();
-        auto  it     = object.find(std::string(key));
-        if (it == object.end()) it = object.emplace(std::string(key), Node{}).first;
+        auto  it     = object.find(key);
+        if (it == object.end()) it = object.emplace(key, Node{}).first;
         return it->second;
     }
 
@@ -216,16 +216,16 @@ public:
         // 'std::map<K, V>::operator[]()' and 'std::map<K, V>::at()' don't support
         // support heterogeneous lookup, we have to reimplement them manually
         const auto& object = this->get_object();
-        const auto  it     = object.find(std::string(key));
-        if (it == object.end()) throw std::runtime_error("Accessing non-existent key in JSON object.");
+        const auto  it     = object.find(key);
+        if (it == object.end()) throw std::runtime_error("Accessing non-existent key {" + std::string(key) + "} in JSON object.");
         return it->second;
     }
 
     [[nodiscard]] Node& at(std::string_view key) {
         // Non-const 'operator[]' inserts non-existent keys, '.at()' should throw instead
         auto&      object = this->get_object();
-        const auto it     = object.find(std::string(key));
-        if (it == object.end()) throw std::runtime_error("Accessing non-existent key in JSON object.");
+        const auto it     = object.find(key);
+        if (it == object.end()) throw std::runtime_error("Accessing non-existent key {" + std::string(key) + "} in JSON object.");
         return it->second;
     }
 

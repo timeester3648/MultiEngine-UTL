@@ -4,8 +4,6 @@
 
 // Libraries to benchmarks agains
 // nlohmann
-#include "thirdparty/jsoncpp/value.h"
-#include "thirdparty/jsoncpp/writer.h"
 #include "thirdparty/nlohmann_json.hpp"
 // rapidjson
 #include "thirdparty/rapidjson/document.h"
