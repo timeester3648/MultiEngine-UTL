@@ -24,9 +24,9 @@
 | Serialization | ✔ |  |
 | JSON Formatting | ✔ |  |
 | JSON Validation | ✔ | Almost complete validation with proper error messages through exceptions |
-| Unicode Support | ✔ | Tested for UTF-8 |
+| Unicode Support | ✔ | Supports UTF-8 |
 | Escape Sequence Support | ✔ |  |
-| ISO/IEC 10646 Hexadecimal Support | ✘ | Currently in the works |
+| ISO/IEC 10646 Hexadecimal Support | ✔ | Supports UTF-8 |
 | Trait-based Type Conversions | ✔ |  |
 | Structure Reflection | ✘ | Requires compiler intrinsics or C++26 to implement |
 | Compile-time JSON Schema | ✘ | Outside the project scope |

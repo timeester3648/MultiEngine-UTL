@@ -701,6 +701,8 @@ inline void _utl_profiler_atexit() {
 //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+#include <cstdlib>
+#include <cwchar>
 #include <sstream>
 #if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_JSON)
 #ifndef UTLHEADERGUARD_JSON
@@ -711,13 +713,15 @@ inline void _utl_profiler_atexit() {
 #include <array>            // array<>
 #include <charconv>         // to_chars(), from_chars()
 #include <cmath>            // isfinite()
+#include <codecvt>          // codecvt_utf8<>
 #include <cstddef>          // size_t
+#include <cuchar>           // char32_t, mbstate_t
 #include <fstream>          // ifstream, ofstream
 #include <initializer_list> // initializer_list<>
 #include <limits>           // numeric_limits<>::max_digits10, numeric_limits<>::max_exponent10
 #include <map>              // map<>
 #include <stdexcept>        // runtime_error
-#include <string>           // string
+#include <string>           // string, stoul()
 #include <string_view>      // string_view
 #include <system_error>     // errc()
 #include <type_traits>      // enable_if_t<>, void_t, is_convertible_v<>, is_same_v<>
@@ -736,6 +740,23 @@ namespace utl::json {
 // ===================
 // --- Misc. Utils ---
 // ===================
+
+// Codepoint -> UTF-8 string conversion using <codecvt> (deprecated in C++17, removed in C++26)
+// This is horrible, but there doesn't seem to a better way.
+// Returns success so we can handle the error message inside the parser itself.
+inline bool _unicode_codepoint_to_utf8(std::string& destination, char32_t cp) {
+    std::array<char, 4> buffer; // here we will put UTF-8 string
+    char32_t const*     from = &cp;
+    char*               end_of_buffer;
+
+    std::mbstate_t              state;
+    std::codecvt_utf8<char32_t> codecvt;
+
+    if (codecvt.out(state, from, from + 1, from, buffer.data(), buffer.data() + 4, end_of_buffer)) return false;
+
+    destination.append(buffer.data(), end_of_buffer);
+    return true;
+}
 
 inline std::string _read_file_to_string(const std::string& path) {
     using namespace std::string_literals;
@@ -910,7 +931,8 @@ public:
         // support heterogeneous lookup, we have to reimplement them manually
         const auto& object = this->get_object();
         const auto  it     = object.find(key);
-        if (it == object.end()) throw std::runtime_error("Accessing non-existent key {" + std::string(key) + "} in JSON object.");
+        if (it == object.end())
+            throw std::runtime_error("Accessing non-existent key {" + std::string(key) + "} in JSON object.");
         return it->second;
     }
 
@@ -918,7 +940,8 @@ public:
         // Non-const 'operator[]' inserts non-existent keys, '.at()' should throw instead
         auto&      object = this->get_object();
         const auto it     = object.find(key);
-        if (it == object.end()) throw std::runtime_error("Accessing non-existent key {" + std::string(key) + "} in JSON object.");
+        if (it == object.end())
+            throw std::runtime_error("Accessing non-existent key {" + std::string(key) + "} in JSON object.");
         return it->second;
     }
 
@@ -1224,7 +1247,7 @@ struct _parser {
         // Parse pair value
         Node value;
         std::tie(cursor, value) = this->parse_node(cursor);
-        
+
         parent.emplace_hint(parent.cend(), std::move(key), std::move(value));
 
         return cursor;
@@ -1361,18 +1384,24 @@ struct _parser {
                     string_value.append(this->chars.data() + segment_start, cursor - segment_start - 1);
                     string_value += replacement_char;
                 }
-                // 5-character escape sequences (escaped unicode HEX codepoints)
-                else if (escaped_char == 'u')
+                // 6-character escape sequences (escaped unicode HEX codepoints)
+                else if (escaped_char == 'u') {
                     if (cursor >= this->chars.size() + 4)
                         throw std::runtime_error("JSON string node reached the end of buffer while"s +
                                                  "parsing a 5-character escape sequence at pos "s +
                                                  std::to_string(cursor) + "."s);
-                    // TODO:
-                    else
-                        throw std::runtime_error(
-                            "JSON string node encountered unicode hex value while parsing an escape sequence at pos "s +
-                            std::to_string(cursor) + ", which is not currently supported."s);
-                else
+                    // Standard library is absolutely HORRIBLE when it comes to Unicode support.
+                    // Literally every single encoding function in <cuchar>/<string>/<codecvt> is a
+                    // crime against common sense, API safety and performace, which is why we do this
+                    // inefficient nonsense and pray that there's not gonna be a lot of escaped unicode
+                    // in the data. This also adds another 2 #include's just by itself. Supports UTF-8.
+                    const std::string hex(this->chars.data() + cursor + 1, 4);
+                    // say hello to allocation, standard functions only support std::string or null-terminated char*,
+                    // there's no way to view into data and parse it without copying it
+                    const char32_t    unicode_char = std::stoul(hex, nullptr, 16);
+                    _unicode_codepoint_to_utf8(string_value, unicode_char);
+                    cursor += 4; // move past first 'uXXX' symbols, last symbol will be covered by the loop '++cursor'
+                } else
                     throw std::runtime_error("JSON string node encountered unexpected character {"s + escaped_char +
                                              "} while parsing an escape sequence at pos "s + std::to_string(cursor) +
                                              "."s);

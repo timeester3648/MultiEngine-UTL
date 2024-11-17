@@ -171,4 +171,6 @@ int main() {
     benchmark_on_data("benchmarks/data/strings.json");
     benchmark_on_data("benchmarks/data/numbers.json");
     benchmark_on_data("benchmarks/data/database.json");
+    
+    //std::cout << "\n\n" << utl::json::import_file("snippets/test.json").to_string() << "\n\n";
 }
