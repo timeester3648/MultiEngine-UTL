@@ -8,6 +8,7 @@
 //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+#include <cstdint>
 #include <cstdlib>
 #include <cwchar>
 #include <sstream>
@@ -45,11 +46,11 @@
 namespace utl::json {
 
 // ===================
-// --- Misc. Utils ---
+// --- Misc. utils ---
 // ===================
 
 // Codepoint -> UTF-8 string conversion using <codecvt> (deprecated in C++17, removed in C++26)
-// This is horrible, but there doesn't seem to a better way.
+// This is kinda horrible, but there doesn't seem to a better way.
 // Returns success so we can handle the error message inside the parser itself.
 inline bool _unicode_codepoint_to_utf8(std::string& destination, char32_t cp) {
     std::array<char, 4> buffer; // here we will put UTF-8 string
@@ -421,7 +422,7 @@ constexpr std::size_t _number_of_char_values = 256;
 // we get:
 //    if (const char replacement = _lookup_serialized_escaped_chars[c]) { chars += replacement; }
 //
-// which ends up being quite noticeably faster.
+// which ends up being a bit faster.
 //
 constexpr std::array<char, _number_of_char_values> _lookup_serialized_escaped_chars = [] {
     std::array<char, _number_of_char_values> res{};
@@ -507,25 +508,18 @@ struct _parser {
 
         // Assuming valid JSON, we can determine node type based on a single first character
         if (c == '{') {
-            // UTL_PROFILER_LABELED("Objects")
             return this->parse_object(cursor);
         } else if (c == '[') {
-            // UTL_PROFILER_LABELED("Arrays")
             return this->parse_array(cursor);
         } else if (c == '"') {
-            // UTL_PROFILER_LABELED("Strings")
             return this->parse_string(cursor);
         } else if (('0' <= c && c <= '9') || (c == '-')) {
-            // UTL_PROFILER_LABELED("Numbers")
             return this->parse_number(cursor);
         } else if (c == 't') {
-            // UTL_PROFILER_LABELED("Trues")
             return this->parse_true(cursor);
         } else if (c == 'f') {
-            // UTL_PROFILER_LABELED("Falses")
             return this->parse_false(cursor);
         } else if (c == 'n') {
-            // UTL_PROFILER_LABELED("Nulls")
             return this->parse_null(cursor);
         }
         throw std::runtime_error("JSON node selector encountered unexpected marker symbol {"s + this->chars[cursor] +
@@ -555,7 +549,11 @@ struct _parser {
         Node value;
         std::tie(cursor, value) = this->parse_node(cursor);
 
-        parent.emplace_hint(parent.cend(), std::move(key), std::move(value));
+        if (!parent.emplace(std::move(key), std::move(value)).second)
+            throw std::runtime_error("JSON object node could not emplace a duplicate key {"s + key +
+                                     "} encountered while parsing at pos "s + std::to_string(cursor) + "."s);
+        // using '.emplace_hint()' here could noticeably speed up parsing of sorted objects, however '.emplace_hint()'
+        // doesn't return success for some reason, which prevents us from validating duplicate object keys.
 
         return cursor;
     }
@@ -706,7 +704,10 @@ struct _parser {
                     // say hello to allocation, standard functions only support std::string or null-terminated char*,
                     // there's no way to view into data and parse it without copying it
                     const char32_t    unicode_char = std::stoul(hex, nullptr, 16);
-                    _unicode_codepoint_to_utf8(string_value, unicode_char);
+                    if (!_unicode_codepoint_to_utf8(string_value, unicode_char))
+                        throw std::runtime_error("JSON string node could not parse unicode codepoint {"s + hex +
+                                                 "} while parsing an escape sequence at pos "s +
+                                                 std::to_string(cursor) + "."s);
                     cursor += 4; // move past first 'uXXX' symbols, last symbol will be covered by the loop '++cursor'
                 } else
                     throw std::runtime_error("JSON string node encountered unexpected character {"s + escaped_char +
@@ -954,9 +955,10 @@ inline void _serialize_json_recursion(const Node& node, std::string& chars, unsi
         // should be the smallest buffer size to account for all possible 'std::to_chars()' outputs,
         // see [https://stackoverflow.com/questions/68472720/stdto-chars-minimal-floating-point-buffer-size]
 
-        std::array<char, max_digits> buffer;
+        thread_local std::array<char, max_digits> buffer;
 
-        auto [number_end_ptr, error_code] = std::to_chars(buffer.data(), buffer.data() + buffer.size(), number_value);
+        const auto [number_end_ptr, error_code] =
+            std::to_chars(buffer.data(), buffer.data() + buffer.size(), number_value);
 
         if (error_code != std::errc())
             throw std::runtime_error(

@@ -7,4 +7,5 @@ macro(add_utl_bencmark filename)
 endmacro()
 
 add_utl_bencmark(benchmark_json)
+add_utl_bencmark(benchmark_log)
 add_utl_bencmark(benchmark_profiler)
