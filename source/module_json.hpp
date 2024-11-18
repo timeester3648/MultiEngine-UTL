@@ -955,7 +955,7 @@ inline void _serialize_json_recursion(const Node& node, std::string& chars, unsi
         // should be the smallest buffer size to account for all possible 'std::to_chars()' outputs,
         // see [https://stackoverflow.com/questions/68472720/stdto-chars-minimal-floating-point-buffer-size]
 
-        thread_local std::array<char, max_digits> buffer;
+        std::array<char, max_digits> buffer;
 
         const auto [number_end_ptr, error_code] =
             std::to_chars(buffer.data(), buffer.data() + buffer.size(), number_value);

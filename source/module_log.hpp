@@ -107,14 +107,14 @@ void stringify_integer(std::string& buffer, IntType value) {
     // we need and format directly to it, however benchmarks showed that it is actually inferior to
     // just doing things the usual way with a stack-allocated middle-man buffer.
 
-    thread_local std::array<char, std::numeric_limits<IntType>::digits10> num_buffer;
-    const auto result = std::to_chars(num_buffer.data(), num_buffer.data() + num_buffer.size(), value);
+    std::array<char, std::numeric_limits<IntType>::digits10> num_buffer;
+    const auto [number_end_ptr, error_code] = std::to_chars(num_buffer.data(), num_buffer.data() + num_buffer.size(), value);
 
-    if (result.ec != std::errc())
+    if (error_code != std::errc())
         throw std::runtime_error(
             "stringify_integer() encountered std::to_chars() formatting error while serializing a value.");
 
-    buffer.append(num_buffer.data(), result.ptr - num_buffer.data());
+    buffer.append(num_buffer.data(), number_end_ptr - num_buffer.data());
 }
 
 // ===============
