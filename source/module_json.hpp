@@ -389,11 +389,20 @@ public:
     Node(number_type value) { this->data = value; }
     Node(bool_type value) { this->data = value; }
     Node(null_type value) { this->data = value; }
+    
+    // --- JSON Serializing public API ---
+    // -----------------------------------
 
     [[nodiscard]] std::string to_string(Format format = Format::PRETTY) const {
         std::string buffer;
         _serialize_json_to_buffer(buffer, *this, format);
         return buffer;
+    }
+    
+    void to_file(const std::string& filepath, Format format = Format::PRETTY) {
+        auto chars = this->to_string(format);
+        std::ofstream(filepath).write(chars.data(), chars.size());
+        // maybe a little faster than doing 'std::ofstream(filepath) << node.to_string(format)'
     }
 };
 
@@ -474,9 +483,9 @@ constexpr std::array<char, _number_of_char_values> _lookup_parsed_escaped_chars 
     return res;
 }();
 
-// ====================
-// --- JSON Parsing ---
-// ====================
+// ==========================
+// --- JSON Parsing impl. ---
+// ==========================
 
 struct _parser {
     const std::string& chars;
@@ -821,9 +830,9 @@ struct _parser {
 };
 
 
-// ========================
-// --- JSON Serializing ---
-// ========================
+// ==============================
+// --- JSON Serializing impl. ---
+// ==============================
 
 template <bool prettify>
 inline void _serialize_json_recursion(const Node& node, std::string& chars, unsigned int indent_level = 0,
@@ -993,38 +1002,25 @@ inline void _serialize_json_to_buffer(std::string& chars, const Node& node, Form
     else _serialize_json_recursion<false>(node, chars);
 }
 
-// ==========================================
-// --- Parsing / Serializing API wrappers ---
-// ==========================================
+// ===============================
+// --- JSON Parsing public API ---
+// ===============================
 
-inline Node import_string(const std::string& buffer) {
-    _parser           parser(buffer);
+inline Node from_string(const std::string& chars) {
+    _parser           parser(chars);
     const std::size_t json_start = parser.skip_nonsignificant_whitespace(0); // skip leading whitespace
     auto result_node = parser.parse_node(json_start).second; // starts parsing recursively from the root node
 
     return result_node;
 }
-
-inline void export_string(std::string& buffer, const Node& node, Format format = Format::PRETTY) {
-    _serialize_json_to_buffer(buffer, node, format);
-    // NOTE: Allocating here kinda defeats the whole purpose of saving to a pre-existing buffer,
-    // but for now I'll keep it for the sake of having a more uniform API
-}
-
-inline Node import_file(const std::string& filepath) {
+inline Node from_file(const std::string& filepath) {
     const std::string chars = _read_file_to_string(filepath);
-    return import_string(chars);
-}
-
-inline void export_file(const std::string& filepath, const Node& node, Format format = Format::PRETTY) {
-    auto chars = node.to_string(format);
-    std::ofstream(filepath).write(chars.data(), chars.size());
-    // a little faster than doing 'std::ofstream(path) << node.to_string(format)'
+    return from_string(chars);
 }
 
 namespace literals {
 inline Node operator""_utl_json(const char* c_str, std::size_t c_str_size) {
-    return import_string(std::string(c_str, c_str_size));
+    return from_string(std::string(c_str, c_str_size));
 }
 } // namespace literals
 

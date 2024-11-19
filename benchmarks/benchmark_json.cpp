@@ -32,7 +32,7 @@ void benchmark_on_data(const std::string& filepath) {
     const std::string string_buffer = (std::ostringstream() << std::ifstream(filepath).rdbuf()).str();
     
     // utl::json
-    json::Node     json_utl = json::import_string(string_buffer);
+    json::Node     json_utl = json::from_string(string_buffer);
     // nlohmann
     nlohmann::json json_nlohmann;
     std::ifstream(filepath) >> json_nlohmann;
@@ -44,8 +44,8 @@ void benchmark_on_data(const std::string& filepath) {
     json_rapidjson.Parse(string_buffer.data());
 
     // Create minimized & prettified JSON file that will be used to bechmark parsing
-    json::export_file(parsing_target_minimized, json_utl, json::Format::MINIMIZED);
-    json::export_file(parsing_target_prettified, json_utl, json::Format::PRETTY);
+    json_utl.to_file(parsing_target_minimized, json::Format::MINIMIZED);
+    json_utl.to_file(parsing_target_prettified, json::Format::PRETTY);
 
     // Set global benchmark options
     bench.minEpochIterations(6).timeUnit(millisecond, "ms");
@@ -54,7 +54,7 @@ void benchmark_on_data(const std::string& filepath) {
     bench.title("Parsing minimized JSON").relative(true).warmup(10);
 
     benchmark("utl::json", [&]() {
-        const auto json = json::import_file(parsing_target_minimized);
+        const auto json = json::from_file(parsing_target_minimized);
         DO_NOT_OPTIMIZE_AWAY(json);
     });
 
@@ -86,7 +86,7 @@ void benchmark_on_data(const std::string& filepath) {
     bench.title("Parsing prettified JSON").relative(true);
 
     benchmark("utl::json", [&]() {
-        const auto json = json::import_file(parsing_target_prettified);
+        const auto json = json::from_file(parsing_target_prettified);
         DO_NOT_OPTIMIZE_AWAY(json);
     });
 
@@ -114,7 +114,7 @@ void benchmark_on_data(const std::string& filepath) {
     bench.title("Serializing minimized JSON").relative(true);
 
     benchmark("utl::json",
-              [&]() { json::export_file(serializing_target_minimized, json_utl, json::Format::MINIMIZED); });
+              [&]() { json_utl.to_file(serializing_target_minimized, json::Format::MINIMIZED); });
 
     benchmark("nlohmann", [&]() { std::ofstream(serializing_target_minimized) << json_nlohmann.dump(); });
 
@@ -132,7 +132,7 @@ void benchmark_on_data(const std::string& filepath) {
     // Benchmark serializing (prettified)
     bench.title("Serializing prettified JSON").relative(true);
 
-    benchmark("utl::json", [&]() { json::export_file(serializing_target_prettified, json_utl, json::Format::PRETTY); });
+    benchmark("utl::json", [&]() { json_utl.to_file(serializing_target_prettified, json::Format::PRETTY); });
 
     benchmark("nlohmann", [&]() { std::ofstream(serializing_target_prettified) << json_nlohmann.dump(4); });
 
@@ -158,19 +158,19 @@ int main() {
                 e.at(utl::random::rand_uint(0, e.size() - 1)) =
                     utl::random::rand_choise({'"', '\\', '/', '\b', '\f', '\n', '\r', '\t'});
         }
-        utl::json::export_file("benchmarks/data/strings.json", utl::json::Node(strings));
+        utl::json::Node(strings).to_file("benchmarks/data/strings.json");
 
         // JSON numeric data
         std::vector<double> numbers(180'000);
         for (auto& e : numbers)
             e = utl::random::rand_choise({utl::random::rand_double(-10., 10), utl::random::rand_double(-1e108, 1e108)});
-        utl::json::export_file("benchmarks/data/numbers.json", utl::json::Node(numbers));
+        utl::json::Node(numbers).to_file("benchmarks/data/numbers.json");
     }
     
     // Benchmark on different datasets
-    //benchmark_on_data("benchmarks/data/strings.json");
-    //benchmark_on_data("benchmarks/data/numbers.json");
-    //benchmark_on_data("benchmarks/data/database.json");
+    benchmark_on_data("benchmarks/data/strings.json");
+    benchmark_on_data("benchmarks/data/numbers.json");
+    benchmark_on_data("benchmarks/data/database.json");
     
-    std::cout << "\n\n" << utl::json::import_file("snippets/test.json").to_string() << "\n\n";
+    //std::cout << "\n\n" << utl::json::from_file("snippets/test.json").to_string() << "\n\n";
 }
