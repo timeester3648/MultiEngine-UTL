@@ -39,7 +39,7 @@
 
 // ____________________ DEVELOPER DOCS ____________________
 
-// NOTE: DOCS
+//TODO:
 
 // ____________________ IMPLEMENTATION ____________________
 
@@ -389,7 +389,7 @@ public:
     Node(number_type value) { this->data = value; }
     Node(bool_type value) { this->data = value; }
     Node(null_type value) { this->data = value; }
-    
+
     // --- JSON Serializing public API ---
     // -----------------------------------
 
@@ -398,7 +398,7 @@ public:
         _serialize_json_to_buffer(buffer, *this, format);
         return buffer;
     }
-    
+
     void to_file(const std::string& filepath, Format format = Format::PRETTY) {
         auto chars = this->to_string(format);
         std::ofstream(filepath).write(chars.data(), chars.size());
@@ -686,6 +686,9 @@ struct _parser {
             if (c == '\\') {
                 ++cursor; // move past the backslash '\'
 
+                string_value.append(this->chars.data() + segment_start, cursor - segment_start - 1);
+                // can't buffer more than that since we have to insert special characters now.
+
                 const char escaped_char = this->chars[cursor];
 
                 // 2-character escape sequences
@@ -694,8 +697,6 @@ struct _parser {
                         throw std::runtime_error("JSON string node reached the end of buffer while"s +
                                                  "parsing a 2-character escape sequence at pos "s +
                                                  std::to_string(cursor) + "."s);
-
-                    string_value.append(this->chars.data() + segment_start, cursor - segment_start - 1);
                     string_value += replacement_char;
                 }
                 // 6-character escape sequences (escaped unicode HEX codepoints)
@@ -704,6 +705,7 @@ struct _parser {
                         throw std::runtime_error("JSON string node reached the end of buffer while"s +
                                                  "parsing a 5-character escape sequence at pos "s +
                                                  std::to_string(cursor) + "."s);
+
                     // Standard library is absolutely HORRIBLE when it comes to Unicode support.
                     // Literally every single encoding function in <cuchar>/<string>/<codecvt> is a
                     // crime against common sense, API safety and performace, which is why we do this
@@ -718,10 +720,11 @@ struct _parser {
                                                  "} while parsing an escape sequence at pos "s +
                                                  std::to_string(cursor) + "."s);
                     cursor += 4; // move past first 'uXXX' symbols, last symbol will be covered by the loop '++cursor'
-                } else
+                } else {
                     throw std::runtime_error("JSON string node encountered unexpected character {"s + escaped_char +
                                              "} while parsing an escape sequence at pos "s + std::to_string(cursor) +
                                              "."s);
+                }
 
                 // This covers all non-hex escape sequences according to ECMA-404 specification
                 // [https://ecma-international.org/wp-content/uploads/ECMA-404.pdf] (page 4)

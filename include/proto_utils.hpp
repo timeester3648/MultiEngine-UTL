@@ -732,7 +732,7 @@ inline void _utl_profiler_atexit() {
 
 // ____________________ DEVELOPER DOCS ____________________
 
-// NOTE: DOCS
+//TODO:
 
 // ____________________ IMPLEMENTATION ____________________
 
@@ -1082,7 +1082,7 @@ public:
     Node(number_type value) { this->data = value; }
     Node(bool_type value) { this->data = value; }
     Node(null_type value) { this->data = value; }
-    
+
     // --- JSON Serializing public API ---
     // -----------------------------------
 
@@ -1091,7 +1091,7 @@ public:
         _serialize_json_to_buffer(buffer, *this, format);
         return buffer;
     }
-    
+
     void to_file(const std::string& filepath, Format format = Format::PRETTY) {
         auto chars = this->to_string(format);
         std::ofstream(filepath).write(chars.data(), chars.size());
@@ -1379,6 +1379,9 @@ struct _parser {
             if (c == '\\') {
                 ++cursor; // move past the backslash '\'
 
+                string_value.append(this->chars.data() + segment_start, cursor - segment_start - 1);
+                // can't buffer more than that since we have to insert special characters now.
+
                 const char escaped_char = this->chars[cursor];
 
                 // 2-character escape sequences
@@ -1387,8 +1390,6 @@ struct _parser {
                         throw std::runtime_error("JSON string node reached the end of buffer while"s +
                                                  "parsing a 2-character escape sequence at pos "s +
                                                  std::to_string(cursor) + "."s);
-
-                    string_value.append(this->chars.data() + segment_start, cursor - segment_start - 1);
                     string_value += replacement_char;
                 }
                 // 6-character escape sequences (escaped unicode HEX codepoints)
@@ -1397,6 +1398,7 @@ struct _parser {
                         throw std::runtime_error("JSON string node reached the end of buffer while"s +
                                                  "parsing a 5-character escape sequence at pos "s +
                                                  std::to_string(cursor) + "."s);
+
                     // Standard library is absolutely HORRIBLE when it comes to Unicode support.
                     // Literally every single encoding function in <cuchar>/<string>/<codecvt> is a
                     // crime against common sense, API safety and performace, which is why we do this
@@ -1411,10 +1413,11 @@ struct _parser {
                                                  "} while parsing an escape sequence at pos "s +
                                                  std::to_string(cursor) + "."s);
                     cursor += 4; // move past first 'uXXX' symbols, last symbol will be covered by the loop '++cursor'
-                } else
+                } else {
                     throw std::runtime_error("JSON string node encountered unexpected character {"s + escaped_char +
                                              "} while parsing an escape sequence at pos "s + std::to_string(cursor) +
                                              "."s);
+                }
 
                 // This covers all non-hex escape sequences according to ECMA-404 specification
                 // [https://ecma-international.org/wp-content/uploads/ECMA-404.pdf] (page 4)
@@ -1737,28 +1740,31 @@ inline Node operator""_utl_json(const char* c_str, std::size_t c_str_size) {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 #include <cstddef>
-#include <limits>
-#include <stdexcept>
+
 #include <string>
-#include <system_error>
-#include <unordered_map> // unordered_map<>
+
+
 #if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_LOG)
 #ifndef UTLHEADERGUARD_LOG
 #define UTLHEADERGUARD_LOG
 
 // _______________________ INCLUDES _______________________
 
-#include <array>    // array<>
-#include <charconv> // to_chars()
-#include <chrono>
-#include <iomanip>     // setw()
-#include <ios>         // left, right
-#include <mutex>       // lock_guard<>, mutex
-#include <ostream>     // ostream
-#include <string_view> // string_view
-#include <thread>      // this_thread::get_id()
-#include <vector>      // vector<>
-
+#include <array>         // array<>
+#include <charconv>      // to_chars()
+#include <chrono>        // steady_clock
+#include <fstream>       // ofstream
+#include <iomanip>       // setw()
+#include <ios>           // left, right
+#include <mutex>         // lock_guard<>, mutex
+#include <ostream>       // ostream
+#include <stdexcept>     // std::runtime_error
+#include <string_view>   // string_view
+#include <system_error>  // errc()
+#include <thread>        // this_thread::get_id()
+#include <type_traits>   // is_integral_v<>, is_floating_point_v<>, is_same_v<>, is_convertible_to_v<>
+#include <unordered_map> // unordered_map<>
+#include <vector>        // vector<>
 
 // ____________________ DEVELOPER DOCS ____________________
 
@@ -1794,7 +1800,7 @@ std::size_t _get_thread_index(const std::thread::id id) {
     static std::unordered_map<std::thread::id, std::size_t> thread_ids;
     std::lock_guard<std::mutex>                             lock(mutex);
 
-    auto it = thread_ids.find(id);
+    const auto it = thread_ids.find(id);
     if (it == thread_ids.end()) return thread_ids[id] = next_index++;
     return it->second;
 }
@@ -1807,16 +1813,36 @@ unsigned int _integer_digit_count(IntType value) {
         ++digits;
     }
     return digits;
-    // NOTE: There is a faster way of doing it, see http://graphics.stanford.edu/~seander/bithacks.html#IntegerLog10
+    // Note: There is probably a faster way of doing it
 }
 
-using _clock = std::chrono::steady_clock;
+template <typename T>
+constexpr int _log_10_ceil(T num) {
+    return num < 10 ? 1 : 1 + _log_10_ceil(num / 10);
+}
 
-inline const _clock::time_point _program_entry_time_point = _clock::now();
+using clock = std::chrono::steady_clock;
+
+using ms = std::chrono::microseconds;
+
+inline const clock::time_point _program_entry_time_point = clock::now();
 
 // ===============================
 // --- String formatting utils ---
 // ===============================
+
+template <class T>
+constexpr bool is_integer_v = std::is_integral_v<T> && !std::is_same_v<T, char> && !std::is_same_v<T, bool>;
+
+template <class T>
+constexpr bool is_float_v = std::is_floating_point_v<T>;
+
+template <class T>
+constexpr bool is_bool_v = std::is_same_v<T, bool>;
+
+template <class T>
+constexpr bool is_stringlike_v = std::is_same_v<T, char> || std::is_convertible_v<T, std::string_view>;
+
 
 // Grows string by 'size_increase' and returns pointer to the old ending
 // in a possibly reallocated string. This function is used in multiple places
@@ -1828,31 +1854,61 @@ inline char* _grow_string(std::string& buffer, std::size_t size_increase) {
 }
 
 // Fast implementation for stringifying an integer and appending it to 'std::string'
-template <class IntType, std::enable_if_t<std::is_integral<IntType>::value, bool> = true>
-void stringify_integer(std::string& buffer, IntType value) {
+template <class Integer, std::enable_if_t<is_integer_v<Integer>, bool> = true>
+void append_stringified(std::string& str, Integer value) {
     // Note:
     // We could count the digits of 'value', preallocate buffer for exactly however many characters
     // we need and format directly to it, however benchmarks showed that it is actually inferior to
     // just doing things the usual way with a stack-allocated middle-man buffer.
 
-    std::array<char, std::numeric_limits<IntType>::digits10> num_buffer;
-    const auto [number_end_ptr, error_code] = std::to_chars(num_buffer.data(), num_buffer.data() + num_buffer.size(), value);
+    std::array<char, std::numeric_limits<Integer>::digits10> buffer;
+    const auto [number_end_ptr, error_code] = std::to_chars(buffer.data(), buffer.data() + buffer.size(), value);
 
     if (error_code != std::errc())
         throw std::runtime_error(
             "stringify_integer() encountered std::to_chars() formatting error while serializing a value.");
 
-    buffer.append(num_buffer.data(), number_end_ptr - num_buffer.data());
+    str.append(buffer.data(), number_end_ptr - buffer.data());
 }
+
+// Fast implementation for stringifying a float and appending it to 'std::string'
+template <class Float, std::enable_if_t<is_float_v<Float>, bool> = true>
+void append_stringified(std::string& str, Float value) {
+
+    constexpr int max_exponent = std::numeric_limits<Float>::max_exponent10;
+    constexpr int max_digits   = 4 + std::numeric_limits<Float>::max_digits10 + std::max(2, _log_10_ceil(max_exponent));
+    // should be the smallest buffer size to account for all possible 'std::to_chars()' outputs,
+    // see [https://stackoverflow.com/questions/68472720/stdto-chars-minimal-floating-point-buffer-size]
+
+    std::array<char, max_digits> buffer;
+    const auto [number_end_ptr, error_code] = std::to_chars(buffer.data(), buffer.data() + buffer.size(), value);
+
+    if (error_code != std::errc())
+        throw std::runtime_error(
+            "stringify_integer() encountered std::to_chars() formatting error while serializing a value.");
+
+    str.append(buffer.data(), number_end_ptr - buffer.data());
+}
+
+template <class Bool, std::enable_if_t<is_bool_v<Bool>, bool> = true>
+void append_stringified(std::string& str, Bool value) {
+    str += value ? "true" : "false";
+}
+
+// Note that 'Stringlike' includes 'char' because the only thing we care
+// about is being able to append the value directly with 'std::string::operator+='
+template <class Stringlike, std::enable_if_t<is_stringlike_v<Stringlike>, bool> = true>
+void append_stringified(std::string& str, Stringlike value) { str += value; }
 
 // ===============
 // --- Options ---
 // ===============
 
 enum class Verbosity {
-    ERR  = 3,
-    WARN = 4,
-    INFO = 6
+    ERR   = 1,
+    WARN  = 2,
+    INFO  = 3,
+    TRACE = 4
 }; // levels according to https://en.wikipedia.org/wiki/Syslog specification, might add others later
 
 enum class OpenMode { REWRITE, APPEND };
@@ -1866,6 +1922,8 @@ struct Columns {
     bool callsite;
     bool level;
     bool message;
+
+    Columns() : datetime(true), uptime(true), thread(true), callsite(true), level(true), message(true) {}
 };
 
 struct Callsite {
@@ -1886,17 +1944,20 @@ constexpr bool operator<=(Verbosity l, Verbosity r) { return static_cast<int>(l)
 
 class Sink {
 private:
-    std::ostream&      os;
-    Verbosity          verbosity;
-    Colors             colors;
-    Columns            columns;
-    _clock::duration   flush_interval;
-    _clock::time_point last_flushed;
+    std::ostream&     os;
+    Verbosity         verbosity;
+    Colors            colors;
+    clock::duration   flush_interval;
+    Columns           columns;
+    clock::time_point last_flushed;
 
 public:
-    Sink() = delete;
-    Sink(std::ostream& os, Verbosity verbosity, Colors colors, const Columns& columns, _clock::duration flush_interval)
-        : os(os), verbosity(verbosity), colors(colors), columns(columns), flush_interval(flush_interval) {}
+    Sink()            = delete;
+    Sink(const Sink&) = delete;
+    Sink(Sink&&)      = default;
+
+    Sink(std::ostream& os, Verbosity verbosity, Colors colors, clock::duration flush_interval, const Columns& columns)
+        : os(os), verbosity(verbosity), colors(colors), flush_interval(flush_interval), columns(columns) {}
 
     template <typename... Args>
     void format(const Callsite& callsite, const MessageMetadata& meta, const Args&... args) {
@@ -1904,7 +1965,7 @@ public:
 
         thread_local std::string buffer;
 
-        const _clock::time_point now = _clock::now();
+        const clock::time_point now = clock::now();
 
         // To minimize logging overhead we use string buffer, append characters to it and then write the whole buffer
         // to `std::ostream`. This avoids the inherent overhead of ostream formatting (caused largely by
@@ -1922,7 +1983,8 @@ public:
         if (this->colors == Colors::ENABLE) switch (meta.verbosity) {
             case Verbosity::ERR: buffer += "\033[31;1m"; break;
             case Verbosity::WARN: buffer += "\033[33m"; break;
-            case Verbosity::INFO: buffer += "\033[90m"; break;
+            case Verbosity::INFO: buffer += "\033[37m"; break;
+            case Verbosity::TRACE: buffer += "\033[90m"; break;
             }
 
         if (this->columns.datetime) this->format_column_datetime(buffer);
@@ -1965,7 +2027,7 @@ public:
         buffer.back() = ' '; // replace null-terminator added by 'strftime()' with a space
     }
 
-    void format_column_uptime(std::string& buffer, _clock::time_point now) {
+    void format_column_uptime(std::string& buffer, clock::time_point now) {
         const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - _program_entry_time_point);
         const auto sec        = (elapsed_ms / 1000).count();
         const auto ms         = (elapsed_ms % 1000).count(); // is 'elapsed_ms - 1000 * full_seconds; faster?
@@ -1980,20 +2042,23 @@ public:
 
         // Emulate '<< std::right << std::setw(sec_width) << sec'
         if (sec_digits < sec_width) buffer.append(sec_width - sec_digits, ' ');
-        stringify_integer(buffer, sec);
+        append_stringified(buffer, sec);
 
         buffer += '.';
 
         // Emulate '<< std::right << std::setw(ms_width) << std::setfill('0') << ms'
         if (ms_digits < ms_width) buffer.append(ms_width - ms_digits, '0');
-        stringify_integer(buffer, ms);
+        append_stringified(buffer, ms);
 
         buffer += ')';
     }
 
     void format_column_thread(std::string& buffer) {
         buffer += '[';
-        stringify_integer(buffer, _get_thread_index(std::this_thread::get_id()));
+        constexpr std::size_t thread_id_width = sizeof("thread") - 1;
+        const auto            thread_id       = _get_thread_index(std::this_thread::get_id());
+        if (_integer_digit_count(thread_id) < thread_id_width) buffer.append(thread_id_width - thread_id, ' ');
+        append_stringified(buffer, thread_id);
         buffer += ']';
     }
 
@@ -2012,22 +2077,24 @@ public:
         buffer += filename;
         buffer += ':';
         // Emulate '<< std::left << std::setw(width_after_dot) << line'
-        stringify_integer(buffer, callsite.line);
+        append_stringified(buffer, callsite.line);
         buffer.append(width_after_dot - _integer_digit_count(callsite.line), ' ');
     }
 
     void format_column_level(std::string& buffer, Verbosity level) {
         switch (level) {
-        case Verbosity::ERR: buffer += " ERR  |"; return;
-        case Verbosity::WARN: buffer += " WARN |"; return;
-        case Verbosity::INFO: buffer += " INFO |"; return;
+        case Verbosity::ERR: buffer += "   ERR|"; return;
+        case Verbosity::WARN: buffer += "  WARN|"; return;
+        case Verbosity::INFO: buffer += "  INFO|"; return;
+        case Verbosity::TRACE: buffer += " TRACE|"; return;
         }
     }
 
     template <typename... Args>
     void format_column_message(std::string& buffer, const Args&... args) {
         buffer += ' ';
-        (buffer += ... += args); // parenthesis here are necessary
+        (append_stringified(buffer, args), ...);
+        //(buffer += ... += args); // parenthesis here are necessary
     }
 };
 
@@ -2037,7 +2104,8 @@ public:
 
 class Logger {
 private:
-    inline static std::vector<Sink> sinks;
+    inline static std::vector<Sink>          sinks;
+    inline static std::vector<std::ofstream> managed_files;
 
 public:
     static Logger& instance() {
@@ -2050,11 +2118,45 @@ public:
         for (auto& sink : this->sinks) sink.format(callsite, meta, args...);
     }
 
-    void add_sink(std::ostream& os, Verbosity verbosity, Colors colors, const Columns& columns,
-                  _clock::duration flush_interval) {
-        this->sinks.emplace_back(os, verbosity, colors, columns, flush_interval);
+    Sink& emplace_sink(std::ostream& os, Verbosity verbosity, Colors colors, clock::duration flush_interval,
+                       const Columns& columns) {
+        return this->sinks.emplace_back(os, verbosity, colors, flush_interval, columns);
     }
+
+    std::ofstream& emplace_managed_file(const std::string& filename, OpenMode open_mode) {
+        const auto ios_open_mode = (open_mode == OpenMode::APPEND) ? std::ios::out | std::ios::app : std::ios::out;
+        return this->managed_files.emplace_back(filename, ios_open_mode);
+    }
+
+    // Sink& add_terminal_sink(std::ostream& os, Verbosity verbosity = Verbosity::WARN, Colors colors = Colors::ENABLE,
+    //                         clock::duration flush_interval = ms{}, const Columns& columns = Columns{}) {
+    //     return this->raw_add_sink(os, verbosity, colors, flush_interval, columns);
+    // }
+
+    // Sink& add_file_sink(const std::string& filename, OpenMode open_mode = OpenMode::REWRITE,
+    //                     Verbosity verbosity = Verbosity::INFO, Colors colors = Colors::DISABLE,
+    //                     clock::duration flush_interval = ms{1000}, const Columns& columns = Columns{}) {
+    //     const auto ios_open_mode = (open_mode == OpenMode::APPEND) ? std::ios::out | std::ios::app : std::ios::out;
+    //     auto&      os            = this->managed_files.emplace_back(filename, ios_open_mode);
+    //     return this->raw_add_sink(os, verbosity, colors, flush_interval, columns);
+    // }
 };
+
+// =======================
+// --- Sink public API ---
+// =======================
+
+Sink& add_terminal_sink(std::ostream& os, Verbosity verbosity = Verbosity::WARN, Colors colors = Colors::ENABLE,
+                        clock::duration flush_interval = ms{}, const Columns& columns = Columns{}) {
+    return Logger::instance().emplace_sink(os, verbosity, colors, flush_interval, columns);
+}
+
+Sink& add_file_sink(const std::string& filename, OpenMode open_mode = OpenMode::REWRITE,
+                    Verbosity verbosity = Verbosity::TRACE, Colors colors = Colors::DISABLE,
+                    clock::duration flush_interval = ms{15}, const Columns& columns = Columns{}) {
+    auto& os = Logger::instance().emplace_managed_file(filename, open_mode);
+    return Logger::instance().emplace_sink(os, verbosity, colors, flush_interval, columns);
+}
 
 // ======================
 // --- Logging macros ---
@@ -2068,6 +2170,9 @@ public:
 
 #define UTL_LOG_INFO(...)                                                                                              \
     utl::log::Logger::instance().push_message({__FILE__, __LINE__}, {utl::log::Verbosity::INFO}, __VA_ARGS__)
+
+#define UTL_LOG_TRACE(...)                                                                                             \
+    utl::log::Logger::instance().push_message({__FILE__, __LINE__}, {utl::log::Verbosity::TRACE}, __VA_ARGS__)
 
 } // namespace utl::log
 
