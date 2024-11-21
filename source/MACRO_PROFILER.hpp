@@ -8,7 +8,6 @@
 //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-#include <functional>
 #if !defined(UTL_PICK_MODULES) || defined(UTLMACRO_PROFILER)
 #ifndef UTLHEADERGUARD_PROFILER
 #define UTLHEADERGUARD_PROFILER

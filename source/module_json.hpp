@@ -8,10 +8,6 @@
 //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-#include <cstdint>
-#include <cstdlib>
-#include <cwchar>
-#include <sstream>
 #if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_JSON)
 #ifndef UTLHEADERGUARD_JSON
 #define UTLHEADERGUARD_JSON
@@ -22,8 +18,7 @@
 #include <charconv>         // to_chars(), from_chars()
 #include <cmath>            // isfinite()
 #include <codecvt>          // codecvt_utf8<>
-#include <cstddef>          // size_t
-#include <cuchar>           // char32_t, mbstate_t
+#include <cuchar>           // size_t, char32_t, mbstate_t
 #include <fstream>          // ifstream, ofstream
 #include <initializer_list> // initializer_list<>
 #include <limits>           // numeric_limits<>::max_digits10, numeric_limits<>::max_exponent10
