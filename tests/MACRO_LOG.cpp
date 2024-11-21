@@ -1,23 +1,23 @@
-// __________ TEST FRAMEWORK & LIBRARY  __________
+// // __________ TEST FRAMEWORK & LIBRARY  __________
 
-#define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
-#define DOCTEST_CONFIG_TREAT_CHAR_STAR_AS_STRING
-#include "thirdparty/doctest.h"
+// #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
+// #define DOCTEST_CONFIG_TREAT_CHAR_STAR_AS_STRING
+// #include "thirdparty/doctest.h"
 
-#define UTL_PICK_MODULES
-#define UTLMACRO_LOG
-#include "proto_utils.hpp"
+// #define UTL_PICK_MODULES
+// #define UTLMACRO_LOG
+// #include "proto_utils.hpp"
 
-// ________________ TEST INCLUDES ________________
+// // ________________ TEST INCLUDES ________________
 
-#include <sstream>
+// #include <sstream>
 
-// _____________ TEST IMPLEMENTATION _____________
+// // _____________ TEST IMPLEMENTATION _____________
 
-TEST_CASE("UTL_LOG() produces correct format") {
-    std::stringstream ss;
-    UTL_LOG_SET_OUTPUT(ss);
-    UTL_LOG("Block ", 17, ": responce in order. Proceeding with code ", 0, ".");
+// TEST_CASE("UTL_LOG() produces correct format") {
+//     std::stringstream ss;
+//     UTL_LOG_SET_OUTPUT(ss);
+//     UTL_LOG("Block ", 17, ": responce in order. Proceeding with code ", 0, ".");
     
-    CHECK(ss.str().data() == doctest::Contains("Block 17: responce in order. Proceeding with code 0.\n"));
-}
+//     CHECK(ss.str().data() == doctest::Contains("Block 17: responce in order. Proceeding with code 0.\n"));
+// }

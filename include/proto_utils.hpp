@@ -271,72 +271,72 @@ inline void _utl_exit_with_message(std::string_view file, int line, std::string_
 
 
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ DmitriBogdanov/prototyping_utils ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-//
-// Macro-Module:  UTL_LOG
-// Documentation: https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/MACRO_LOG.md
-// Source repo:   https://github.com/DmitriBogdanov/prototyping_utils
-//
-// This project is licensed under the MIT License
-//
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ DmitriBogdanov/prototyping_utils ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// //
+// // Macro-Module:  UTL_LOG
+// // Documentation: https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/MACRO_LOG.md
+// // Source repo:   https://github.com/DmitriBogdanov/prototyping_utils
+// //
+// // This project is licensed under the MIT License
+// //
+// // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-#if !defined(UTL_PICK_MODULES) || defined(UTLMACRO_LOG)
-#ifndef UTLHEADERGUARD_LOG
-#define UTLHEADERGUARD_LOG
+// #if !defined(UTL_PICK_MODULES) || defined(UTLMACRO_LOG)
+// #ifndef UTLHEADERGUARD_LOG
+// #define UTLHEADERGUARD_LOG
 
-// _______________________ INCLUDES _______________________
+// // _______________________ INCLUDES _______________________
 
-#include <iostream>    // cout
-#include <ostream>     // ostream
-#include <string_view> // string_view
+// #include <iostream>    // cout
+// #include <ostream>     // ostream
+// #include <string_view> // string_view
 
-// ____________________ DEVELOPER DOCS ____________________
+// // ____________________ DEVELOPER DOCS ____________________
 
-// A very minimalistic logger with source file info. Mainly used for debugging.
-// NOTE: Perhaps can be expanded to something faster and more production-usable.
-//
-// # UTL_LOG_SET_OUTPUT() #
-// Select ostream used by LOG macros.
-//
-// # UTL_LOG(), UTL_LOG_DEBUG() #
-// Print message to selected ostream prefixed with [<filename>:<line> (<function>)].
-// Accepts multiple args (with defined operator <<) that get concatenated into a single message.
-// DEBUG version compiles to nothing in release.
+// // A very minimalistic logger with source file info. Mainly used for debugging.
+// // NOTE: Perhaps can be expanded to something faster and more production-usable.
+// //
+// // # UTL_LOG_SET_OUTPUT() #
+// // Select ostream used by LOG macros.
+// //
+// // # UTL_LOG(), UTL_LOG_DEBUG() #
+// // Print message to selected ostream prefixed with [<filename>:<line> (<function>)].
+// // Accepts multiple args (with defined operator <<) that get concatenated into a single message.
+// // DEBUG version compiles to nothing in release.
 
-// ____________________ IMPLEMENTATION ____________________
+// // ____________________ IMPLEMENTATION ____________________
 
-// ======================
-// --- Logging Macros ---
-// ======================
+// // ======================
+// // --- Logging Macros ---
+// // ======================
 
-inline std::ostream* _utl_log_ostream = &std::cout;
+// inline std::ostream* _utl_log_ostream = &std::cout;
 
-#define UTL_LOG_SET_OUTPUT(new_stream_) _utl_log_ostream = &new_stream_;
+// #define UTL_LOG_SET_OUTPUT(new_stream_) _utl_log_ostream = &new_stream_;
 
-template <typename... Args>
-inline void _utl_log_print(std::string_view file, int line, std::string_view func, const Args&... args) {
-    const std::string_view filename = file.substr(file.find_last_of("/\\") + 1);
+// template <typename... Args>
+// inline void _utl_log_print(std::string_view file, int line, std::string_view func, const Args&... args) {
+//     const std::string_view filename = file.substr(file.find_last_of("/\\") + 1);
 
-    ///(*_utl_log_ostream) << "\033[31;1m"; // Supported by Linux and Windows10+, but prints to files, figure out a fix
-    (*_utl_log_ostream) << "[" << filename << ":" << line << ", " << func << "()]";
-    ///(*_utl_log_ostream) << "\033[0m";
+//     ///(*_utl_log_ostream) << "\033[31;1m"; // Supported by Linux and Windows10+, but prints to files, figure out a fix
+//     (*_utl_log_ostream) << "[" << filename << ":" << line << ", " << func << "()]";
+//     ///(*_utl_log_ostream) << "\033[0m";
 
-    (*_utl_log_ostream) << " ";
-    ((*_utl_log_ostream) << ... << args);
-    (*_utl_log_ostream) << '\n';
-}
+//     (*_utl_log_ostream) << " ";
+//     ((*_utl_log_ostream) << ... << args);
+//     (*_utl_log_ostream) << '\n';
+// }
 
-#define UTL_LOG(...) _utl_log_print(__FILE__, __LINE__, __func__, __VA_ARGS__)
+// #define UTL_LOG(...) _utl_log_print(__FILE__, __LINE__, __func__, __VA_ARGS__)
 
-#ifdef _DEBUG
-#define UTL_LOG_DEBUG(...) _utl_log_print(__FILE__, __LINE__, __func__, __VA_ARGS__)
-#else
-#define UTL_LOG_DEBUG(...)
-#endif
+// #ifdef _DEBUG
+// #define UTL_LOG_DEBUG(...) _utl_log_print(__FILE__, __LINE__, __func__, __VA_ARGS__)
+// #else
+// #define UTL_LOG_DEBUG(...)
+// #endif
 
-#endif
-#endif // macro-module UTL_LOG
+// #endif
+// #endif // macro-module UTL_LOG
 
 
 
@@ -1770,6 +1770,7 @@ inline Node operator""_utl_json(const char* c_str, std::size_t c_str_size) {
 #include <type_traits>   // is_integral_v<>, is_floating_point_v<>, is_same_v<>, is_convertible_to_v<>
 #include <unordered_map> // unordered_map<>
 #include <vector>        // vector<>
+#include <list>          // list<>
 
 // ____________________ DEVELOPER DOCS ____________________
 
@@ -1858,29 +1859,38 @@ struct is_index_sequence_expandable<Type, std::void_t<decltype(std::get<0>(std::
                                     std::void_t<decltype(std::tuple_size<Type>::value)>> : std::true_type {};
 
 template <class T>
-constexpr bool is_integer_v = std::is_integral_v<T> && !std::is_same_v<T, char> && !std::is_same_v<T, bool>;
+constexpr bool is_stringified_as_integer_v =
+    std::is_integral_v<T> && !std::is_same_v<T, char> && !std::is_same_v<T, bool>;
 
 template <class T>
-constexpr bool is_float_v = std::is_floating_point_v<T>;
+constexpr bool is_stringified_as_float_v = std::is_floating_point_v<T>;
 
 template <class T>
-constexpr bool is_bool_v = std::is_same_v<T, bool>;
+constexpr bool is_stringified_as_bool_v = std::is_same_v<T, bool>;
 
 template <class T>
-constexpr bool is_string_or_char_v = std::is_same_v<T, char> || std::is_convertible_v<T, std::string_view>;
+constexpr bool is_stringified_as_string_v = std::is_same_v<T, char> || std::is_convertible_v<T, std::string_view>;
 
 template <class T>
-constexpr bool is_array_v = is_iterable_through<T>::value && !is_string_or_char_v<T>;
-// std::string and similar types are also iterable through, don't want to treat them as arrays
+constexpr bool is_stringified_as_string_convertible_v =
+    std::is_convertible_v<T, std::string> && !is_stringified_as_string_v<T>;
+// 'std::filesystem::path' can convert to 'std::string' but not to 'std::string_view', and if it gets
+// interpreted as an array nasty things will happen as the array tries to iterate over path entries.
+// Don't know any other types with this issue, but if they exist the workaround will be the same.
 
 template <class T>
-constexpr bool is_tuple_v = is_index_sequence_expandable<T>::value && !is_array_v<T>;
-// std::array<> is both iterable and idx sequence expandable like a tuple, we don't want to treat it like tuple
+constexpr bool is_stringified_as_array_v =
+    is_iterable_through<T>::value && !is_stringified_as_string_v<T> && !is_stringified_as_string_convertible_v<T>;
+// 'std::string' and similar types are also iterable through, don't want to treat them as arrays
+
+template <class T>
+constexpr bool is_stringified_as_tuple_v = is_index_sequence_expandable<T>::value && !is_stringified_as_array_v<T>;
+// 'std::array<>' is both iterable and idx sequence expandable like a tuple, we don't want to treat it like tuple
 
 // Fast implementation for stringifying an integer and appending it to 'std::string'
-template <class Integer, std::enable_if_t<is_integer_v<Integer>, bool> = true>
+template <class Integer, std::enable_if_t<is_stringified_as_integer_v<Integer>, bool> = true>
 void append_stringified(std::string& str, Integer value) {
-    
+
     // Note:
     // We could count the digits of 'value', preallocate buffer for exactly however many characters
     // we need and format directly to it, however benchmarks showed that it is actually inferior to
@@ -1902,7 +1912,7 @@ void append_stringified(std::string& str, Integer value) {
 }
 
 // Fast implementation for stringifying a float and appending it to 'std::string'
-template <class Float, std::enable_if_t<is_float_v<Float>, bool> = true>
+template <class Float, std::enable_if_t<is_stringified_as_float_v<Float>, bool> = true>
 void append_stringified(std::string& str, Float value) {
 
     constexpr int max_exponent = std::numeric_limits<Float>::max_exponent10;
@@ -1920,16 +1930,22 @@ void append_stringified(std::string& str, Float value) {
     str.append(buffer.data(), number_end_ptr - buffer.data());
 }
 
-template <class Bool, std::enable_if_t<is_bool_v<Bool>, bool> = true>
+template <class Bool, std::enable_if_t<is_stringified_as_bool_v<Bool>, bool> = true>
 void append_stringified(std::string& str, Bool value) {
     str += value ? "true" : "false";
 }
 
 // Note that 'Stringlike' includes 'char' because the only thing we care
 // about is being able to append the value directly with 'std::string::operator+='
-template <class Stringlike, std::enable_if_t<is_string_or_char_v<Stringlike>, bool> = true>
+template <class Stringlike, std::enable_if_t<is_stringified_as_string_v<Stringlike>, bool> = true>
 void append_stringified(std::string& str, const Stringlike& value) {
     str += value;
+}
+
+template <class StringConvertible,
+          std::enable_if_t<is_stringified_as_string_convertible_v<StringConvertible>, bool> = true>
+void append_stringified(std::string& str, const StringConvertible& value) {
+    str += std::string(value);
 }
 
 // Tuple stringification relies on variadic template over the index sequence, but such template
@@ -1948,11 +1964,11 @@ void append_stringified(std::string& str, const Stringlike& value) {
 // which is why we predeclare all the necessary 'append_stringified()' and then have the impl.
 
 // Predeclare
-template <class Arraylike, std::enable_if_t<is_array_v<Arraylike>, bool> = true>
+template <class Arraylike, std::enable_if_t<is_stringified_as_array_v<Arraylike>, bool> = true>
 void append_stringified(std::string& str, const Arraylike& value);
 
 template <template <typename... Params> class Tuplelike, typename... Args,
-          std::enable_if_t<is_tuple_v<Tuplelike<Args...>>, bool> = true>
+          std::enable_if_t<is_stringified_as_tuple_v<Tuplelike<Args...>>, bool> = true>
 void append_stringified(std::string& str, const Tuplelike<Args...>& value);
 
 // Implement
@@ -1963,7 +1979,7 @@ void _append_stringified_tuple_impl(std::string& str, Tuplelike value, std::inde
     // in the same fashion, we can fold over 2 functions by doing '( ( f(args), g(args) ), ... )'
 }
 
-template <class Arraylike, std::enable_if_t<is_array_v<Arraylike>, bool>>
+template <class Arraylike, std::enable_if_t<is_stringified_as_array_v<Arraylike>, bool>>
 void append_stringified(std::string& str, const Arraylike& value) {
     str += "{ ";
     for (auto it = value.begin();;) {
@@ -1975,7 +1991,7 @@ void append_stringified(std::string& str, const Arraylike& value) {
 }
 
 template <template <typename...> class Tuplelike, typename... Args,
-          std::enable_if_t<is_tuple_v<Tuplelike<Args...>>, bool>>
+          std::enable_if_t<is_stringified_as_tuple_v<Tuplelike<Args...>>, bool>>
 void append_stringified(std::string& str, const Tuplelike<Args...>& value) {
     str += "< ";
     _append_stringified_tuple_impl(str, value, std::index_sequence_for<Args...>{});
@@ -1994,12 +2010,7 @@ std::string stringify(const T& value) {
 // --- Options ---
 // ===============
 
-enum class Verbosity {
-    ERR   = 1,
-    WARN  = 2,
-    INFO  = 3,
-    TRACE = 4
-};
+enum class Verbosity { ERR = 1, WARN = 2, INFO = 3, TRACE = 4 };
 
 enum class OpenMode { REWRITE, APPEND };
 
@@ -2109,9 +2120,10 @@ public:
         _available_localtime_impl(&time_moment, &timer);
 
         constexpr std::size_t datetime_width = sizeof("yyyy-mm-dd HH:MM:SS");
+        // size includes the null terminator added by 'strftime()'
 
         // Format time straight into the buffer
-        std::array<char, datetime_width + 1> strftime_buffer; // + 1 for the null terminator added by 'strftime()'
+        std::array<char, datetime_width> strftime_buffer;
         std::strftime(strftime_buffer.data(), strftime_buffer.size(), "%Y-%m-%d %H:%M:%S", &time_moment);
 
         strftime_buffer.back() = ' '; // replace null-terminator added by 'strftime()' with a space
@@ -2196,7 +2208,10 @@ public:
 class Logger {
 private:
     inline static std::vector<Sink>          sinks;
-    inline static std::vector<std::ofstream> managed_files;
+    inline static std::list<std::ofstream> managed_files;
+    // we don't want 'managed_files' to reallocate its elements at any point
+    // since that would leave corresponding sinks with dangling references,
+    // which is why list is used
 
 public:
     static Logger& instance() {
@@ -2211,7 +2226,7 @@ public:
             static Sink default_sink(std::cout, Verbosity::TRACE, Colors::ENABLE, ms(0), Columns{});
             default_sink.format(callsite, meta, args...);
         }
-        
+
         for (auto& sink : this->sinks) sink.format(callsite, meta, args...);
     }
 
