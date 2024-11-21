@@ -263,7 +263,7 @@ enum class Verbosity {
     WARN  = 2,
     INFO  = 3,
     TRACE = 4
-}; // levels according to https://en.wikipedia.org/wiki/Syslog specification, might add others later
+};
 
 enum class OpenMode { REWRITE, APPEND };
 
@@ -488,19 +488,6 @@ public:
         const auto ios_open_mode = (open_mode == OpenMode::APPEND) ? std::ios::out | std::ios::app : std::ios::out;
         return this->managed_files.emplace_back(filename, ios_open_mode);
     }
-
-    // Sink& add_terminal_sink(std::ostream& os, Verbosity verbosity = Verbosity::WARN, Colors colors = Colors::ENABLE,
-    //                         clock::duration flush_interval = ms{}, const Columns& columns = Columns{}) {
-    //     return this->raw_add_sink(os, verbosity, colors, flush_interval, columns);
-    // }
-
-    // Sink& add_file_sink(const std::string& filename, OpenMode open_mode = OpenMode::REWRITE,
-    //                     Verbosity verbosity = Verbosity::INFO, Colors colors = Colors::DISABLE,
-    //                     clock::duration flush_interval = ms{1000}, const Columns& columns = Columns{}) {
-    //     const auto ios_open_mode = (open_mode == OpenMode::APPEND) ? std::ios::out | std::ios::app : std::ios::out;
-    //     auto&      os            = this->managed_files.emplace_back(filename, ios_open_mode);
-    //     return this->raw_add_sink(os, verbosity, colors, flush_interval, columns);
-    // }
 };
 
 // =======================
@@ -534,6 +521,19 @@ Sink& add_file_sink(const std::string& filename, OpenMode open_mode = OpenMode::
 
 #define UTL_LOG_TRACE(...)                                                                                             \
     utl::log::Logger::instance().push_message({__FILE__, __LINE__}, {utl::log::Verbosity::TRACE}, __VA_ARGS__)
+
+#ifdef _DEBUG
+#define UTL_LOG_DERR(...) UTL_LOG_ERR(__VA_ARGS__)
+#define UTL_LOG_DWARN(...) UTL_LOG_WARN(__VA_ARGS__)
+#define UTL_LOG_DINFO(...) UTL_LOG_INFO(__VA_ARGS__)
+#define UTL_LOG_DTRACE(...) UTL_LOG_TRACE(__VA_ARGS__)
+#else
+#define UTL_LOG_DERR(...)
+#define UTL_LOG_DWARN(...)
+#define UTL_LOG_DINFO(...)
+#define UTL_LOG_DTRACE(...)
+#endif
+
 
 } // namespace utl::log
 
