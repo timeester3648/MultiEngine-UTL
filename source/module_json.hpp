@@ -891,7 +891,7 @@ inline void _serialize_json_recursion(const Node& node, std::string& chars, unsi
         chars += '{';
         if constexpr (prettify) chars += '\n';
 
-        for (auto it = object_value.cbegin(); it != object_value.cend();) {
+        for (auto it = object_value.cbegin();;) {
             if constexpr (prettify) chars.append(indent_size + indent_level_size, ' ');
             // Key
             chars += '"';
@@ -901,8 +901,13 @@ inline void _serialize_json_recursion(const Node& node, std::string& chars, unsi
             // Value
             _serialize_json_recursion<prettify>(it->second, chars, indent_level + 1, true);
             // Comma
-            if (++it != object_value.cend()) chars += ','; // prevents trailing comma
-            if constexpr (prettify) chars += '\n';
+            if (++it != object_value.cend()) { // prevents trailing comma
+                chars += ','; 
+                if constexpr (prettify) chars += '\n';
+            } else {
+                if constexpr (prettify) chars += '\n';
+                break;
+            }
         }
 
         if constexpr (prettify) chars.append(indent_size, ' ');
@@ -921,12 +926,18 @@ inline void _serialize_json_recursion(const Node& node, std::string& chars, unsi
         chars += '[';
         if constexpr (prettify) chars += '\n';
 
-        for (auto it = array_value.cbegin(); it != array_value.cend();) {
+        for (auto it = array_value.cbegin();;) {
             // Node
             _serialize_json_recursion<prettify>(*it, chars, indent_level + 1);
             // Comma
-            if (++it != array_value.cend()) chars += ','; // prevents trailing comma
-            if constexpr (prettify) chars += '\n';
+            if (++it != array_value.cend()) { // prevents trailing comma
+                chars += ',';
+                if constexpr (prettify) chars += '\n';
+            }
+            else {
+                if constexpr (prettify) chars += '\n';
+                break;
+            }
         }
         if constexpr (prettify) chars.append(indent_size, ' ');
         chars += ']';

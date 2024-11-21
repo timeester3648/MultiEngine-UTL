@@ -11,6 +11,7 @@
 #include <cstddef>
 
 #include <string>
+#include <utility>
 
 
 #if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_LOG)
@@ -96,9 +97,32 @@ using ms = std::chrono::microseconds;
 
 inline const clock::time_point _program_entry_time_point = clock::now();
 
-// ===============================
-// --- String formatting utils ---
-// ===============================
+// Grows string by 'size_increase' and returns pointer to the old ending
+// in a possibly reallocated string. This function is used in multiple places
+// to expand string buffer before formatting a known amount of characters into it.
+// inline char* _grow_string(std::string& buffer, std::size_t size_increase) {
+//     const std::size_t old_buffer_size = buffer.size();
+//     buffer.resize(old_buffer_size + size_increase);
+//     return buffer.data() + old_buffer_size;
+// }
+
+// =======================
+// --- Stringification ---
+// =======================
+
+template <typename Type, typename = void, typename = void>
+struct is_iterable_through : std::false_type {};
+
+template <typename Type>
+struct is_iterable_through<Type, std::void_t<decltype(++std::declval<Type>().begin())>,
+                            std::void_t<decltype(std::declval<Type>().end())>> : std::true_type {};
+
+template <typename Type, typename = void, typename = void>
+struct is_index_sequence_expandable : std::false_type {};
+
+template <typename Type>
+struct is_index_sequence_expandable<Type, std::void_t<decltype(std::get<0>(std::declval<Type>()))>,
+                                     std::void_t<decltype(std::tuple_size<Type>::value)>> : std::true_type {};
 
 template <class T>
 constexpr bool is_integer_v = std::is_integral_v<T> && !std::is_same_v<T, char> && !std::is_same_v<T, bool>;
@@ -110,17 +134,15 @@ template <class T>
 constexpr bool is_bool_v = std::is_same_v<T, bool>;
 
 template <class T>
-constexpr bool is_stringlike_v = std::is_same_v<T, char> || std::is_convertible_v<T, std::string_view>;
+constexpr bool is_string_or_char_v = std::is_same_v<T, char> || std::is_convertible_v<T, std::string_view>;
 
+template <class T>
+constexpr bool is_array_v = is_iterable_through<T>::value && !is_string_or_char_v<T>;
+// std::string and similar types are also iterable through, don't want to treat them as arrays
 
-// Grows string by 'size_increase' and returns pointer to the old ending
-// in a possibly reallocated string. This function is used in multiple places
-// to expand string buffer before formatting a known amount of characters into it.
-inline char* _grow_string(std::string& buffer, std::size_t size_increase) {
-    const std::size_t old_buffer_size = buffer.size();
-    buffer.resize(old_buffer_size + size_increase);
-    return buffer.data() + old_buffer_size;
-}
+template <class T>
+constexpr bool is_tuple_v = is_index_sequence_expandable<T>::value && !is_array_v<T>;
+// std::array<> is both iterable and idx sequence expandable like a tuple, we don't want to treat it like tuple
 
 // Fast implementation for stringifying an integer and appending it to 'std::string'
 template <class Integer, std::enable_if_t<is_integer_v<Integer>, bool> = true>
@@ -166,8 +188,68 @@ void append_stringified(std::string& str, Bool value) {
 
 // Note that 'Stringlike' includes 'char' because the only thing we care
 // about is being able to append the value directly with 'std::string::operator+='
-template <class Stringlike, std::enable_if_t<is_stringlike_v<Stringlike>, bool> = true>
-void append_stringified(std::string& str, Stringlike value) { str += value; }
+template <class Stringlike, std::enable_if_t<is_string_or_char_v<Stringlike>, bool> = true>
+void append_stringified(std::string& str, const Stringlike &value) {
+    str += value;
+}
+
+// Tuple stringification relies on variadic template over the index sequence, but such template
+// cannot have default arguments like 'enable_if_t<...> = true' at the end, preventing us from
+// doing the usual SFINAE.
+//
+// We can SFINAE in a wrapper method 'append_stringified()' and make variadic implementation a separate function,
+// avoiding all issues. This is canonical to how 'std::integer_sequence' is usually used, see cppreference:
+// https://en.cppreference.com/w/cpp/utility/integer_sequence.
+//
+// Due to recursive 'append_stringified()' calls during tuple and array stringification,
+// to be able to handle nested tuples & arrays we need to satisfy following relations:
+//      'append_stringified(tuple)'             -> knows '_append_stringified_tuple_impl(tuple)'
+//     '_append_stringified_tuple_impl(tuple)'  -> knows  'append_stringified(array)' and 'append_stringified(tuple)'
+//      'append_stringified(array)'             -> knows  'append_stringified(tuple)'
+// which is why we predeclare all the necessary 'append_stringified()' and then have the impl.
+
+// Predeclare
+template <class Arraylike, std::enable_if_t<is_array_v<Arraylike>, bool> = true>
+void append_stringified(std::string& str, const Arraylike &value);
+
+template <template <typename... Params> class Tuplelike, typename... Args,
+          std::enable_if_t<is_tuple_v<Tuplelike<Args...>>, bool> = true>
+void append_stringified(std::string& str, const Tuplelike<Args...> &value);
+
+// Implement
+template <class Tuplelike, std::size_t... Idx>
+void _append_stringified_tuple_impl(std::string& str, Tuplelike value, std::index_sequence<Idx...>) {
+    ((Idx == 0 ? "" : str += ", ", append_stringified(str, std::get<Idx>(value))), ...);
+    // fold expression '( f(args), ... )' invokes 'f(args)' for all arguments in 'args...'
+    // in the same fashion, we can fold over 2 functions by doing '( ( f(args), g(args) ), ... )'
+}
+
+template <class Arraylike, std::enable_if_t<is_array_v<Arraylike>, bool>>
+void append_stringified(std::string& str, const Arraylike &value) {
+    str += "{ ";
+    for (auto it = value.begin();;) {
+        append_stringified(str, *it);
+        if (++it != value.end()) str += ", "; // prevents trailing comma
+        else break;
+    }
+    str += " }";
+}
+
+template <template <typename...> class Tuplelike, typename... Args,
+          std::enable_if_t<is_tuple_v<Tuplelike<Args...>>, bool>>
+void append_stringified(std::string& str, const Tuplelike<Args...> &value) {
+    str += "< ";
+    _append_stringified_tuple_impl(str, value, std::index_sequence_for<Args...>{});
+    str += " >";
+}
+
+template<class T>
+std::string stringify(const T &value) {
+    std::string str;
+    append_stringified(str, value);
+    return str;
+}
+
 
 // ===============
 // --- Options ---
@@ -290,10 +372,11 @@ public:
         constexpr std::size_t datetime_width = sizeof("yyyy-mm-dd HH:MM:SS");
 
         // Format time straight into the buffer
-        const auto append_point = _grow_string(buffer, datetime_width);
-
-        std::strftime(append_point, datetime_width, "%Y-%m-%d %H:%M:%S", &time_moment);
-        buffer.back() = ' '; // replace null-terminator added by 'strftime()' with a space
+        std::array<char, datetime_width + 1> strftime_buffer; // + 1 for the null terminator added by 'strftime()'
+        std::strftime(strftime_buffer.data(), strftime_buffer.size(), "%Y-%m-%d %H:%M:%S", &time_moment);
+        
+        strftime_buffer.back() = ' '; // replace null-terminator added by 'strftime()' with a space
+        buffer.append(strftime_buffer.data(), strftime_buffer.size());
     }
 
     void format_column_uptime(std::string& buffer, clock::time_point now) {
