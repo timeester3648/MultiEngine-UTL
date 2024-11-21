@@ -162,7 +162,7 @@ int main() {
     //benchmark_stringification();
     // benchmark_int_logging();
 
-    log::add_terminal_sink(std::cout, log::Verbosity::TRACE);
+    //log::add_terminal_sink(std::cout, log::Verbosity::INFO);
 
     UTL_LOG_INFO("Value is ", 5);
     UTL_LOG_WARN("But it should be ", 4);

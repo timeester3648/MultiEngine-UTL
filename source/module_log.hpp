@@ -24,8 +24,7 @@
 #include <charconv>      // to_chars()
 #include <chrono>        // steady_clock
 #include <fstream>       // ofstream
-#include <iomanip>       // setw()
-#include <ios>           // left, right
+#include <iostream>      // cout
 #include <mutex>         // lock_guard<>, mutex
 #include <ostream>       // ostream
 #include <stdexcept>     // std::runtime_error
@@ -62,9 +61,7 @@ auto _available_localtime_impl(Arg_tm time_moment, Arg_time_t timer)
 }
 
 std::size_t _get_thread_index(const std::thread::id id) {
-    static std::size_t next_index = 1;
-    // we start thread indexation at 1 because otherwise <charconv> formats thread '0' to ''
-    // (since it doesn't output leading zeroes), also this looks a bit nicer (subjective)
+    static std::size_t next_index = 0;
 
     static std::mutex                                       mutex;
     static std::unordered_map<std::thread::id, std::size_t> thread_ids;
@@ -115,14 +112,14 @@ struct is_iterable_through : std::false_type {};
 
 template <typename Type>
 struct is_iterable_through<Type, std::void_t<decltype(++std::declval<Type>().begin())>,
-                            std::void_t<decltype(std::declval<Type>().end())>> : std::true_type {};
+                           std::void_t<decltype(std::declval<Type>().end())>> : std::true_type {};
 
 template <typename Type, typename = void, typename = void>
 struct is_index_sequence_expandable : std::false_type {};
 
 template <typename Type>
 struct is_index_sequence_expandable<Type, std::void_t<decltype(std::get<0>(std::declval<Type>()))>,
-                                     std::void_t<decltype(std::tuple_size<Type>::value)>> : std::true_type {};
+                                    std::void_t<decltype(std::tuple_size<Type>::value)>> : std::true_type {};
 
 template <class T>
 constexpr bool is_integer_v = std::is_integral_v<T> && !std::is_same_v<T, char> && !std::is_same_v<T, bool>;
@@ -147,10 +144,16 @@ constexpr bool is_tuple_v = is_index_sequence_expandable<T>::value && !is_array_
 // Fast implementation for stringifying an integer and appending it to 'std::string'
 template <class Integer, std::enable_if_t<is_integer_v<Integer>, bool> = true>
 void append_stringified(std::string& str, Integer value) {
+    
     // Note:
     // We could count the digits of 'value', preallocate buffer for exactly however many characters
     // we need and format directly to it, however benchmarks showed that it is actually inferior to
     // just doing things the usual way with a stack-allocated middle-man buffer.
+
+    if (value == 0) { // 'std::to_chars' converts 0 to "" due to skipping leading zeroes, we want "0" instead
+        str += '0';
+        return;
+    }
 
     std::array<char, std::numeric_limits<Integer>::digits10> buffer;
     const auto [number_end_ptr, error_code] = std::to_chars(buffer.data(), buffer.data() + buffer.size(), value);
@@ -189,7 +192,7 @@ void append_stringified(std::string& str, Bool value) {
 // Note that 'Stringlike' includes 'char' because the only thing we care
 // about is being able to append the value directly with 'std::string::operator+='
 template <class Stringlike, std::enable_if_t<is_string_or_char_v<Stringlike>, bool> = true>
-void append_stringified(std::string& str, const Stringlike &value) {
+void append_stringified(std::string& str, const Stringlike& value) {
     str += value;
 }
 
@@ -210,11 +213,11 @@ void append_stringified(std::string& str, const Stringlike &value) {
 
 // Predeclare
 template <class Arraylike, std::enable_if_t<is_array_v<Arraylike>, bool> = true>
-void append_stringified(std::string& str, const Arraylike &value);
+void append_stringified(std::string& str, const Arraylike& value);
 
 template <template <typename... Params> class Tuplelike, typename... Args,
           std::enable_if_t<is_tuple_v<Tuplelike<Args...>>, bool> = true>
-void append_stringified(std::string& str, const Tuplelike<Args...> &value);
+void append_stringified(std::string& str, const Tuplelike<Args...>& value);
 
 // Implement
 template <class Tuplelike, std::size_t... Idx>
@@ -225,7 +228,7 @@ void _append_stringified_tuple_impl(std::string& str, Tuplelike value, std::inde
 }
 
 template <class Arraylike, std::enable_if_t<is_array_v<Arraylike>, bool>>
-void append_stringified(std::string& str, const Arraylike &value) {
+void append_stringified(std::string& str, const Arraylike& value) {
     str += "{ ";
     for (auto it = value.begin();;) {
         append_stringified(str, *it);
@@ -237,14 +240,14 @@ void append_stringified(std::string& str, const Arraylike &value) {
 
 template <template <typename...> class Tuplelike, typename... Args,
           std::enable_if_t<is_tuple_v<Tuplelike<Args...>>, bool>>
-void append_stringified(std::string& str, const Tuplelike<Args...> &value) {
+void append_stringified(std::string& str, const Tuplelike<Args...>& value) {
     str += "< ";
     _append_stringified_tuple_impl(str, value, std::index_sequence_for<Args...>{});
     str += " >";
 }
 
-template<class T>
-std::string stringify(const T &value) {
+template <class T>
+std::string stringify(const T& value) {
     std::string str;
     append_stringified(str, value);
     return str;
@@ -374,7 +377,7 @@ public:
         // Format time straight into the buffer
         std::array<char, datetime_width + 1> strftime_buffer; // + 1 for the null terminator added by 'strftime()'
         std::strftime(strftime_buffer.data(), strftime_buffer.size(), "%Y-%m-%d %H:%M:%S", &time_moment);
-        
+
         strftime_buffer.back() = ' '; // replace null-terminator added by 'strftime()' with a space
         buffer.append(strftime_buffer.data(), strftime_buffer.size());
     }
@@ -467,6 +470,12 @@ public:
 
     template <typename... Args>
     void push_message(const Callsite& callsite, const MessageMetadata& meta, const Args&... args) {
+        // When no sinks were manually created, default sink-to-terminal takes over
+        if (this->sinks.empty()) {
+            static Sink default_sink(std::cout, Verbosity::TRACE, Colors::ENABLE, ms(0), Columns{});
+            default_sink.format(callsite, meta, args...);
+        }
+        
         for (auto& sink : this->sinks) sink.format(callsite, meta, args...);
     }
 
