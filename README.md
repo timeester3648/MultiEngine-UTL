@@ -62,7 +62,7 @@ Secondary design goals also include:
 
 ## Third-party tools & libraries
 
-While the library itself consists of a single header, it was built and tested using a number of third-party tools and libraries, some of which are embedded in a repo.
+While the library itself consists of a single header with no embedded dependencies, it was built and tested using a number of third-party tools and libraries, some of which are embedded in a repo.
 
 | Tool | Version | Used for |
 | - | - | - |
@@ -71,14 +71,14 @@ While the library itself consists of a single header, it was built and tested us
 | [CMake](https://cmake.org) | **v.3.2.11** | Build and test automation |
 | [valgrind](https://valgrind.org) | **v.3.18.1** | Memory leak detection |
 
-| Library | Version | Used for | Embedded in repo |
-| - | - | - | - |
-| [doctest](https://github.com/doctest/doctest) | **v.2.4.11** | Unit testing | ✔ |
-| [nanobench](https://github.com/martinus/nanobench) | **v.4.3.11** | Benchmarking | ✔ |
-| [nlohmann json](https://github.com/nlohmann/json) | **v.3.11.3** | Benchmark comparison | ✔ |
-| [PicoJSON](https://github.com/kazuho/picojson) | **v.1.3.0** | Benchmark comparison | ✔ |
-| [RapidJSON](https://github.com/Tencent/rapidjson) | **v.1.1.0** | Benchmark comparison | ✔ |
-
+| Library | Version | License | Used for | Embedded in repo |
+| - | - | - | - | - |
+| [doctest](https://github.com/doctest/doctest) | **v.2.4.11** | [MIT](https://github.com/doctest/doctest/blob/master/LICENSE.txt) | Unit testing | ✔ |
+| [nanobench](https://github.com/martinus/nanobench) | **v.4.3.11** | [MIT](https://github.com/martinus/nanobench/blob/master/LICENSE) | Benchmarking | ✔ |
+| [nlohmann json](https://github.com/nlohmann/json) | **v.3.11.3** | [MIT](https://github.com/nlohmann/json/blob/develop/LICENSE.MIT) | Benchmark comparison | ✔ |
+| [PicoJSON](https://github.com/kazuho/picojson) | **v.1.3.0** | [BSD-2](https://github.com/kazuho/picojson/blob/master/LICENSE) | Benchmark comparison | ✔ |
+| [RapidJSON](https://github.com/Tencent/rapidjson) | **v.1.1.0** | [MIT, BSD, JSON](https://github.com/Tencent/rapidjson/blob/master/license.txt) | Benchmark comparison | ✔ |
+| [JSONTestSuite](https://github.com/nst/JSONTestSuite/) | **commit 1ef36fa** | [MIT](https://github.com/nst/JSONTestSuite/blob/master/LICENSE) | JSON Validation test suite | ✔ |
 
 ## Work in progress
 

@@ -509,7 +509,7 @@ public:
 // --- Sink public API ---
 // =======================
 
-Sink& add_terminal_sink(std::ostream& os, Verbosity verbosity = Verbosity::WARN, Colors colors = Colors::ENABLE,
+Sink& add_terminal_sink(std::ostream& os, Verbosity verbosity = Verbosity::INFO, Colors colors = Colors::ENABLE,
                         clock::duration flush_interval = ms{}, const Columns& columns = Columns{}) {
     return Logger::instance().emplace_sink(os, verbosity, colors, flush_interval, columns);
 }

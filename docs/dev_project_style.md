@@ -80,6 +80,32 @@ Replace `XXXXXXXXXXXX` with **module name**.
 
 Replace `XXXXXXXXXXXX` with **macro-module name**.
 
+### Module tests template
+
+```cpp
+// _______________ TEST FRAMEWORK & MODULE  _______________
+
+#define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
+#include "thirdparty/doctest.h"
+
+#include "module_XXXXXXXXXXXX.hpp"
+
+// _______________________ INCLUDES _______________________
+
+// NOTE: STD INCLUDES
+
+// ____________________ DEVELOPER DOCS ____________________
+
+// NOTE: DOCS
+
+// ____________________ IMPLEMENTATION ____________________
+
+// NOTE: IMPL
+
+```
+
+Replace `XXXXXXXXXXXX` with **module name**.
+
 ### In-code headers
 
 #### Header 1

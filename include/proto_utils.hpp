@@ -726,7 +726,7 @@ inline void _utl_profiler_atexit() {
 
 // ____________________ DEVELOPER DOCS ____________________
 
-//TODO:
+// TODO:
 
 // ____________________ IMPLEMENTATION ____________________
 
@@ -1245,11 +1245,38 @@ struct _parser {
         Node value;
         std::tie(cursor, value) = this->parse_node(cursor);
 
-        if (!parent.emplace(std::move(key), std::move(value)).second)
-            throw std::runtime_error("JSON object node could not emplace a duplicate key {"s + key +
-                                     "} encountered while parsing at pos "s + std::to_string(cursor) + "."s);
-        // using '.emplace_hint()' here could noticeably speed up parsing of sorted objects, however '.emplace_hint()'
-        // doesn't return success for some reason, which prevents us from validating duplicate object keys.
+        // Note 1:
+        // The question of wheter JSON allows duplicate keys is non-trivial but the resulting answer is NO.
+        // JSON is goverened by 2 standards:
+        // 1) ECMA-404 https://ecma-international.org/wp-content/uploads/ECMA-404.pdf
+        //    which doesn't say anything about duplicate kys
+        // 2) RFC-8259 https://www.rfc-editor.org/rfc/rfc2119
+        //    which states "The names within an object SHOULD be unique.",
+        //    however as defined in RFC-2119 https://www.rfc-editor.org/rfc/rfc2119:
+        //       "SHOULD This word, or the adjective "RECOMMENDED", mean that there may exist valid reasons in
+        //       particular circumstances to ignore a particular item, but the full implications must be understood
+        //       and carefully weighed before choosing a different course."
+        // which means at the end of the day duplicate keys are discouraged but still valid
+
+        // Note 2:
+        // There is no standard specification on which JSON value should be prefered in case of duplicate keys.
+        // This is considered implementation detail as per RFC-8259:
+        //    "An object whose names are all unique is interoperable in the sense that all software implementations
+        //    receiving that object will agree on the name-value mappings. When the names within an object are not
+        //    unique, the behavior of software that receives such an object is unpredictable. Many implementations
+        //    report the last name/value pair only. Other implementations report an error or fail to parse the object,
+        //    and some implementations report all of the name/value pairs, including duplicates."
+
+        // Note 3:
+        // We could easily check for duplicate keys since 'std::map<>::emplace()' returns insertion success as a bool
+        // (the same isn't true for 'std::map<>::emplace_hint()' which returns just the iterator), however we will
+        // not since that goes against the standard
+
+        // Note 4:
+        // 'parent.emplace_hint(parent.end(), ...)' can drastically speed up parsing of sorted JSON object, however
+        // since most JSONs in the wild aren't sorted we will resort to a more generic option of regular '.emplace()'
+
+        parent.emplace(std::move(key), std::move(value));
 
         return cursor;
     }
@@ -1296,6 +1323,10 @@ struct _parser {
             } else if (c == '}') {
                 ++cursor; // move past the closing brace '}'
                 return {cursor, std::move(object_value)};
+            }else {
+                throw std::runtime_error(
+                    "JSON array node could not find comma {,} or object ending symbol {}} after the element at pos "s +
+                    std::to_string(cursor) + "."s);
             }
         }
 
@@ -1346,6 +1377,10 @@ struct _parser {
             } else if (c == ']') {
                 ++cursor; // move past the closing bracket ']'
                 return {cursor, std::move(array_value)};
+            } else {
+                throw std::runtime_error(
+                    "JSON array node could not find comma {,} or array ending symbol {]} after the element at pos "s +
+                    std::to_string(cursor) + "."s);
             }
         }
 
@@ -1464,7 +1499,7 @@ struct _parser {
         using namespace std::string_literals;
         constexpr std::size_t token_length = 4;
 
-        if (cursor + token_length >= this->chars.size())
+        if (cursor + token_length > this->chars.size())
             throw std::runtime_error("JSON bool node reached the end of buffer while parsing {true}.");
 
         const bool parsed_correctly =         //
@@ -1483,7 +1518,7 @@ struct _parser {
         using namespace std::string_literals;
         constexpr std::size_t token_length = 5;
 
-        if (cursor + token_length >= this->chars.size())
+        if (cursor + token_length > this->chars.size())
             throw std::runtime_error("JSON bool node reached the end of buffer while parsing {false}.");
 
         const bool parsed_correctly =         //
@@ -1503,7 +1538,7 @@ struct _parser {
         using namespace std::string_literals;
         constexpr std::size_t token_length = 4;
 
-        if (cursor + token_length >= this->chars.size())
+        if (cursor + token_length > this->chars.size())
             throw std::runtime_error("JSON null node reached the end of buffer while parsing {null}.");
 
         const bool parsed_correctly =         //
@@ -1589,7 +1624,7 @@ inline void _serialize_json_recursion(const Node& node, std::string& chars, unsi
             _serialize_json_recursion<prettify>(it->second, chars, indent_level + 1, true);
             // Comma
             if (++it != object_value.cend()) { // prevents trailing comma
-                chars += ','; 
+                chars += ',';
                 if constexpr (prettify) chars += '\n';
             } else {
                 if constexpr (prettify) chars += '\n';
@@ -1620,8 +1655,7 @@ inline void _serialize_json_recursion(const Node& node, std::string& chars, unsi
             if (++it != array_value.cend()) { // prevents trailing comma
                 chars += ',';
                 if constexpr (prettify) chars += '\n';
-            }
-            else {
+            } else {
                 if constexpr (prettify) chars += '\n';
                 break;
             }
@@ -2245,7 +2279,7 @@ public:
 // --- Sink public API ---
 // =======================
 
-Sink& add_terminal_sink(std::ostream& os, Verbosity verbosity = Verbosity::WARN, Colors colors = Colors::ENABLE,
+Sink& add_terminal_sink(std::ostream& os, Verbosity verbosity = Verbosity::INFO, Colors colors = Colors::ENABLE,
                         clock::duration flush_interval = ms{}, const Columns& columns = Columns{}) {
     return Logger::instance().emplace_sink(os, verbosity, colors, flush_interval, columns);
 }

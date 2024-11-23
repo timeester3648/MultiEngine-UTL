@@ -168,9 +168,9 @@ int main() {
     }
     
     // Benchmark on different datasets
-    benchmark_on_data("benchmarks/data/strings.json");
-    benchmark_on_data("benchmarks/data/numbers.json");
+    //benchmark_on_data("benchmarks/data/strings.json");
+    //benchmark_on_data("benchmarks/data/numbers.json");
     benchmark_on_data("benchmarks/data/database.json");
     
-    //std::cout << "\n\n" << utl::json::from_file("snippets/test.json").to_string() << "\n\n";
+    //std::cout << "\n\n" << utl::json::from_file("snippets/test4.json").to_string(utl::json::Format::MINIMIZED) << "\n\n";
 }
