@@ -243,10 +243,10 @@ Converting assignment & constructors. Tries to convert `T` to one of the possibl
 #### Serializing
 
 > ```cpp
-> void to_string(Format format = Format::PRETTY);
+> std::string to_string(Format format = Format::PRETTY);
 > ```
 
-Serializes JSON node to a string using a given `format` and returns the resul.
+Serializes JSON node to a string using a given `format`.
 
 > ```cpp
 > void to_file(const std::string& filepath, Format format = Format::PRETTY);
@@ -280,7 +280,7 @@ Parses JSON from the file at `filepath`.
 
 Sets max recursion depth during parsing, default value is `1000`.
 
-JSON parsers need recursion depth limit to prevent malicious inputs (such as 100'000+ nested object opening braces) from causing stack overflows.
+**Note:** JSON parsers need recursion depth limit to prevent malicious inputs (such as 100'000+ nested object opening braces) from causing stack overflows.
 
 ### Typedefs
 
