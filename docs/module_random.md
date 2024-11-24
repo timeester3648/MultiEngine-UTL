@@ -162,30 +162,30 @@ constexpr std::uint64_t seed = 15;
 double sum = 0.;
 
 // Profile generating N doubles with uniform [0, 1] distribution
-UTL_PROFILER_LABELED("std::rand()") {
+UTL_PROFILER("std::rand()") {
     srand(seed);
     for (int i = 0; i < N; ++i) sum += std::rand() / (static_cast<double>(RAND_MAX) + 1.);
 }
 
-UTL_PROFILER_LABELED("std::minstd_rand") {
+UTL_PROFILER("std::minstd_rand") {
     std::minstd_rand gen{seed};
     std::uniform_real_distribution dist{0., 1.};
     for (int i = 0; i < N; ++i) sum += dist(gen);
 }
 
-UTL_PROFILER_LABELED("std::mt19937") {
+UTL_PROFILER("std::mt19937") {
     std::mt19937 gen{seed};
     std::uniform_real_distribution dist{0., 1.};
     for (int i = 0; i < N; ++i) sum += dist(gen);
 }
 
-UTL_PROFILER_LABELED("random::XorShift64StarGenerator") {
+UTL_PROFILER("random::XorShift64StarGenerator") {
     utl::random::XorShift64StarGenerator gen{seed};
     std::uniform_real_distribution dist{0., 1.};
     for (int i = 0; i < N; ++i) sum += dist(gen);
 }
 
-UTL_PROFILER_LABELED("random::rand_double()") {
+UTL_PROFILER("random::rand_double()") {
     random::xorshift64star.seed(seed);
     for (int i = 0; i < N; ++i) sum += random::rand_double();
 }
