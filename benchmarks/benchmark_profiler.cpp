@@ -17,7 +17,9 @@
 #include "MACRO_PROFILER.hpp"
 #include "thirdparty/nanobench.h"
 
+#if defined(__x86_64__)
 #include <x86intrin.h> // testing
+#endif
 
 // ________________ BENCHMARK INCLUDES ________________
 
@@ -26,27 +28,21 @@
 
 // _____________ BENCHMARK IMPLEMENTATION _____________
 
-constexpr int repeats = 50'000;
+const auto compute_value = []() { return std::atan(std::pow(std::cos(std::sin(utl::random::rand_double())), 0.5)); };
+// some kind of computation, just heavy enough to be measurable, yet fast enough to not overshadow profiling overhead
 
-double compute_value() { return std::atan(std::pow(std::cos(std::sin(utl::random::rand_double())), 0.5)); }
-
-double recursive_func(int recursion_level) {
-    if (recursion_level == 0) return 1.;
-    return (compute_value() + recursive_func(recursion_level - 1)) * recursive_func(recursion_level - 2);
-}
-
-int main() {
+void benchmark_profiling_overhead() {
+    constexpr int repeats = 50'000;
 
     bench.minEpochIterations(10).timeUnit(millisecond, "ms").relative(true);
 
-    // Baseline
     benchmark("UTL_PROFILE()", [&]() {
         double s = 0.;
         REPEAT(repeats) { UTL_PROFILER("Work profiler") s += compute_value(); }
         DO_NOT_OPTIMIZE_AWAY(s);
     });
 
-    benchmark("Theoretical best std::chrono profile", [&]() {
+    benchmark("Theoretical best std::chrono profiler", [&]() {
         double                   s = 0.;
         std::chrono::nanoseconds time{};
         REPEAT(repeats) {
@@ -58,7 +54,8 @@ int main() {
         DO_NOT_OPTIMIZE_AWAY(time);
     });
 
-    benchmark("Theoretical best __rdtsc() profile", [&]() {
+#if defined(__x86_64__)
+    benchmark("Theoretical best __rdtsc() profiler", [&]() {
         double   s = 0.;
         uint64_t time{};
         REPEAT(repeats) {
@@ -69,12 +66,51 @@ int main() {
         DO_NOT_OPTIMIZE_AWAY(s);
         DO_NOT_OPTIMIZE_AWAY(time);
     });
-    
+#endif
+
     benchmark("Runtime without profiling", [&]() {
-        double   s = 0.;
-        REPEAT(repeats) {
-            s += compute_value();
-        }
+        double s = 0.;
+        REPEAT(repeats) { s += compute_value(); }
         DO_NOT_OPTIMIZE_AWAY(s);
     });
+
+    // Here 'theoretical best profiler' is the one that has no additional overhead besides
+    // the time measurement at two points, can't get better than without swithing to a
+    // completely different profiling method (like, for example, sampling or CPU instruction modeling)
+}
+
+void test_profiler_precision() {
+    UTL_PROFILER("Precision test:   50 ms") utl::sleep::spinlock(50);
+    UTL_PROFILER("Precision test:  200 ms") utl::sleep::spinlock(200);
+    UTL_PROFILER("Precision test: 1000 ms") utl::sleep::spinlock(1000);
+}
+
+double recursive_function(int recursion_depth) {
+    if (recursion_depth > 2) {
+        utl::sleep::spinlock(1.25);
+        return utl::random::rand_double();
+    }
+
+    double s1 = 0, s2 = 0, s3 = 0;
+
+    UTL_PROFILER_EXCLUSIVE("Recursive function (1st branch)") { s1 = recursive_function(recursion_depth + 1); }
+
+    UTL_PROFILER_EXCLUSIVE("Recursive function (2nd branch)") {
+        s2 = recursive_function(recursion_depth + 1);
+        s3 = recursive_function(recursion_depth + 1);
+    }
+
+    return s1 + s2 + s3;
+}
+
+void test_profiler_recursion_handling() {
+    double sum = recursive_function(0);
+
+    DO_NOT_OPTIMIZE_AWAY(sum);
+}
+
+int main() {
+    // benchmark_profiling_overhead();
+    // test_profiler_precision();
+    test_profiler_recursion_handling();
 }
