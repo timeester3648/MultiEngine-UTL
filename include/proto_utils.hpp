@@ -780,14 +780,17 @@ constexpr int _log_10_ceil(T num) {
 }
 
 std::string _pretty_error(std::size_t cursor, const std::string& chars) {
+    // Special case for empty buffers
+    if (chars.empty()) return "";
+
     // "Normalize" cursor if it's at the end of the buffer
     if (cursor >= chars.size()) cursor = chars.size() - 1;
-    
+
     // Get JSON line number
     std::size_t line_number = 1; // don't want to include <algorithm> just for a single std::count()
     for (std::size_t pos = 0; pos < cursor; ++pos)
         if (chars[pos] == '\n') ++line_number;
-    
+
     // Get contents of the current line
     constexpr std::size_t max_left_width  = 24;
     constexpr std::size_t max_right_width = 24;
@@ -799,7 +802,7 @@ std::string _pretty_error(std::size_t cursor, const std::string& chars) {
     std::size_t line_end = cursor;
     for (; line_end < chars.size() - 1; ++line_end)
         if (chars[line_end + 1] == '\n' || line_end - cursor >= max_right_width) break;
-    
+
     const std::string_view line_contents(chars.data() + line_start, line_end - line_start + 1);
 
     // Format output
@@ -808,7 +811,7 @@ std::string _pretty_error(std::size_t cursor, const std::string& chars) {
 
     std::string res;
     res.reserve(7 + 2 * line_prefix.size() + 2 * line_contents.size());
-    
+
     res += '\n';
     res += line_prefix;
     res += line_contents;
@@ -857,7 +860,11 @@ using _array_type_impl  = std::vector<T>;
 using _string_type_impl = std::string;
 using _number_type_impl = double;
 using _bool_type_impl   = bool;
-class _null_type_impl {};
+struct _null_type_impl {
+    [[nodiscard]] bool operator==(const _null_type_impl&) const noexcept {
+        return true;
+    } // so we can check 'Null == Null'
+};
 
 template <class T>
 constexpr bool is_object_like_v = _is_const_iterable_through<T>::value && _is_assotiative<T>::value;
@@ -992,7 +999,7 @@ public:
     }
 
     template <class T>
-    [[nodiscard]] T& value_or(std::string_view key, const T& else_value) {
+    [[nodiscard]] const T& value_or(std::string_view key, const T& else_value) {
         const auto& object = this->get_object();
         const auto  it     = object.find(std::string(key));
         if (it != object.end()) return it->second.get<T>();
@@ -1264,7 +1271,7 @@ constexpr std::array<bool, _number_of_char_values> _lookup_rejected_control_char
 
 inline int _recursion_limit = 1000;
 
-inline void set_recursion_limit(int max_depth) { _recursion_limit = max_depth; }
+inline void set_recursion_limit(int max_depth) noexcept { _recursion_limit = max_depth; }
 
 struct _parser {
     const std::string& chars;
@@ -1882,7 +1889,7 @@ inline Node from_string(const std::string& chars) {
     for (auto cursor = end_cursor; cursor < chars.size(); ++cursor)
         if (!_lookup_whitespace_chars[chars[cursor]])
             throw std::runtime_error("Invalid trailing symbols encountered after the root JSON node at pos "s +
-                                     std::to_string(cursor) + "."s);
+                                     std::to_string(cursor) + "."s + _pretty_error(cursor, chars));
 
     return result_node;
 }
