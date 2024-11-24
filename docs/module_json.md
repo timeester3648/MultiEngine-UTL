@@ -572,7 +572,7 @@ Flat maps and async maps seem like the way to go, slotting in a custom flat map 
 
 ```
 // Using associative API wrapper for std::vector of pairs instead of std::map we can bridge the performance gap
-// General-case usage however suffers, which is why this decision was reled agains
+// General-case usage however suffers, which is why this decision was ruled against
 
 ====== BENCHMARKING ON DATA: `database.json` ======
 
