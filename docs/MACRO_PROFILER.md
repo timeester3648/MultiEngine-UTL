@@ -154,7 +154,7 @@ Let's imagine we have a recursive function `f()` that calls 2 instances of each 
 
 The function will end up with a following call graph:
 
-TODO: IMAGE
+<img src ="images/profiler_recursion_call_graph.svg">
 
 If we profile  **1st** and **2nd** branches independently, we will measure following parts of the call graph:
 

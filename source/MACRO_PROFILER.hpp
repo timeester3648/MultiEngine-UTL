@@ -386,16 +386,7 @@ inline void _utl_profiler_atexit() {
     if constexpr (const utl::profiler::ExclusiveScopeTimer _utl_profiler_add_uuid(utl_profiler_scope_timer_){          \
                       &_utl_profiler_add_uuid(utl_profiler_record_manager_)})
 
-#define UTL_PROFILER_WRAP(label_, value_)                                                                              \
-    constexpr bool _utl_profiler_add_uuid(utl_profiler_macro_guard_) = true;                                           \
-                                                                                                                       \
-    static_assert(_utl_profiler_add_uuid(utl_profiler_macro_guard_), "UTL_PROFILE is a multi-line macro.");            \
-                                                                                                                       \
-    static utl::profiler::RecordManager _utl_profiler_add_uuid(utl_profiler_record_manager_)(__FILE__, __LINE__,       \
-                                                                                             __func__, label_);        \
-                                                                                                                       \
-    if constexpr (const utl::profiler::ScopeTimer _utl_profiler_add_uuid(utl_profiler_scope_timer_){                   \
-                      &_utl_profiler_add_uuid(utl_profiler_record_manager_)})
+
 
 } // namespace utl::profiler
 
