@@ -48,7 +48,7 @@ void benchmark_on_data(const std::string& filepath) {
     json_utl.to_file(parsing_target_prettified, json::Format::PRETTY);
 
     // Set global benchmark options
-    bench.minEpochIterations(6).timeUnit(millisecond, "ms");
+    bench.minEpochIterations(20).timeUnit(millisecond, "ms");
 
     // Benchmark parsing (minimized)
     bench.title("Parsing minimized JSON").relative(true).warmup(10);
@@ -154,7 +154,7 @@ int main() {
         std::vector<std::string> strings(120'000);
         for (auto& e : strings) {
             e = utl::shell::random_ascii_string(utl::random::rand_uint(0, 120));
-            if (!e.empty())
+            if (!e.empty() && utl::random::rand_double() < 0.1)
                 e.at(utl::random::rand_uint(0, e.size() - 1)) =
                     utl::random::rand_choise({'"', '\\', '/', '\b', '\f', '\n', '\r', '\t'});
         }
@@ -168,8 +168,8 @@ int main() {
     }
     
     // Benchmark on different datasets
-    //benchmark_on_data("benchmarks/data/strings.json");
-    //benchmark_on_data("benchmarks/data/numbers.json");
+    benchmark_on_data("benchmarks/data/strings.json");
+    benchmark_on_data("benchmarks/data/numbers.json");
     benchmark_on_data("benchmarks/data/database.json");
     
     //std::cout << "\n\n" << utl::json::from_file("snippets/test4.json").to_string(utl::json::Format::MINIMIZED) << "\n\n";

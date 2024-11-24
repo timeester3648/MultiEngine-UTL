@@ -8,7 +8,7 @@
 - Objects support transparent comparators (which means `std::string_view` and `const char*` can be used for lookup)
 - [Decent performance](#benchmarks) without relying on compiler intrinsics
 - All JSON types map to standard library containers, no need to learn custom APIs
-- Simple integration (single header, less that `1k` lines)
+- Simple integration (single header, barely over `1k` lines)
 
 > [!Note]
 > Despite rather competitive performance, considerably faster parsing can be achieved with custom formatters, SIMD and unordered key optimizations (see [simdjson](https://github.com/simdjson/simdjson), [Glaze](https://github.com/stephenberry/glaze), [RapidJSON](https://github.com/Tencent/rapidjson)  and [yyjson](https://github.com/ibireme/yyjson)), this, however often comes at the expense of user convenience (like with *RapidJSON*) or features (such as missing escape sequence handling in *simdjson* and *yyjson*, *Glaze* has it all, but requires [C++23](https://en.cppreference.com/w/cpp/23)).
@@ -23,10 +23,10 @@
 | Parsing | ✔ |  |
 | Serialization | ✔ |  |
 | JSON Formatting | ✔ |  |
-| JSON Validation | ✔ | Almost complete validation with proper error messages through exceptions |
+| JSON Validation | ✔ | Almost complete[¹](#tests) validation with proper error messages through exceptions |
 | Unicode Support | ✔ | Supports UTF-8 |
-| Escape Sequence Support | ✔ |  |
-| ISO/IEC 10646 Hexadecimal Support | ✔ | Supports UTF-8 |
+| Control Character Escape Sequence Support | ✔ |  |
+| Unicode HEX Sequence Support | ✔ | Supports UTF-8 |
 | Trait-based Type Conversions | ✔ |  |
 | Structure Reflection | ✘ | Requires compiler intrinsics or C++26 to implement |
 | Compile-time JSON Schema | ✘ | Outside the project scope |
@@ -292,6 +292,7 @@ Exports JSON `node` to the file at `filepath` using a given `format`.
 ### Import/Export JSON
 
 [ [Run this code](https://godbolt.org/#g:!((g:!((g:!((h:codeEditor,i:(filename:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,selection:(endColumn:23,endLineNumber:7,positionColumn:23,positionLineNumber:7,selectionStartColumn:23,selectionStartLineNumber:7,startColumn:23,startLineNumber:7),source:'%23include+%3Chttps://raw.githubusercontent.com/DmitriBogdanov/prototyping_utils/master/include/proto_utils.hpp%3E%0A%0Aint+main(int+argc,+char+**argv)+%7B%0A++++using+namespace+utl%3B%0A%0A++++//+Export+JSON%0A++++json::Node+config%3B%0A%0A++++config%5B%22auxiliary_info%22%5D+++++++%3D+true%3B%0A++++config%5B%22date%22%5D+++++++++++++++++%3D+%222024.04.02%22%3B%0A++++config%5B%22options%22%5D%5B%22grid_size%22%5D+%3D+120%3B%0A++++config%5B%22options%22%5D%5B%22phi_order%22%5D+%3D+5%3B%0A++++config%5B%22scaling_functions%22%5D++++%3D+%7B+%22identity%22,+%22log10%22+%7D%3B%0A++++config%5B%22time_steps%22%5D+++++++++++%3D+500%3B%0A++++config%5B%22time_period%22%5D++++++++++%3D+1.24709e%2B2%3B%0A%0A++++config.to_file(%22config.json%22)%3B%0A%0A++++//+Import+JSON%0A++++config+%3D+json::from_file(%22config.json%22)%3B%0A%0A++++std::cout+%3C%3C+config.to_string()%3B%0A%0A++++return+0%3B%0A%7D%0A'),l:'5',n:'0',o:'C%2B%2B+source+%231',t:'0')),k:71.71783148269105,l:'4',n:'0',o:'',s:0,t:'0'),(g:!((g:!((h:compiler,i:(compiler:clang1600,filters:(b:'0',binary:'1',binaryObject:'1',commentOnly:'0',debugCalls:'1',demangle:'0',directives:'0',execute:'0',intel:'0',libraryCode:'0',trim:'1',verboseDemangling:'0'),flagsViewOpen:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,libs:!(),options:'-std%3Dc%2B%2B17+-O2',overrides:!(),selection:(endColumn:1,endLineNumber:1,positionColumn:1,positionLineNumber:1,selectionStartColumn:1,selectionStartLineNumber:1,startColumn:1,startLineNumber:1),source:1),l:'5',n:'0',o:'+x86-64+clang+16.0.0+(Editor+%231)',t:'0')),header:(),l:'4',m:50,n:'0',o:'',s:0,t:'0'),(g:!((h:output,i:(compilerName:'x86-64+clang+16.0.0',editorid:1,fontScale:14,fontUsePx:'0',j:1,wrap:'1'),l:'5',n:'0',o:'Output+of+x86-64+clang+16.0.0+(Compiler+%231)',t:'0')),k:46.69421860597116,l:'4',m:50,n:'0',o:'',s:0,t:'0')),k:28.282168517308946,l:'3',n:'0',o:'',t:'0')),l:'2',n:'0',o:'',t:'0')),version:4) ]
+
 ```cpp
 using namespace utl;
 
@@ -334,7 +335,7 @@ Output:
 
 ### Setters & Type Conversions
 
-[ [Run this code](https://godbolt.org/#z:OYLghAFBqd5QCxAYwPYBMCmBRdBLAF1QCcAaPECAMzwBtMA7AQwFtMQByARg9KtQYEAysib0QXACx8BBAKoBnTAAUAHpwAMvAFYTStJg1DIApACYAQuYukl9ZATwDKjdAGFUtAK4sGe1wAyeAyYAHI%2BAEaYxCAArKQADqgKhE4MHt6%2BekkpjgJBIeEsUTHxdpgOaUIETMQEGT5%2BXLaY9nkM1bUEBWGR0XG2NXUNWc0KQ93BvcX9sQCUtqhexMjsHOYAzMHI3lgA1CYbbggEBAkKIAD0l8RMAO4AdMCECF4RXkorsowED2gslwAIixCMQ8BZUMB0IZUAA3S4JYioIgEACeCWCwAA%2Bl5HLQFJcWExxtFLttdpgEUiiDi8QoHggEglDtgTBoAIJszlmLYMHZefaHNy0PDjFlczbkgWYA5HJQEcUcrnBAh7InBCAqva1YDIUh7ZAIWp7ABUJp1sLmBwA7FYOXsHXsPpi9sw2AoEkxVk6CLRDnbOfbHdoFM4QKEMDKQwJ/RKgw7rnsAOpMVEKPZEbUKFLABjavYAKSEAHlQntUBFtBUFfG9tGGCZYlYzGYK1WHOYzI3AY3m2YANaYVFYrid7uywF7UcbAOOuuhhtNztt6tj2I9pctwfDrst8eHSddmdcuf13vLyurvfrue3id3h%2BPp8Pky2m0WA5bocjzv6rg2wF9VfD9O23LFdzMfUzAAgDY1rM9N1bS8O2vScnwPZ9MNPBcQBAYtkIVN9gM/Adv1HFs/wAoCiK/Hdfz2aDX0nJi4PZbCY0QlcUK7G90I2NCn3GdBcKJZk5QIYSQHGMEjH1FVxSImjSOHcjIKnKj3xIsCIKgmCWOPeCF3PFsuIVVDnwwoTcK8BgSCwYhMHQLFRKFKypIIGTgDkwQFJApSwNUyimOokDaPA%2BjGOtZiotYk9HUTFM0wzVAsxzPMmELEsy1qW5UTih0EL7HLUzXZj%2BKw4jmgY/UNlggy2ODIzEOKvLzIw%2BtcPZYhcsqqCarq2dGo4orupKtryrc2FqxIXrqr2Wr9MGgqmpGnrxoEtyRTFN8qrUhaYvq9jF1WsaeLKgS9jc%2BVZr2ga4wahNLmTVN00zYk0vzItS0ujzMXy%2Bdhs7aS/vWrC707WgSEwFg9jwc4fE7WUloB46gd%2BoxSvvI7cOqTyIAhqGYbhhQEZbOZWKO4yzGBjHQdvK70eAfGW0hhyifhlhO3Jw6htRlsaeATHLIk3CBaxWE8EwO5mbMVnodhjmudi2tEweNXDHQS6UoEbUGE10M9n4OoED2O4XnLAgEGiDN0UwBR9QUVgZUtl0zctg0PiIGG0EEJgpmIel/sTdlaFoA0DGzO2DUMA0BCmuosz2SGjETy2hz2RE4TwfYhIAWhFQc9nZZQAEkHnuucHIIZY8w0WKYo5DgFloThYl4PwOC0UhUE4NxrGsLXlm9TYeFIAhNCbhZ%2BxAa0uAeWfrQADg2KRF7MAA2ABOLgNHiFuOEkduJ%2B7zheAuDQx4nhY4FgGBEBQVAWAxegyAoCB/mf/odkMYAuHXjQL40FoAQaIFwIARGPhEYItRUScFHlA5gxBUT4XbOPbgvB/hsEEMWBgtBYGd14Fgd4wA3BiHxHAwh0Mf7iAIaQfADlKhTQuLQzAqgKi4jWF3FUrRj4igiLcJBHgsDH1%2BiwChpB44RGSJgQEVCjAiiMFfPgBhgAKAAGqSzuMWBIjBxH8EECIMQ7ApAyEEIoFQ6haG6GaAYRRphLDWH0HgCIFxIALFQAkdozDc5CQPPY5sFguDWj2LnYsZheBwmiGCLAriIALHKJUZwEBXAjCaKQQIUwiglGyMkVIAhUk5NyGkHoWT%2BhjFaNWKoEwCnlLaFUroJS%2BgxDGNUzwjQ9DjAaZkppEh4lLBWMY5urcj60J7hwPYqhF7r1zuvSQ4cf5TnXg8DQyy9gQFwIQEgn4V5zF4GgrQcwFhWyYPZSgQyD68DEbEC%2BHcu5jLPiAC%2B%2Bym6kBvvfJYZxcTkEoB/Og0RQhO04JM6Zsz5kpz/ss5ZvBHKbOiXofRwhRDiBMQi8xahj7WNIHcW4CQKHnLbqQW5ETODFlxAkXE5YqATKmTMuZ39wVLJWRoNZHgn5/OINsrguzL4EMOaQaekgllb0kGYLgUzd6b1nn/fQnBD6kCuTc4%2B9zbCPJ5QcqeIAzCLweFq0V69F6xCCRsDQi9N6CplRwDYIy7mnzVZPC14TCVKttc8vl8cUjOEkEAA) ]
+[ [Run this code](https://godbolt.org/#z:OYLghAFBqd5QCxAYwPYBMCmBRdBLAF1QCcAaPECAMzwBtMA7AQwFtMQByARg9KtQYEAysib0QXACx8BBAKoBnTAAUAHpwAMvAFYTStJg1DIApACYAQuYukl9ZATwDKjdAGFUtAK4sGISdKuADJ4DJgAcj4ARpjEIGbSAA6oCoRODB7evv5JKWkCIWGRLDFxCbaY9o4CQgRMxASZPn4BFVXptfUEhRHRsfHSCnUNTdmtQ109xaUDAJS2qF7EyOwc5gDMocjeWADUJutuCAQEiQogAPQXxEwA7gB0wIQIXlFeSsuyjAT3aCwXABEWIRiHgLKhgOhDKgAG4XRLEVBEAgAT0SoWAAH0vI5aAoLiwmENYhctjtMPDEURsbiFPcEIlEgdsCYNABBVkcsybBjbLx7A5uWh4IbMzkbMn8zD7Q5KAhi9mc0IEXaE0IQZW7erAZCkXbIBD1XYAKmN2phs32AHYrOzdvbdu8MbtmGwFIkmCtHQRaAdbRy7Q7tApnCBwhhpcGBH7xYH7VddgB1JgohS7IhahSpYAMLW7ABSQgA8uFdqgotpMA5OQ7dlGGCYAKxWMxmcuV6utpsApstswAa0wKMxXHMZm7MoBu1H639tfrvbH7ar8q7jZ7zbHg%2BH47XU4OU/Hs5rQZDDc3reXnfH69rd8n98fT%2Bfj5MNutFn2re3I7Heq41oAnqb6fluQ6YruZh6mYgGATGcZ1mei6XhWK5jhOz4Hi%2B2HzmeIAgEWqHVu%2BIFfgO4Gjq2/6AcBJHfuBkHQbBb49seCELhebZEauN5Tph6x8c%2BQzoPhhJMrKBAiSAQygkYerKmKJF0eRw6UVB040R%2BZE/oxuwwSxcFsWyuHRpxV48RhT5YcJ%2BFeAwJBYMQmDoJiYmCjZ0kELJwDyYIimgcpP5qdRLG0aB9E7n%2BenMVarH%2Bie8YXEmKZphmRLZrmTAFsWpb1DcKIJYhpl9nlKbobeWHYaRXDQXq6yGXOp7FWOpUFXuD71vhbLEPl1W1bs9UsfBxlNeeJU9WV7XWZJ%2BEwiuJB9XpdUNYVHHjb1U0CQ6HnCqK741UtA0rexSGca15X7lt20zdJmDyvt/WDbFw2radfaEl5eCqBdD6kYt%2BmxWFA16pIMVxbsCYfaCKxpuYABs6aMCGxBpvU0o0GE6aoKgr3Na2BBIwtm37kpAWfgdANAVp6wg2DQOkdIuyNpppFw3qVpg8dAYjYlyWpljmYZXmhYlrsMkYrjY1juLRg/ZVOG1mOtAkJgLC7HgZw%2BGOMqNfaa3S59svE3enUgLU3kQErKtqxrCha62szDSZUutjLwBy1dtYeW7lutsrTk25rLBjo7RnO8hZhux7U7e4bWIwngmC3L7Zj%2B6r6tByHL0IQm9x54Y6Bi6gZaZQwhchrs/ANAguy3M8ZYEAgsTpmimAKHqCisNKjfOnXjf6u8RBq2gghMKEsR0oVCZsrQtD6gYWZt/qhj6gIc0NJmuzK0Ym%2BN0OuwIrCeB7MJAC0wqDrsbLKAAkvcsY87sTkEEsuYaC9z3shw8y0Jwja8H4DgWhSCoE4G4aw1gi5LC9BsHgpACCaG/vMfsIArRcHuGgq0AAOdYUgsFmDhgATi4BoRs%2BhOCSAAYgkBnBeDnA0PAxB8w4CwBgIgFAqAWDonoGQCgEA/jcP6NsQwwAuBww0AwmgtACYo0oFEahURQj1BRJwOBijmDEBRIRDsCDuC8D%2BGwQQRYGC0BUUA3gWA3jADcGIPEqiLGqxEeIcxpB8BOQcHgOa5wXGYFUFWHEqxgHKkqNQ4UUQbiaI8Fgahn0WD2NIOvKIKRMAAkcUYYURgmF8AMMABQAA1ROtwiyJEYPE/gggRBiHYFIGQghFAqHUC43QNUDCZNMJYaw%2Bg8BRHOJAeYqBEjVAYN40%2BwkDztJbBYLgHNT5FjMLwWEsRQRYF6RAeYdgVzpBcGXUYfgarBHHtMfoNVkipCGbsvQpz8gMCmH0OINUNkeJqMMRonhmh6EeUMzoDRbklGObYF5FyHkvN%2BTMLg6zFjLGqT/P%2BVCXGgI4LsVQWC4anzhqDYRO8xH3A0Di3YEBcCEBIF%2BXBsxeC6K0LMeYTcmCOUoDCjglDSBxMbAwwBwCEV0JAAwil39SAsPYYsU4OJyCUAEXQWI4Qu6cGRai9F88RHTjhjinFvBnJEuWXocpwhRDiBqdq%2BpahqHNNILcG4iR7EMv/qQdlCzOBFhxIkHEZYqBIpRWijFrTgBKpVRofFHguESuICS8F5KmHIP8MqohkgzBcBRaQwhaCxHkMZbwFlbLqGctsNyxh5iqWkBQWYLB9wi2xrhlgxs0z1gaCwYQyQbNf4cHWHCjltDc2UoZfMm1ma228vzevVIzhJBAA%3D%3D%3D) ]
 ```cpp
 using namespace utl;
 
@@ -354,6 +355,9 @@ json["array"] = json::Array{ 1, 2, 3 };
 json["array"] = std::vector{ 1, 2, 3 };
 json["array"] =   std::list{ 1, 2, 3 };
 json["array"] =    std::set{ 1, 2, 3 };
+
+json["matrix"] = { { 1, 2 }, { 3, 4 } }; // matrices & tensors are fine too
+json["tensor"] = { { { 1, 2 }, { 3, 4 } }, { { 4, 5 }, { 6, 7 } } };
 
 // Ways to assign a JSON string
 json["string"] =                  "lorem ipsum" ;
@@ -448,6 +452,17 @@ Output:
 
 {"array":[1,2,3],"object":{"key_1":3.14,"key_2":6.28},"string":"lorem ipsum"}
 ```
+
+## Tests
+
+`utl::json` parsing was [tested](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/tests/module_json.cpp) using the standard [RFC-8259](https://datatracker.ietf.org/doc/html/rfc8259) compliance [testing suite](https://github.com/nst/JSONTestSuite/) with following metrics:
+
+| Metric | Compliance | Note |
+| - | - | - |
+| Parser accepts valid RFC-8259 JSON | **100%** | Full conformance |
+| Parser rejects invalid RFC-8259 JSON | **93.6%** | Missing conformance of 6.4% is due to parser imposing less restrictions on the floating point format, it will accepts values such as `2.`, `01`, `2.e+3` and etc., which go beyond the default JSON specification. |
+
+Parsing and serialization also satisfies [C++ `<charconv>`](https://en.cppreference.com/w/cpp/header/charconv) float round-trip guarantees (which means floats serialized by `utl::json` will be recovered to the exact same value when parsed again by the library).
 
 ## Benchmarks
 

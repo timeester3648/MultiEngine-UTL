@@ -1045,6 +1045,32 @@ public:
         this->data = std::move(array_value);
         return *this;
     }
+    
+    template <class T>
+    Node& operator=(std::initializer_list<std::initializer_list<T>> ilist) {
+        // Support for 2D brace initialization
+        array_type array_value;
+        array_value.reserve(ilist.size());
+        for (const auto& e : ilist) { array_value.emplace_back(); array_value.back() = e; }
+        // uses 1D 'operator=(std::initializer_list<T>)' to fill each node of the array
+        this->data = std::move(array_value);
+        return *this;
+    }
+    
+    template <class T>
+    Node& operator=(std::initializer_list<std::initializer_list<std::initializer_list<T>>> ilist) {
+        // Support for 3D brace initialization
+        // it's dumb, but it works
+        array_type array_value;
+        array_value.reserve(ilist.size());
+        for (const auto& e : ilist) { array_value.emplace_back(); array_value.back() = e; }
+        // uses 2D 'operator=(std::initializer_list<std::initializer_list<T>>)' to fill each node of the array
+        this->data = std::move(array_value);
+        return *this;
+    }
+    
+    // we assume no reasonable person would want to type a 4D+ array as 'std::initializer_list<>',
+    // if they really want to they can specify the type of the top layer and still be fine
 
     // -- Constructors --
     // ------------------
@@ -1170,12 +1196,35 @@ constexpr std::array<char, _number_of_char_values> _lookup_parsed_escaped_chars 
     return res;
 }();
 
+// Lookup table used to validate that JSON string has no unescaped charactes that should be escaped
+constexpr std::array<bool, _number_of_char_values> _lookup_rejected_control_chars = [] {
+    std::array<bool, _number_of_char_values> res{};
+    // Codepoints U+0000 to U+001F require an escape
+    // Some can be escaped with a 2-char sequence, others should be escaped as a unicode HEX
+    for (char c = 0; c <= 31; ++c) res[c] = true;
+    return res;
+    
+    // Note:
+    // While C++ standard doesn't guarantee that chars 0-31 correspond to ASCII control characters,
+    // this is in fact guaranteed by the assumption of UTF-8 encoded string.
+}();
+
 // ==========================
 // --- JSON Parsing impl. ---
 // ==========================
 
+inline int _recursion_limit = 1000;
+
+inline void set_recursion_limit(int max_depth) { _recursion_limit = max_depth; }
+
 struct _parser {
     const std::string& chars;
+    int                recursion_depth{};
+    // we track recursion depth to handle stack allocation errors
+    // (this can be caused malicious inputs with extreme level of nesting, for example, 100k array
+    // opening brackets, which would cause huge recursion depth causing the stack to overflow with SIGSEGV)
+
+    // dynamic allocation errors can be handled with regular exceptions through std::bad_alloc
 
     _parser() = delete;
     _parser(const std::string& chars) : chars(chars) {}
@@ -1242,8 +1291,16 @@ struct _parser {
         cursor = this->skip_nonsignificant_whitespace(cursor);
 
         // Parse pair value
+        if (++this->recursion_depth > _recursion_limit)
+            throw std::runtime_error("JSON parser has exceeded maximum allowed recursion depth of "s +
+                                     std::to_string(_recursion_limit) +
+                                     ". If stated depth wasn't caused by an invalid input, "s +
+                                     "recursion limit can be increased with json::set_recursion_limit()."s);
+
         Node value;
         std::tie(cursor, value) = this->parse_node(cursor);
+
+        --this->recursion_depth;
 
         // Note 1:
         // The question of wheter JSON allows duplicate keys is non-trivial but the resulting answer is NO.
@@ -1323,7 +1380,7 @@ struct _parser {
             } else if (c == '}') {
                 ++cursor; // move past the closing brace '}'
                 return {cursor, std::move(object_value)};
-            }else {
+            } else {
                 throw std::runtime_error(
                     "JSON array node could not find comma {,} or object ending symbol {}} after the element at pos "s +
                     std::to_string(cursor) + "."s);
@@ -1339,8 +1396,16 @@ struct _parser {
         // Array element parser assumes it is starting at the first symbol of some JSON node
 
         // Parse pair key
+        if (++this->recursion_depth > _recursion_limit)
+            throw std::runtime_error("JSON parser has exceeded maximum allowed recursion depth of "s +
+                                     std::to_string(_recursion_limit) +
+                                     ". If stated depth wasn't caused by an invalid input, "s +
+                                     "recursion limit can be increased with json::set_recursion_limit()."s);
+
         Node value;
         std::tie(cursor, value) = this->parse_node(cursor);
+
+        --this->recursion_depth;
 
         parent.emplace_back(std::move(value));
 
@@ -1435,7 +1500,7 @@ struct _parser {
                     // in the data. This also adds another 2 #include's just by itself. Supports UTF-8.
                     const std::string hex(this->chars.data() + cursor + 1, 4);
                     // say hello to allocation, standard functions only support std::string or null-terminated char*,
-                    // there's no way to view into data and parse it without copying it
+                    // there's no way (that I know of) to view into data and parse it without copying it
                     const char32_t    unicode_char = std::stoul(hex, nullptr, 16);
                     if (!_unicode_codepoint_to_utf8(string_value, unicode_char))
                         throw std::runtime_error("JSON string node could not parse unicode codepoint {"s + hex +
@@ -1455,8 +1520,12 @@ struct _parser {
                 segment_start = cursor + 1;
                 continue;
             }
-            // NOTE: Hex escape sequences are not supported yet
-
+            // validation
+            else if (_lookup_rejected_control_chars[c])
+                throw std::runtime_error(
+                    "JSON string node encountered unescaped ASCII control character character \\"s +
+                    std::to_string(static_cast<int>(c)) + "at pos"s + std::to_string(cursor) + "."s);
+            
             // Reached the end of the string
             if (c == '"') {
                 string_value.append(this->chars.data() + segment_start, cursor - segment_start);
@@ -1743,8 +1812,15 @@ inline void _serialize_json_to_buffer(std::string& chars, const Node& node, Form
 
 inline Node from_string(const std::string& chars) {
     _parser           parser(chars);
-    const std::size_t json_start = parser.skip_nonsignificant_whitespace(0); // skip leading whitespace
-    auto result_node = parser.parse_node(json_start).second; // starts parsing recursively from the root node
+    const std::size_t json_start   = parser.skip_nonsignificant_whitespace(0); // skip leading whitespace
+    auto [end_cursor, result_node] = parser.parse_node(json_start); // starts parsing recursively from the root node
+
+    // Check for invalid trailing sumbols
+    using namespace std::string_literals;
+    for (auto cursor = end_cursor; cursor < chars.size(); ++cursor)
+        if (!_lookup_whitespace_chars[chars[cursor]])
+            throw std::runtime_error("Invalid trailing symbols encountered after the root JSON node at pos "s +
+                                     std::to_string(cursor) + "."s);
 
     return result_node;
 }
