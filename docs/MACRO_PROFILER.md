@@ -145,7 +145,7 @@ Output:
 
 ## Why Recursion is a Rather Non-trivial Thing to Measure
 
-Let's imagine we have a recursive function `f()` that calls 2 instances of each other recursively. Let's limit recursion depth to **2** and define following variables:
+Let's imagine we have a recursive function `f()` that calls 2 instances of itself recursively. Let's limit recursion depth to **2** and define following variables:
 
 - $t$ —  time spent on a single recursion tail-call;
 - $T$ — total time spent inside the recursive function `f()`;
@@ -158,19 +158,19 @@ The function will end up with a following call graph:
 
 If we profile  **1st** and **2nd** branches independently, we will measure following parts of the call graph:
 
-TODO: IMAGE_1
+<img src ="images/profiler_recursion_independent_profiling_branch_1.svg">
 
-TODO: IMAGE_2
+<img src ="images/profiler_recursion_independent_profiling_branch_2.svg">
 
 Which means $T_1 + T_2 \neq T$, which goes against the logic of what were actually trying to measure. In essense, when profiling recursion, different profilers should be aware of each other and not invoke measurement while inside the call graph of a another already existing profiler.
 
-This is exactly the problem solved by `UTL_PROFILER_EXCLUSIVE`, as it guarantees no other profiler will be invoked under an already existing one. We will end up wil a following call graph:
+This is exactly the problem solved by `UTL_PROFILER_EXCLUSIVE()`, as it guarantees no other profiler will be invoked under an already existing one. We will end up with a following call graph:
 
-TODO: IMAGE_1
+<img src ="images/profiler_recursion_exclusive_profiling_branch_1.svg">
 
-TODO: IMAGE_2
+<img src ="images/profiler_recursion_exclusive_profiling_branch_2.svg">
 
-which correspons to the parts we were trying to measure.
+which corresponds to the parts we were trying to measure and satisfied $T_1 + T_2 = T$. The same logic can be generalized to an arbitrary recursion with $N$ different profilers.
 
 ## Microbenchmarking With x86 Intrinsics
 
