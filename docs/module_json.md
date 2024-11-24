@@ -240,6 +240,48 @@ Returns value stored at given `key` in the JSON object, if no such key can be fo
 
 Converting assignment & constructors. Tries to convert `T` to one of the possible JSON types based on `T` traits, conversions and provided methods. If no such conversion is possible, SFINAE rejects the overload.
 
+#### Serializing
+
+> ```cpp
+> void to_string(Format format = Format::PRETTY);
+> ```
+
+Serializes JSON node to a string using a given `format` and returns the resul.
+
+> ```cpp
+> void to_file(const std::string& filepath, Format format = Format::PRETTY);
+> ```
+
+Serializes JSON node to the file at `filepath` using a given `format`.
+
+### Parsing
+
+> ```cpp
+> Node from_string(const std::string& buffer);
+> ```
+
+Parses JSON from a given string `buffer`.
+
+> ```cpp
+> Node from_file(const std::string& filepath);
+> ```
+
+Parses JSON from the file at `filepath`.
+
+> ```cpp
+> Node literals::operator""_utl_json(const char* c_str, std::size_t c_str_size);
+> ```
+
+`json::Node` custom literals.
+
+> ```cpp
+> void set_recursion_limit(int max_depth) noexcept;
+> ```
+
+Sets max recursion depth during parsing, default value is `1000`.
+
+JSON parsers need recursion depth limit to prevent malicious inputs (such as 100'000+ nested object opening braces) from causing stack overflows.
+
 ### Typedefs
 
 > ```cpp
@@ -253,51 +295,16 @@ Converting assignment & constructors. Tries to convert `T` to one of the possibl
 
 Shorter typedefs for all existing JSON value types.
 
-### Parsing
-
-> ```cpp
-> Node import_string(const std::string& buffer);
-> ```
-
-Imports JSON from a given string `buffer`.
-
-> ```cpp
-> Node import_file(const std::string& filepath);
-> ```
-
-Imports JSON from the file at `filepath`.
-
-> ```cpp
-> Node literals::operator""_utl_json(const char* c_str, std::size_t c_str_size);
-> ```
-
-`json::Node` custom literals.
-
-### Serializing
-
-> ```cpp
-> void export_string(std::string& buffer, const Node& node, Format format = Format::PRETTY);
-> ```
-
-Exports JSON `node` to the target `buffer` using a given `format`. If serialization runs out of preallocated buffer, it is allowed to reallocate with more space.
-
-> ```cpp
-> void export_file(const std::string& filepath, const Node& node, Format format = Format::PRETTY);
-> ```
-> 
-
-Exports JSON `node` to the file at `filepath` using a given `format`.
-
 ## Examples 
 
-### Import/Export JSON
+### Parse/Serialize JSON
 
 [ [Run this code](https://godbolt.org/#g:!((g:!((g:!((h:codeEditor,i:(filename:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,selection:(endColumn:23,endLineNumber:7,positionColumn:23,positionLineNumber:7,selectionStartColumn:23,selectionStartLineNumber:7,startColumn:23,startLineNumber:7),source:'%23include+%3Chttps://raw.githubusercontent.com/DmitriBogdanov/prototyping_utils/master/include/proto_utils.hpp%3E%0A%0Aint+main(int+argc,+char+**argv)+%7B%0A++++using+namespace+utl%3B%0A%0A++++//+Export+JSON%0A++++json::Node+config%3B%0A%0A++++config%5B%22auxiliary_info%22%5D+++++++%3D+true%3B%0A++++config%5B%22date%22%5D+++++++++++++++++%3D+%222024.04.02%22%3B%0A++++config%5B%22options%22%5D%5B%22grid_size%22%5D+%3D+120%3B%0A++++config%5B%22options%22%5D%5B%22phi_order%22%5D+%3D+5%3B%0A++++config%5B%22scaling_functions%22%5D++++%3D+%7B+%22identity%22,+%22log10%22+%7D%3B%0A++++config%5B%22time_steps%22%5D+++++++++++%3D+500%3B%0A++++config%5B%22time_period%22%5D++++++++++%3D+1.24709e%2B2%3B%0A%0A++++config.to_file(%22config.json%22)%3B%0A%0A++++//+Import+JSON%0A++++config+%3D+json::from_file(%22config.json%22)%3B%0A%0A++++std::cout+%3C%3C+config.to_string()%3B%0A%0A++++return+0%3B%0A%7D%0A'),l:'5',n:'0',o:'C%2B%2B+source+%231',t:'0')),k:71.71783148269105,l:'4',n:'0',o:'',s:0,t:'0'),(g:!((g:!((h:compiler,i:(compiler:clang1600,filters:(b:'0',binary:'1',binaryObject:'1',commentOnly:'0',debugCalls:'1',demangle:'0',directives:'0',execute:'0',intel:'0',libraryCode:'0',trim:'1',verboseDemangling:'0'),flagsViewOpen:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,libs:!(),options:'-std%3Dc%2B%2B17+-O2',overrides:!(),selection:(endColumn:1,endLineNumber:1,positionColumn:1,positionLineNumber:1,selectionStartColumn:1,selectionStartLineNumber:1,startColumn:1,startLineNumber:1),source:1),l:'5',n:'0',o:'+x86-64+clang+16.0.0+(Editor+%231)',t:'0')),header:(),l:'4',m:50,n:'0',o:'',s:0,t:'0'),(g:!((h:output,i:(compilerName:'x86-64+clang+16.0.0',editorid:1,fontScale:14,fontUsePx:'0',j:1,wrap:'1'),l:'5',n:'0',o:'Output+of+x86-64+clang+16.0.0+(Compiler+%231)',t:'0')),k:46.69421860597116,l:'4',m:50,n:'0',o:'',s:0,t:'0')),k:28.282168517308946,l:'3',n:'0',o:'',t:'0')),l:'2',n:'0',o:'',t:'0')),version:4) ]
 
 ```cpp
 using namespace utl;
 
-// Export JSON
+// Serialize JSON
 json::Node config;
 
 config["auxiliary_info"]       = true;
@@ -310,7 +317,7 @@ config["time_period"]          = 1.24709e+2;
 
 config.to_file("config.json");
 
-// Import JSON
+// Parse JSON
 config = json::from_file("config.json");
 
 std::cout << config.to_string();
