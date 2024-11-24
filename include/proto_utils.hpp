@@ -779,6 +779,49 @@ constexpr int _log_10_ceil(T num) {
     return num < 10 ? 1 : 1 + _log_10_ceil(num / 10);
 }
 
+std::string _pretty_error(std::size_t cursor, const std::string& chars) {
+    // "Normalize" cursor if it's at the end of the buffer
+    if (cursor >= chars.size()) cursor = chars.size() - 1;
+    
+    // Get JSON line number
+    std::size_t line_number = 1; // don't want to include <algorithm> just for a single std::count()
+    for (std::size_t pos = 0; pos < cursor; ++pos)
+        if (chars[pos] == '\n') ++line_number;
+    
+    // Get contents of the current line
+    constexpr std::size_t max_left_width  = 24;
+    constexpr std::size_t max_right_width = 24;
+
+    std::size_t line_start = cursor;
+    for (; line_start > 0; --line_start)
+        if (chars[line_start - 1] == '\n' || cursor - line_start >= max_left_width) break;
+
+    std::size_t line_end = cursor;
+    for (; line_end < chars.size() - 1; ++line_end)
+        if (chars[line_end + 1] == '\n' || line_end - cursor >= max_right_width) break;
+    
+    const std::string_view line_contents(chars.data() + line_start, line_end - line_start + 1);
+
+    // Format output
+    const std::string line_prefix =
+        "Line " + std::to_string(line_number) + ": "; // fits into SSO buffer in almost all cases
+
+    std::string res;
+    res.reserve(7 + 2 * line_prefix.size() + 2 * line_contents.size());
+    
+    res += '\n';
+    res += line_prefix;
+    res += line_contents;
+    res += '\n';
+    res.append(line_prefix.size(), ' ');
+    res.append(cursor - line_start, '-');
+    res += '^';
+    res.append(line_end - cursor, '-');
+    res += " [!]";
+
+    return res;
+}
+
 // Workaround for 'static_assert(false)' making program ill-formed even
 // when placed inide an 'if constexpr' branch that never compiles.
 // 'static_assert(_always_false_v<T)' on the the other hand doesn't,
@@ -1045,30 +1088,36 @@ public:
         this->data = std::move(array_value);
         return *this;
     }
-    
+
     template <class T>
     Node& operator=(std::initializer_list<std::initializer_list<T>> ilist) {
         // Support for 2D brace initialization
         array_type array_value;
         array_value.reserve(ilist.size());
-        for (const auto& e : ilist) { array_value.emplace_back(); array_value.back() = e; }
+        for (const auto& e : ilist) {
+            array_value.emplace_back();
+            array_value.back() = e;
+        }
         // uses 1D 'operator=(std::initializer_list<T>)' to fill each node of the array
         this->data = std::move(array_value);
         return *this;
     }
-    
+
     template <class T>
     Node& operator=(std::initializer_list<std::initializer_list<std::initializer_list<T>>> ilist) {
         // Support for 3D brace initialization
         // it's dumb, but it works
         array_type array_value;
         array_value.reserve(ilist.size());
-        for (const auto& e : ilist) { array_value.emplace_back(); array_value.back() = e; }
+        for (const auto& e : ilist) {
+            array_value.emplace_back();
+            array_value.back() = e;
+        }
         // uses 2D 'operator=(std::initializer_list<std::initializer_list<T>>)' to fill each node of the array
         this->data = std::move(array_value);
         return *this;
     }
-    
+
     // we assume no reasonable person would want to type a 4D+ array as 'std::initializer_list<>',
     // if they really want to they can specify the type of the top layer and still be fine
 
@@ -1203,7 +1252,7 @@ constexpr std::array<bool, _number_of_char_values> _lookup_rejected_control_char
     // Some can be escaped with a 2-char sequence, others should be escaped as a unicode HEX
     for (char c = 0; c <= 31; ++c) res[c] = true;
     return res;
-    
+
     // Note:
     // While C++ standard doesn't guarantee that chars 0-31 correspond to ASCII control characters,
     // this is in fact guaranteed by the assumption of UTF-8 encoded string.
@@ -1239,7 +1288,8 @@ struct _parser {
         }
 
         throw std::runtime_error("JSON parser reached the end of buffer at pos "s + std::to_string(cursor) +
-                                 " while skipping insignificant whitespace segment."s);
+                                 " while skipping insignificant whitespace segment."s +
+                                 _pretty_error(cursor, this->chars));
     }
 
     // Parsing methods
@@ -1268,7 +1318,8 @@ struct _parser {
             return this->parse_null(cursor);
         }
         throw std::runtime_error("JSON node selector encountered unexpected marker symbol {"s + this->chars[cursor] +
-                                 "} at pos "s + std::to_string(cursor) + " (should be one of {0123456789{[\"tfn})."s);
+                                 "} at pos "s + std::to_string(cursor) + " (should be one of {0123456789{[\"tfn})."s +
+                                 _pretty_error(cursor, this->chars));
 
         // Note: using a lookup table instead of an 'if' chain doesn't seem to offer any performance benefits here
     }
@@ -1286,7 +1337,8 @@ struct _parser {
         cursor = this->skip_nonsignificant_whitespace(cursor);
         if (this->chars[cursor] != ':')
             throw std::runtime_error("JSON object node encountered unexpected symbol {"s + this->chars[cursor] +
-                                     "} after the pair key at pos "s + std::to_string(cursor) + " (should be {:})."s);
+                                     "} after the pair key at pos "s + std::to_string(cursor) + " (should be {:})."s +
+                                     _pretty_error(cursor, this->chars));
         ++cursor; // move past the colon ':'
         cursor = this->skip_nonsignificant_whitespace(cursor);
 
@@ -1383,11 +1435,12 @@ struct _parser {
             } else {
                 throw std::runtime_error(
                     "JSON array node could not find comma {,} or object ending symbol {}} after the element at pos "s +
-                    std::to_string(cursor) + "."s);
+                    std::to_string(cursor) + "."s + _pretty_error(cursor, this->chars));
             }
         }
 
-        throw std::runtime_error("JSON object node reached the end of buffer while parsing object contents.");
+        throw std::runtime_error("JSON object node reached the end of buffer while parsing object contents." +
+                                 _pretty_error(cursor, this->chars));
     }
 
     std::size_t parse_array_element(std::size_t cursor, Array& parent) {
@@ -1445,11 +1498,12 @@ struct _parser {
             } else {
                 throw std::runtime_error(
                     "JSON array node could not find comma {,} or array ending symbol {]} after the element at pos "s +
-                    std::to_string(cursor) + "."s);
+                    std::to_string(cursor) + "."s + _pretty_error(cursor, this->chars));
             }
         }
 
-        throw std::runtime_error("JSON array node reached the end of buffer while parsing object contents.");
+        throw std::runtime_error("JSON array node reached the end of buffer while parsing object contents." +
+                                 _pretty_error(cursor, this->chars));
     }
 
     std::pair<std::size_t, String> parse_string(std::size_t cursor) {
@@ -1483,7 +1537,7 @@ struct _parser {
                     if (cursor >= this->chars.size())
                         throw std::runtime_error("JSON string node reached the end of buffer while"s +
                                                  "parsing a 2-character escape sequence at pos "s +
-                                                 std::to_string(cursor) + "."s);
+                                                 std::to_string(cursor) + "."s + _pretty_error(cursor, this->chars));
                     string_value += replacement_char;
                 }
                 // 6-character escape sequences (escaped unicode HEX codepoints)
@@ -1491,7 +1545,7 @@ struct _parser {
                     if (cursor >= this->chars.size() + 4)
                         throw std::runtime_error("JSON string node reached the end of buffer while"s +
                                                  "parsing a 5-character escape sequence at pos "s +
-                                                 std::to_string(cursor) + "."s);
+                                                 std::to_string(cursor) + "."s + _pretty_error(cursor, this->chars));
 
                     // Standard library is absolutely HORRIBLE when it comes to Unicode support.
                     // Literally every single encoding function in <cuchar>/<string>/<codecvt> is a
@@ -1505,12 +1559,12 @@ struct _parser {
                     if (!_unicode_codepoint_to_utf8(string_value, unicode_char))
                         throw std::runtime_error("JSON string node could not parse unicode codepoint {"s + hex +
                                                  "} while parsing an escape sequence at pos "s +
-                                                 std::to_string(cursor) + "."s);
+                                                 std::to_string(cursor) + "."s + _pretty_error(cursor, this->chars));
                     cursor += 4; // move past first 'uXXX' symbols, last symbol will be covered by the loop '++cursor'
                 } else {
                     throw std::runtime_error("JSON string node encountered unexpected character {"s + escaped_char +
                                              "} while parsing an escape sequence at pos "s + std::to_string(cursor) +
-                                             "."s);
+                                             "."s + _pretty_error(cursor, this->chars));
                 }
 
                 // This covers all non-hex escape sequences according to ECMA-404 specification
@@ -1524,8 +1578,9 @@ struct _parser {
             else if (_lookup_rejected_control_chars[c])
                 throw std::runtime_error(
                     "JSON string node encountered unescaped ASCII control character character \\"s +
-                    std::to_string(static_cast<int>(c)) + "at pos"s + std::to_string(cursor) + "."s);
-            
+                    std::to_string(static_cast<int>(c)) + " at pos "s + std::to_string(cursor) + "."s +
+                    _pretty_error(cursor, this->chars));
+
             // Reached the end of the string
             if (c == '"') {
                 string_value.append(this->chars.data() + segment_start, cursor - segment_start);
@@ -1534,7 +1589,8 @@ struct _parser {
             }
         }
 
-        throw std::runtime_error("JSON string node reached the end of buffer while parsing string contents.");
+        throw std::runtime_error("JSON string node reached the end of buffer while parsing string contents." +
+                                 _pretty_error(cursor, this->chars));
     }
 
     std::pair<std::size_t, Number> parse_number(std::size_t cursor) {
@@ -1554,11 +1610,11 @@ struct _parser {
             // even though it does not appear in the enumerator list (which starts at 1)
             if (error_code == std::errc::invalid_argument)
                 throw std::runtime_error("JSON number node could not be parsed as a number at pos "s +
-                                         std::to_string(cursor) + "."s);
+                                         std::to_string(cursor) + "."s + _pretty_error(cursor, this->chars));
             else if (error_code == std::errc::result_out_of_range)
                 throw std::runtime_error(
                     "JSON number node parsed to number larger than its possible binary representation at pos "s +
-                    std::to_string(cursor) + "."s);
+                    std::to_string(cursor) + "."s + _pretty_error(cursor, this->chars));
         }
 
         return {numer_end_ptr - this->chars.data(), number_value};
@@ -1569,7 +1625,8 @@ struct _parser {
         constexpr std::size_t token_length = 4;
 
         if (cursor + token_length > this->chars.size())
-            throw std::runtime_error("JSON bool node reached the end of buffer while parsing {true}.");
+            throw std::runtime_error("JSON bool node reached the end of buffer while parsing {true}." +
+                                     _pretty_error(cursor, this->chars));
 
         const bool parsed_correctly =         //
             this->chars[cursor + 0] == 't' && //
@@ -1578,7 +1635,8 @@ struct _parser {
             this->chars[cursor + 3] == 'e';   //
 
         if (!parsed_correctly)
-            throw std::runtime_error("JSON bool node could not parse {true} at pos "s + std::to_string(cursor) + "."s);
+            throw std::runtime_error("JSON bool node could not parse {true} at pos "s + std::to_string(cursor) + "."s +
+                                     _pretty_error(cursor, this->chars));
 
         return {cursor + token_length, Bool(true)};
     }
@@ -1588,7 +1646,8 @@ struct _parser {
         constexpr std::size_t token_length = 5;
 
         if (cursor + token_length > this->chars.size())
-            throw std::runtime_error("JSON bool node reached the end of buffer while parsing {false}.");
+            throw std::runtime_error("JSON bool node reached the end of buffer while parsing {false}." +
+                                     _pretty_error(cursor, this->chars));
 
         const bool parsed_correctly =         //
             this->chars[cursor + 0] == 'f' && //
@@ -1598,7 +1657,8 @@ struct _parser {
             this->chars[cursor + 4] == 'e';   //
 
         if (!parsed_correctly)
-            throw std::runtime_error("JSON bool node could not parse {false} at pos "s + std::to_string(cursor) + "."s);
+            throw std::runtime_error("JSON bool node could not parse {false} at pos "s + std::to_string(cursor) + "."s +
+                                     _pretty_error(cursor, this->chars));
 
         return {cursor + token_length, Bool(false)};
     }
@@ -1608,7 +1668,8 @@ struct _parser {
         constexpr std::size_t token_length = 4;
 
         if (cursor + token_length > this->chars.size())
-            throw std::runtime_error("JSON null node reached the end of buffer while parsing {null}.");
+            throw std::runtime_error("JSON null node reached the end of buffer while parsing {null}." +
+                                     _pretty_error(cursor, this->chars));
 
         const bool parsed_correctly =         //
             this->chars[cursor + 0] == 'n' && //
@@ -1617,7 +1678,8 @@ struct _parser {
             this->chars[cursor + 3] == 'l';   //
 
         if (!parsed_correctly)
-            throw std::runtime_error("JSON null node could not parse {null} at pos "s + std::to_string(cursor) + "."s);
+            throw std::runtime_error("JSON null node could not parse {null} at pos "s + std::to_string(cursor) + "."s +
+                                     _pretty_error(cursor, this->chars));
 
         return {cursor + token_length, Null()};
     }

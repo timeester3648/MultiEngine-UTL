@@ -9,6 +9,7 @@
 - [Decent performance](#benchmarks) without relying on compiler intrinsics
 - All JSON types map to standard library containers, no need to learn custom APIs
 - Simple integration (single header, barely over `1k` lines)
+- [Nice error messages](#error-handling)
 
 > [!Note]
 > Despite rather competitive performance, considerably faster parsing can be achieved with custom formatters, SIMD and unordered key optimizations (see [simdjson](https://github.com/simdjson/simdjson), [Glaze](https://github.com/stephenberry/glaze), [RapidJSON](https://github.com/Tencent/rapidjson)  and [yyjson](https://github.com/ibireme/yyjson)), this, however often comes at the expense of user convenience (like with *RapidJSON*) or features (such as missing escape sequence handling in *simdjson* and *yyjson*, *Glaze* has it all, but requires [C++23](https://en.cppreference.com/w/cpp/23)).
@@ -451,6 +452,38 @@ Output:
 --- Minimized JSON ---
 
 {"array":[1,2,3],"object":{"key_1":3.14,"key_2":6.28},"string":"lorem ipsum"}
+```
+
+### Error Handling
+
+[ [Run this code](https://godbolt.org/#g:!((g:!((g:!((h:codeEditor,i:(filename:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,selection:(endColumn:6,endLineNumber:19,positionColumn:6,positionLineNumber:19,selectionStartColumn:6,selectionStartLineNumber:19,startColumn:6,startLineNumber:19),source:'%23include+%3Chttps://raw.githubusercontent.com/DmitriBogdanov/prototyping_utils/master/include/proto_utils.hpp%3E%0A%0Aint+main(int+argc,+char+**argv)+%7B%0A++++using+namespace+utl%3B%0A%0A++++const+auto+invalid_json+%3D+R%22(%0A++++++++%7B%0A++++++++++++%22key_1%22:+%22value_1%22,%0A++++++++++++%22key_2%22:++value_2%22,%0A++++++++++++%22key_3%22:+%22value_3%22%0A++++++++%7D%0A++++)%22%3B%0A%0A++++try+%7B%0A++++++++utl::json::from_string(invalid_json)%3B%0A++++%7D%0A++++catch+(std::runtime_error+%26e)+%7B%0A++++++++std::cerr+%3C%3C+%22ERROR:+Caught+exception:%5Cn%5Cn%22+%3C%3C+e.what()%3B%0A++++%7D%0A%0A++++return+0%3B%0A%7D%0A'),l:'5',n:'0',o:'C%2B%2B+source+%231',t:'0')),k:71.71783148269105,l:'4',n:'0',o:'',s:0,t:'0'),(g:!((g:!((h:compiler,i:(compiler:clang1600,filters:(b:'0',binary:'1',binaryObject:'1',commentOnly:'0',debugCalls:'1',demangle:'0',directives:'0',execute:'0',intel:'0',libraryCode:'0',trim:'1',verboseDemangling:'0'),flagsViewOpen:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,libs:!(),options:'-std%3Dc%2B%2B17+-O2',overrides:!(),selection:(endColumn:1,endLineNumber:1,positionColumn:1,positionLineNumber:1,selectionStartColumn:1,selectionStartLineNumber:1,startColumn:1,startLineNumber:1),source:1),l:'5',n:'0',o:'+x86-64+clang+16.0.0+(Editor+%231)',t:'0')),header:(),l:'4',m:50,n:'0',o:'',s:0,t:'0'),(g:!((h:output,i:(compilerName:'x86-64+clang+16.0.0',editorid:1,fontScale:14,fontUsePx:'0',j:1,wrap:'1'),l:'5',n:'0',o:'Output+of+x86-64+clang+16.0.0+(Compiler+%231)',t:'0')),k:46.69421860597116,l:'4',m:50,n:'0',o:'',s:0,t:'0')),k:28.282168517308946,l:'3',n:'0',o:'',t:'0')),l:'2',n:'0',o:'',t:'0')),version:4) ]
+
+```cpp
+using namespace utl;
+
+const auto invalid_json = R"(
+    {
+        "key_1": "value_1",
+        "key_2":  value_2",
+        "key_3": "value_3"
+    }
+)";
+
+try {
+    utl::json::from_string(invalid_json);
+}
+catch (std::runtime_error &e) {
+    std::cerr << "ERROR: Caught exception:\n\n" << e.what();
+}
+```
+
+Output:
+```
+ERROR: Caught exception:
+
+JSON node selector encountered unexpected marker symbol {v} at pos 48 (should be one of {0123456789{["tfn}).
+Line 4:         "key_2":  value_2",
+        ------------------^-------- [!]
 ```
 
 ## Tests

@@ -12,6 +12,7 @@
 #include "thirdparty/rapidjson/writer.h"
 // picojson
 #include "thirdparty/picojson.h"
+#include <stdexcept>
 
 // _____________ BENCHMARK IMPLEMENTATION _____________
 
@@ -172,5 +173,12 @@ int main() {
     benchmark_on_data("benchmarks/data/numbers.json");
     benchmark_on_data("benchmarks/data/database.json");
     
-    //std::cout << "\n\n" << utl::json::from_file("snippets/test4.json").to_string(utl::json::Format::MINIMIZED) << "\n\n";
+    // const auto invalid_json = "[[[[[";
+    
+    // try {
+    //     utl::json::from_string(invalid_json);
+    // }
+    // catch (std::runtime_error &e) {
+    //     std::cerr << "ERROR: Caught exception:\n\n" << e.what();
+    // }
 }

@@ -345,7 +345,7 @@ using ConstSparseMatrixView =
 > `noexcept` specifiers are omitted in this section to reduce verbosity.
 
 > [!Note]
-> From now on `mvl::GenericTensor::` will be omitted for same reason.
+> From now on `mvl::GenericTensor::` will be omitted for the same reason.
 
 ## Methods
 
