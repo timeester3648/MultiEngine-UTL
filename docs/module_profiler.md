@@ -199,6 +199,9 @@ This is exactly the problem solved by `UTL_PROFILER_EXCLUSIVE()`, as it guarante
 
 which corresponds to the parts we were trying to measure and satisfied $T_1 + T_2 = T$. The same logic can be generalized to an arbitrary recursion with $N$ different profilers.
 
+> [!Note]
+> There are some other non-trivial questions such as "how to automatically detect recursion and avoid double-counting the time spent inside the profiler that is nested under itself in the call graph", but those fall under the "implementation details" umbrella.
+
 ## Microbenchmarking With x86 Intrinsics
 
 To enable the use of intrinsics add folowing `#define` before including the `proto_utils` header:
