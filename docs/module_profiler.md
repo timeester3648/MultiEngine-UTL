@@ -2,7 +2,7 @@
 
 [<- back to README.md](https://github.com/DmitriBogdanov/prototyping_utils/tree/master)
 
-**URL_PROFILER** module contains macros for quick scope profiling and micro-benchmarking with x86 intrinsics.
+**URL_PROFILER** module contains macros for quick scope profiling and micro-benchmarking with x86 intrinsics (GCC/clang only).
 
 ## Definitions
 
@@ -94,8 +94,7 @@ UTL_PROFILER("whole loop")
 for (int i = 0; i < 5; ++i) {
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
 
-    UTL_PROFILER("some_function()")
-    some_function();
+    UTL_PROFILER("some_function()") some_function();
 }
 
 // we expect to see that 'some_function()' will measure ~half the time of the 'whole loop'
@@ -115,7 +114,7 @@ double some_computation() {
     return utl::random::rand_double();
 }
 
-recursive_function(int recursion) {
+double recursive_function(int recursion) {
     if (recursion > 5) return some_computation();
     
     UTL_PROFILER_BEGIN_EXCLUSIVE(segment_1, "1st recursion branch");
@@ -174,17 +173,38 @@ which corresponds to the parts we were trying to measure and satisfied $T_1 + T_
 
 ## Microbenchmarking With x86 Intrinsics
 
+To enable the use of intrinsics add folowing `#define` before including the `proto_utils` header:
+
 ```cpp
-// To enable intrinsics define this before including the header
 #define UTL_PROFILER_OPTION_USE_x86_INTRINSICS_FOR_FREQUENCY 3'300'000'000
-// 3.3 GHz CPU in this example (AMD Ryzen 5 5600H)
+// I have 3.3 GHz CPU in this example (AMD Ryzen 5 5600H)
 
 #include "proto_utils.hpp"
 ```
 
-This will switch `profiler::clock` from `std::chrono::steady_clock` to a custom [`<chrono>`](https://en.cppreference.com/w/cpp/chrono)-compatible implementation using GCC/clang [RDTSC x86 intrinsic](https://en.wikipedia.org/wiki/Time_Stamp_Counter) that is likely to be DRASTICALLY faster at getting time that stdlib solutions like `std::chrono::steady_clock` or `ctime()`.
+This will switch `profiler::clock` from `std::chrono::steady_clock` to a custom [`<chrono>`](https://en.cppreference.com/w/cpp/chrono)-compatible implementation using GCC/clang [RDTSC x86 intrinsic](https://en.wikipedia.org/wiki/Time_Stamp_Counter) that is likely to be DRASTICALLY faster at getting time that std-lib solutions like `std::chrono::steady_clock` or `ctime()`.
 
 This is exceedingly helpful when benchmarking code on a hot path, however it comes at a price of producing a non-portable executable. Below are a few [benchmarks](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/benchmarks/benchmark_profiler.cpp) showcasing the difference on a particular hardware:
 
 ```
+======= USING std::chrono ========
+
+| relative |               ms/op |                op/s |    err% |     total | benchmark
+|---------:|--------------------:|--------------------:|--------:|----------:|:----------
+|   100.0% |                5.15 |              194.16 |    1.2% |      0.62 | `UTL_PROFILE()`
+|   102.5% |                5.02 |              199.04 |    0.3% |      0.61 | `Theoretical best std::chrono profiler`
+|   209.8% |                2.45 |              407.38 |    0.2% |      0.30 | `Theoretical best __rdtsc() profiler`
+|   233.8% |                2.20 |              453.91 |    1.4% |      0.26 | `Runtime without profiling`
+
+====== USING x86 INTRINSICS ======
+
+| relative |               ms/op |                op/s |    err% |     total | benchmark
+|---------:|--------------------:|--------------------:|--------:|----------:|:----------
+|   100.0% |                2.53 |              394.91 |    0.4% |      0.33 | `UTL_PROFILE()`
+|    49.9% |                5.07 |              197.09 |    0.2% |      0.61 | `Theoretical best std::chrono profiler`
+|   102.8% |                2.46 |              405.79 |    0.3% |      0.30 | `Theoretical best __rdtsc() profiler`
+|   116.8% |                2.17 |              461.13 |    0.5% |      0.26 | `Runtime without profiling`
 ```
+
+> [!Note]
+> Here *"theoretical best"* refers to a hypothetical profiler that requires zero operations aside from measuring the time at two points  — before and after entering the code segment.

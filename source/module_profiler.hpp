@@ -1,14 +1,14 @@
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ DmitriBogdanov/prototyping_utils ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //
-// Macro-Module:  UTL_PROFILER
-// Documentation: https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/MACRO_PROFILER.md
+// Module:        utl::profiler
+// Documentation: https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_profiler.md
 // Source repo:   https://github.com/DmitriBogdanov/prototyping_utils
 //
 // This project is licensed under the MIT License
 //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-#if !defined(UTL_PICK_MODULES) || defined(UTLMACRO_PROFILER)
+#if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_PROFILER)
 #ifndef UTLHEADERGUARD_PROFILER
 #define UTLHEADERGUARD_PROFILER
 
@@ -37,17 +37,13 @@
 // suite of course would include support for automatic reruns and gather statistical data,
 // but in prototying this is often not necessary.
 //
-// # UTL_PROFILER_REROUTE_TO_FILE(filepath) #
-// Reroutes profiler summary from std::cout to a file with a given name.
+// Resolving time recording inside recursion took some thinking, but ended up being quite simple in
+// implementation. See the docs for more details on that.
 //
-// # UTL_PROFILER, UTL_PROFILER_LABELED() #
-// Profiles the following expression/scope. If profiled scope was entered at any point of the program,
-// upon exiting 'main()' the table with profiling results will be printed. Profiling results include:
-// - Total program runtime
-// - Total runtime of each profiled scope
-// - % of total runtime taken by each profiled scope
-// - Profiler labels (if using 'UTL_PROFILE_LABELED()', otherwise the label is set to "<NONE>")
-// - Profiler locations: file, function, line
+// Currently, the overhead of profiling is barely different to the overhead of just time measurement,
+// this also took a bit of thinking but in the end there is a nice solution that uses static variables
+// to offload things that can only be done once to their initialization, and then links local variables
+// to 'static' markers of the callsite recording. See 'UTL_PROFILE' macro for some more details.
 
 // ____________________ IMPLEMENTATION ____________________
 
@@ -102,7 +98,7 @@ inline void _utl_profiler_atexit(); // predeclaration, implementation has circul
 // --- Profiler Classess ---
 // =========================
 
-class RecordManager {
+class _record_manager {
 private:
     _record data;
 
@@ -113,9 +109,9 @@ public:
 
     void add_time(duration time) noexcept { this->data.accumulated_time += time; }
 
-    RecordManager() = delete;
+    _record_manager() = delete;
 
-    RecordManager(const char* file, int line, const char* func, const char* label)
+    _record_manager(const char* file, int line, const char* func, const char* label)
         : data({file, line, func, label, duration(0)}) {
         // 'file', 'func', 'label' are guaranteed to be string literals, since we want to
         // have as little overhead as possible during runtime, we can just save raw pointers
@@ -129,48 +125,67 @@ public:
         }
     }
 
-    ~RecordManager() { records.emplace_back(this->data); }
+    ~_record_manager() { records.emplace_back(this->data); }
 };
 
-// Timple class that records the time of its creation and destruction and records it into the connected 'RecordManager'
-class ScopeTimer {
-private:
-    time_point     start;
-    RecordManager* record_manager;
+// We need 4 slightly different timer classes, so might as well deduplicate some code by moving it into a base class
+struct _timer_base {
+protected:
+    time_point       start;
+    _record_manager* record_manager;
     // we could use 'std::optional<std::reference_wrapper<RecordManager>>',
     // but that would inctroduce more dependencies for no real reason
-
 public:
     constexpr operator bool() const noexcept { return true; }
-    // we needed so we can use 'if constexpr (const auto x = ScopeTimer())' construct
 
-    ScopeTimer(RecordManager* manager) : record_manager(manager) {
+    _timer_base(_record_manager* manager) : record_manager(manager) {}
+};
+
+// Simple class that records the time of its creation and destruction and records it into the connected 'RecordManager'
+struct _scope_timer : public _timer_base {
+    _scope_timer(_record_manager* manager) : _timer_base(manager) {
         if (this->record_manager->recursion++ == 0) this->start = clock::now();
         // this check prevent timer from double-counting time spent inside
         // of it's own scope due to recursive calls
     }
 
-    ~ScopeTimer() {
+    ~_scope_timer() {
         if (--this->record_manager->recursion == 0) this->record_manager->add_time(clock::now() - this->start);
     }
 };
 
-// Same thing as 'ScopeTimer' except it uses global static 'exclusive_recursion' instead of regular 'recursion' that is
-// specific to each 'RecordManager'. This effecively means no 'ExclusiveScopeTimer''s will count time as long a a single
-// instance of another exclusive timer exists. This allows us to resolve som tricky situations such as recursion.
-class ExclusiveScopeTimer {
-private:
-    time_point     start;
-    RecordManager* record_manager;
-
-public:
-    constexpr operator bool() const noexcept { return true; }
-
-    ExclusiveScopeTimer(RecordManager* manager) : record_manager(manager) {
+// Same thing as '_scope_timer' except it uses global static 'exclusive_recursion' instead of regular 'recursion' that
+// is specific to each '_record_manager'. This effecively means no '_exclusive_scope_timer''s will count time as long a
+// single instance of another exclusive timer exists. This allows us to resolve som tricky situations such as recursion
+struct _exclusive_scope_timer : public _timer_base {
+    _exclusive_scope_timer(_record_manager* manager) : _timer_base(manager) {
         if (this->record_manager->exclusive_recursion++ == 0) this->start = clock::now();
     }
 
-    ~ExclusiveScopeTimer() {
+    ~_exclusive_scope_timer() {
+        if (--this->record_manager->exclusive_recursion == 0)
+            this->record_manager->add_time(clock::now() - this->start);
+    }
+};
+
+// Same thing as '_scope_timer', except instead of destructor it uses an explicitly called method to record time.
+// We need it to implement code-segment profiling with 'UTL_PROFILER_BEGIN' and 'UTL_PROFILER_END'
+struct _segment_timer : public _timer_base {
+    _segment_timer(_record_manager* manager) : _timer_base(manager) {
+        if (this->record_manager->recursion++ == 0) this->start = clock::now();
+    }
+
+    void finish() {
+        if (--this->record_manager->recursion == 0) this->record_manager->add_time(clock::now() - this->start);
+    }
+};
+
+struct _exclusive_segment_timer : public _timer_base {
+    _exclusive_segment_timer(_record_manager* manager) : _timer_base(manager) {
+        if (this->record_manager->exclusive_recursion++ == 0) this->start = clock::now();
+    }
+
+    void finish() {
         if (--this->record_manager->exclusive_recursion == 0)
             this->record_manager->add_time(clock::now() - this->start);
     }
@@ -221,7 +236,7 @@ inline void _utl_profiler_atexit() {
     constexpr std::string_view percentage_postfix   = "%";
 
     // Sort records by their accumulated time
-    std::sort(RecordManager::records.begin(), RecordManager::records.end(),
+    std::sort(_record_manager::records.begin(), _record_manager::records.end(),
               [](const _record& l, const _record& r) { return l.accumulated_time > r.accumulated_time; });
 
     // Collect max length of each column (for proper formatting)
@@ -235,7 +250,7 @@ inline void _utl_profiler_atexit() {
     std::streamsize max_length_duration   = column_name_duration.size();
     std::streamsize max_length_percentage = column_name_percentage.size();
 
-    for (const auto& record : RecordManager::records) {
+    for (const auto& record : _record_manager::records) {
         const std::string call_site    = _format_call_site(record.file, record.line, record.func);
         const std::string label        = record.label;
         const double      duration_sec = duration_to_sec(record.accumulated_time);
@@ -295,7 +310,7 @@ inline void _utl_profiler_atexit() {
 
 
     // Print formatted table contents
-    for (const auto& record : RecordManager::records) {
+    for (const auto& record : _record_manager::records) {
         const std::string call_site    = _format_call_site(record.file, record.line, record.func);
         const std::string label        = record.label;
         const double      duration_sec = duration_to_sec(record.accumulated_time);
@@ -335,15 +350,18 @@ inline void _utl_profiler_atexit() {
 // '__LINE__' gets expanded in '_utl_profiler_concat_tokens_wrapper()'
 // and then tokenized and concatenated in '_utl_profiler_concat_tokens()'
 
+// --- Scope profiling ---
+// -----------------------
+
 #define UTL_PROFILER(label_)                                                                                           \
     constexpr bool _utl_profiler_add_uuid(utl_profiler_macro_guard_) = true;                                           \
                                                                                                                        \
     static_assert(_utl_profiler_add_uuid(utl_profiler_macro_guard_), "UTL_PROFILE is a multi-line macro.");            \
                                                                                                                        \
-    static utl::profiler::RecordManager _utl_profiler_add_uuid(utl_profiler_record_manager_)(__FILE__, __LINE__,       \
-                                                                                             __func__, label_);        \
+    static utl::profiler::_record_manager _utl_profiler_add_uuid(utl_profiler_record_manager_)(__FILE__, __LINE__,     \
+                                                                                               __func__, label_);      \
                                                                                                                        \
-    if constexpr (const utl::profiler::ScopeTimer _utl_profiler_add_uuid(utl_profiler_scope_timer_){                   \
+    if constexpr (const utl::profiler::_scope_timer _utl_profiler_add_uuid(utl_profiler_scope_timer_){                 \
                       &_utl_profiler_add_uuid(utl_profiler_record_manager_)})
 // Note 1:
 //
@@ -378,15 +396,46 @@ inline void _utl_profiler_atexit() {
 #define UTL_PROFILER_EXCLUSIVE(label_)                                                                                 \
     constexpr bool _utl_profiler_add_uuid(utl_profiler_macro_guard_) = true;                                           \
                                                                                                                        \
-    static_assert(_utl_profiler_add_uuid(utl_profiler_macro_guard_), "UTL_PROFILE is a multi-line macro.");            \
+    static_assert(_utl_profiler_add_uuid(utl_profiler_macro_guard_), "UTL_PROFILER_EXCLUSIVE is a multi-line macro."); \
                                                                                                                        \
-    static utl::profiler::RecordManager _utl_profiler_add_uuid(utl_profiler_record_manager_)(__FILE__, __LINE__,       \
-                                                                                             __func__, label_);        \
+    static utl::profiler::_record_manager _utl_profiler_add_uuid(utl_profiler_record_manager_)(__FILE__, __LINE__,     \
+                                                                                               __func__, label_);      \
                                                                                                                        \
-    if constexpr (const utl::profiler::ExclusiveScopeTimer _utl_profiler_add_uuid(utl_profiler_scope_timer_){          \
+    if constexpr (const utl::profiler::_exclusive_scope_timer _utl_profiler_add_uuid(utl_profiler_scope_timer_){       \
                       &_utl_profiler_add_uuid(utl_profiler_record_manager_)})
+// Note:
+//
+// Exact same thing as a regular UTL_PROFILER() but uses '_exclusive_scope_timer' instead.
+// The reason we need this for recursion is nicely explained in the docs.
 
+// --- Segment profiling ---
+// -------------------------
 
+#define UTL_PROFILER_BEGIN(segment_label_, label_)                                                                     \
+    static utl::profiler::_record_manager utl_profiler_record_manager_##segment_label_(__FILE__, __LINE__, __func__,   \
+                                                                                       label_);                        \
+    utl::profiler::_segment_timer         utl_profiler_segment_timer_##segment_label_(                                 \
+        &utl_profiler_record_manager_##segment_label_)
+
+#define UTL_PROFILER_END(segment_label_) utl_profiler_segment_timer_##segment_label_.finish()
+// Note 1:
+//
+// Last semicolon is intentiomally skipped so macro requires it at the end and
+// doesn't mess up auto code formatters that have a dislike for statement macros.
+//
+// Note 2:
+//
+// The idea here exactly the same as with scope profiles, except instead of '_scope_timer' we use '_segment_timer'
+// that records time on a '.finish()' call instead of destructor. We can put this call inside the END macro
+// and have a nice 2-macro API for profiling segments without creating a scope.
+
+#define UTL_PROFILER_EXCLUSIVE_BEGIN(segment_label_, label_)                                                           \
+    static utl::profiler::_record_manager   utl_profiler_record_manager_##segment_label_(__FILE__, __LINE__, __func__, \
+                                                                                         label_);                      \
+    utl::profiler::_exclusive_segment_timer utl_profiler_segment_timer_##segment_label_(                               \
+        &utl_profiler_record_manager_##segment_label_)
+
+#define UTL_PROFILER_EXCLUSIVE_END(segment_label_) utl_profiler_segment_timer_##segment_label_.finish()
 
 } // namespace utl::profiler
 

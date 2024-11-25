@@ -14,7 +14,6 @@
 
 #include "benchmark.hpp"
 
-#include "MACRO_PROFILER.hpp"
 #include "thirdparty/nanobench.h"
 
 #if defined(__x86_64__)
@@ -79,10 +78,24 @@ void benchmark_profiling_overhead() {
     // completely different profiling method (like, for example, sampling or CPU instruction modeling)
 }
 
-void test_profiler_precision() {
-    UTL_PROFILER("Precision test:   50 ms") utl::sleep::spinlock(50);
-    UTL_PROFILER("Precision test:  200 ms") utl::sleep::spinlock(200);
-    UTL_PROFILER("Precision test: 1000 ms") utl::sleep::spinlock(1000);
+void test_scope_profiler_precision() {
+    UTL_PROFILER("Scope precision test:   50 ms") utl::sleep::spinlock(50);
+    UTL_PROFILER("Scope precision test:  200 ms") utl::sleep::spinlock(200);
+    UTL_PROFILER("Scope precision test: 1000 ms") utl::sleep::spinlock(1000);
+}
+
+void test_segment_profiler_precision() {
+    UTL_PROFILER_BEGIN(segment_1, "Segment precision test:   50 ms");
+    utl::sleep::spinlock(50);
+    UTL_PROFILER_END(segment_1);
+    
+    UTL_PROFILER_BEGIN(segment_2, "Segment precision test:   200 ms");
+    utl::sleep::spinlock(200);
+    UTL_PROFILER_END(segment_2);
+    
+    UTL_PROFILER_BEGIN(segment_3, "Segment precision test:  1000 ms");
+    utl::sleep::spinlock(1000);
+    UTL_PROFILER_END(segment_3);
 }
 
 double recursive_function(int recursion_depth) {
@@ -110,7 +123,8 @@ void test_profiler_recursion_handling() {
 }
 
 int main() {
-    // benchmark_profiling_overhead();
-    // test_profiler_precision();
-    test_profiler_recursion_handling();
+    //benchmark_profiling_overhead();
+    test_scope_profiler_precision();
+    test_segment_profiler_precision();
+    //test_profiler_recursion_handling();
 }
