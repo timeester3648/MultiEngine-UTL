@@ -30,7 +30,7 @@ Secondary design goals also include:
 | [**utl::json**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_json.md) | Lightweight JSON parsing and serializing |
 | [**utl::math**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_math.md) | Math-related utilities |
 | [**utl::mvl**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_mvl.md) | Flexible API for vector and matrix operations |
-| [**utl::profiler**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/moduler_profiler.md) | Quick scope & expression profiling macros |
+| [**utl::profiler**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_profiler.md) | Quick scope & expression profiling macros |
 | [**utl::progressbar**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_progressbar.md) | Configurable progress bars for CLI apps |
 | [**utl::random**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_random.md) | Convenient random functions |
 | [**utl::shell**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_shell.md) | Command-line related utilities |
