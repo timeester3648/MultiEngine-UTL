@@ -249,6 +249,9 @@ This is exceedingly helpful when benchmarking code on a hot path, however it com
 |   209.8% |                2.45 |              407.38 |    0.2% |      0.30 | `Theoretical best __rdtsc() profiler`
 |   233.8% |                2.20 |              453.91 |    1.4% |      0.26 | `Runtime without profiling`
 
+// light workload is difficult to time and sensitive to overhead, here profiled code is ~2x slower then
+// the non-profiled workload, measurement is going to be inaccurate and affect other segments of the code
+
 ====== USING x86 INTRINSICS ======
 
 | relative |               ms/op |                op/s |    err% |     total | benchmark
@@ -257,6 +260,9 @@ This is exceedingly helpful when benchmarking code on a hot path, however it com
 |    49.9% |                5.07 |              197.09 |    0.2% |      0.61 | `Theoretical best std::chrono profiler`
 |   102.8% |                2.46 |              405.79 |    0.3% |      0.30 | `Theoretical best __rdtsc() profiler`
 |   116.8% |                2.17 |              461.13 |    0.5% |      0.26 | `Runtime without profiling`
+
+// while profiling overhead is still present, it is much less significant,
+// this is more-or-less reliable despite measuring a rather lightweight operation
 ```
 
 > [!Note]
