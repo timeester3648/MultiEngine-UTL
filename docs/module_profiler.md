@@ -1,8 +1,8 @@
-# UTL_PROFILER
+# utl::profiler
 
 [<- back to README.md](https://github.com/DmitriBogdanov/prototyping_utils/tree/master)
 
-**URL_PROFILER** module contains macros for quick scope profiling and micro-benchmarking with x86 intrinsics (GCC/clang only).
+**utl::profiler** module contains macros for quick scope profiling and micro-benchmarking with x86 intrinsics (GCC/clang only).
 
 ## Definitions
 
@@ -48,7 +48,11 @@ Similar to a `UTL_PROFILER`, but unlike a regular case only one `UTL_PROFILER_EX
 
 ### Profiling a Scope
 
-[ [Run this code]() ]
+[ [Run this code](https://godbolt.org/#g:!((g:!((g:!((h:codeEditor,i:(filename:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,selection:(endColumn:1,endLineNumber:8,positionColumn:1,positionLineNumber:8,selectionStartColumn:1,selectionStartLineNumber:8,startColumn:1,startLineNumber:8),source:'%23include+%3Chttps://raw.githubusercontent.com/DmitriBogdanov/prototyping_utils/master/include/proto_utils.hpp%3E%0A%0Avoid+computation_1()+%7B+std::this_thread::sleep_for(std::chrono::milliseconds(300))%3B+%7D%0Avoid+computation_2()+%7B+std::this_thread::sleep_for(std::chrono::milliseconds(200))%3B+%7D%0Avoid+computation_3()+%7B+std::this_thread::sleep_for(std::chrono::milliseconds(400))%3B+%7D%0Avoid+computation_4()+%7B+std::this_thread::sleep_for(std::chrono::milliseconds(600))%3B+%7D%0Avoid+computation_5()+%7B+std::this_thread::sleep_for(std::chrono::milliseconds(100))%3B+%7D%0A%0Aint+main(int+argc,+char+**argv)+%7B%0A++++//+Profile+a+scope%0A++++UTL_PROFILER(%22Computation+1+%26+2%22)+%7B%0A++++++++computation_1()%3B%0A++++++++computation_2()%3B%0A++++%7D%0A%0A++++//+Profile+a+single+statement%0A++++UTL_PROFILER(%22Computation+3%22)+computation_3()%3B%0A%0A++++//+Profile+a+code+segment%0A++++UTL_PROFILER_BEGIN(segment_label,+%22Computation+4+%26+5%22)%3B%0A++++computation_4()%3B%0A++++computation_5()%3B%0A++++UTL_PROFILER_END(segment_label)%3B%0A%0A++++return+0%3B%0A%7D%0A'),l:'5',n:'0',o:'C%2B%2B+source+%231',t:'0')),k:71.71783148269105,l:'4',n:'0',o:'',s:0,t:'0'),(g:!((g:!((h:compiler,i:(compiler:clang1600,filters:(b:'0',binary:'1',binaryObject:'1',commentOnly:'0',debugCalls:'1',demangle:'0',directives:'0',execute:'0',intel:'0',libraryCode:'0',trim:'1',verboseDemangling:'0'),flagsViewOpen:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,libs:!(),options:'-std%3Dc%2B%2B17+-O2',overrides:!(),selection:(endColumn:1,endLineNumber:1,positionColumn:1,positionLineNumber:1,selectionStartColumn:1,selectionStartLineNumber:1,startColumn:1,startLineNumber:1),source:1),l:'5',n:'0',o:'+x86-64+clang+16.0.0+(Editor+%231)',t:'0')),header:(),l:'4',m:50,n:'0',o:'',s:0,t:'0'),(g:!((h:output,i:(compilerName:'x86-64+clang+16.0.0',editorid:1,fontScale:12,fontUsePx:'0',j:1,wrap:'1'),l:'5',n:'0',o:'Output+of+x86-64+clang+16.0.0+(Compiler+%231)',t:'0')),k:46.69421860597116,l:'4',m:50,n:'0',o:'',s:0,t:'0')),k:28.282168517308946,l:'3',n:'0',o:'',t:'0')),l:'2',n:'0',o:'',t:'0')),version:4) ]
+
+> [!Note]
+> Online compiler explorer may be a little weird when it comes to sleep & time measurement precision.
+
 ```cpp
 void computation_1() { std::this_thread::sleep_for(std::chrono::milliseconds(300)); }
 void computation_2() { std::this_thread::sleep_for(std::chrono::milliseconds(200)); }
@@ -76,16 +80,23 @@ UTL_PROFILER_END(segment_label);
 
 Output:
 ```
+--------------------- UTL PROFILING RESULTS ----------------------
 
+ Total runtime -> 1.60 sec
+
+ |              Call Site |             Label |   Time | Time % |
+ |------------------------|-------------------|--------|--------|
+ | example.cpp:21, main() | Computation 4 & 5 | 0.70 s |  43.8% |
+ | example.cpp:12, main() | Computation 1 & 2 | 0.50 s |  31.2% |
+ | example.cpp:18, main() |     Computation 3 | 0.40 s |  25.0% |
 ```
 
 ### Nested Profilers & Loops
 
-[ [Run this code]() ]
+[ [Run this code](https://godbolt.org/#g:!((g:!((g:!((h:codeEditor,i:(filename:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,selection:(endColumn:6,endLineNumber:12,positionColumn:6,positionLineNumber:12,selectionStartColumn:6,selectionStartLineNumber:12,startColumn:6,startLineNumber:12),source:'%23include+%3Chttps://raw.githubusercontent.com/DmitriBogdanov/prototyping_utils/master/include/proto_utils.hpp%3E%0A%0Avoid+some_function()+%7B+std::this_thread::sleep_for(std::chrono::milliseconds(200))%3B+%7D%0A%0Aint+main(int+argc,+char+**argv)+%7B%0A++++//+Profile+how+much+of+a+loop+runtime+is+spent+inside+!'some_function()!'%0A++++UTL_PROFILER(%22whole+loop%22)%0A++++for+(int+i+%3D+0%3B+i+%3C+5%3B+%2B%2Bi)+%7B%0A++++++++std::this_thread::sleep_for(std::chrono::milliseconds(200))%3B%0A%0A++++++++UTL_PROFILER(%22some_function()%22)+some_function()%3B%0A++++%7D%0A%0A++++return+0%3B%0A%7D%0A'),l:'5',n:'0',o:'C%2B%2B+source+%231',t:'0')),k:71.71783148269105,l:'4',n:'0',o:'',s:0,t:'0'),(g:!((g:!((h:compiler,i:(compiler:clang1600,filters:(b:'0',binary:'1',binaryObject:'1',commentOnly:'0',debugCalls:'1',demangle:'0',directives:'0',execute:'0',intel:'0',libraryCode:'0',trim:'1',verboseDemangling:'0'),flagsViewOpen:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,libs:!(),options:'-std%3Dc%2B%2B17+-O2',overrides:!(),selection:(endColumn:1,endLineNumber:1,positionColumn:1,positionLineNumber:1,selectionStartColumn:1,selectionStartLineNumber:1,startColumn:1,startLineNumber:1),source:1),l:'5',n:'0',o:'+x86-64+clang+16.0.0+(Editor+%231)',t:'0')),header:(),l:'4',m:50,n:'0',o:'',s:0,t:'0'),(g:!((h:output,i:(compilerName:'x86-64+clang+16.0.0',editorid:1,fontScale:12,fontUsePx:'0',j:1,wrap:'1'),l:'5',n:'0',o:'Output+of+x86-64+clang+16.0.0+(Compiler+%231)',t:'0')),k:46.69421860597116,l:'4',m:50,n:'0',o:'',s:0,t:'0')),k:28.282168517308946,l:'3',n:'0',o:'',t:'0')),l:'2',n:'0',o:'',t:'0')),version:4) ]
+
 ```cpp
-void some_function() {
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
-}
+void some_function() { std::this_thread::sleep_for(std::chrono::milliseconds(200)); }
 
 // ...
 
@@ -102,12 +113,20 @@ for (int i = 0; i < 5; ++i) {
 
 Output:
 ```
+-------------------- UTL PROFILING RESULTS ---------------------
 
+ Total runtime -> 2.00 sec
+
+ |              Call Site |           Label |   Time | Time % |
+ |------------------------|-----------------|--------|--------|
+ |  example.cpp:8, main() |      whole loop | 2.00 s | 100.0% |
+ | example.cpp:12, main() | some_function() | 1.00 s |  50.0% |
 ```
 
 ### Profiling Recursion
 
-[ [Run this code]() ]
+[ [Run this code](https://godbolt.org/#g:!((g:!((g:!((h:codeEditor,i:(filename:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,selection:(endColumn:1,endLineNumber:22,positionColumn:1,positionLineNumber:22,selectionStartColumn:1,selectionStartLineNumber:22,startColumn:1,startLineNumber:22),source:'%23include+%3Chttps://raw.githubusercontent.com/DmitriBogdanov/prototyping_utils/master/include/proto_utils.hpp%3E%0A%0Adouble+some_computation()+%7B%0A++++utl::sleep::spinlock(1)%3B%0A++++return+utl::random::rand_double()%3B%0A%7D%0A%0Adouble+recursive_function(int+recursion)+%7B%0A++++if+(recursion+%3E+5)+return+some_computation()%3B%0A++++%0A++++UTL_PROFILER_EXCLUSIVE_BEGIN(segment_1,+%221st+recursion+branch%22)%3B%0A++++const+double+s1+%3D+recursive_function(recursion+%2B+1)%3B%0A++++UTL_PROFILER_EXCLUSIVE_END(segment_1)%3B%0A++++%0A++++UTL_PROFILER_EXCLUSIVE_BEGIN(segment_2,+%222nd+recursion+branch%22)%3B%0A++++const+double+s2+%3D+recursive_function(recursion+%2B+1)%3B%0A++++const+double+s3+%3D+recursive_function(recursion+%2B+1)%3B%0A++++UTL_PROFILER_EXCLUSIVE_END(segment_2)%3B%0A++++%0A++++return+s1+%2B+s2+%2B+s3%3B%0A%7D%0A%0Aint+main()+%7B%0A%0A++++std::cout+%3C%3C+%22SUM+%3D+%22+%3C%3C+recursive_function(0)+%3C%3C+!'%5Cn!'%3B%0A++++%0A++++//+we+expect+that+!'1st+recursion+branch!'+will+measure+~33%25+and%0A++++//+!'2nd+recursion+branch!'+will+measure+~66%25%0A%0A%7D%0A'),l:'5',n:'0',o:'C%2B%2B+source+%231',t:'0')),k:71.71783148269105,l:'4',n:'0',o:'',s:0,t:'0'),(g:!((g:!((h:compiler,i:(compiler:clang1600,filters:(b:'0',binary:'1',binaryObject:'1',commentOnly:'0',debugCalls:'1',demangle:'0',directives:'0',execute:'0',intel:'0',libraryCode:'0',trim:'1',verboseDemangling:'0'),flagsViewOpen:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,libs:!(),options:'-std%3Dc%2B%2B17+-O2',overrides:!(),selection:(endColumn:1,endLineNumber:1,positionColumn:1,positionLineNumber:1,selectionStartColumn:1,selectionStartLineNumber:1,startColumn:1,startLineNumber:1),source:1),l:'5',n:'0',o:'+x86-64+clang+16.0.0+(Editor+%231)',t:'0')),header:(),l:'4',m:50,n:'0',o:'',s:0,t:'0'),(g:!((h:output,i:(compilerName:'x86-64+clang+16.0.0',editorid:1,fontScale:12,fontUsePx:'0',j:1,wrap:'1'),l:'5',n:'0',o:'Output+of+x86-64+clang+16.0.0+(Compiler+%231)',t:'0')),k:46.69421860597116,l:'4',m:50,n:'0',o:'',s:0,t:'0')),k:28.282168517308946,l:'3',n:'0',o:'',t:'0')),l:'2',n:'0',o:'',t:'0')),version:4) ]
+
 ```cpp
 double some_computation() {
     utl::sleep::spinlock(1);
@@ -117,21 +136,21 @@ double some_computation() {
 double recursive_function(int recursion) {
     if (recursion > 5) return some_computation();
     
-    UTL_PROFILER_BEGIN_EXCLUSIVE(segment_1, "1st recursion branch");
+    UTL_PROFILER_EXCLUSIVE_BEGIN(segment_1, "1st recursion branch");
     const double s1 = recursive_function(recursion + 1);
-    UTL_PROFILER_END_EXCLUSIVE(segment_1)
+    UTL_PROFILER_EXCLUSIVE_END(segment_1);
     
-    UTL_PROFILER_BEGIN_EXCLUSIVE(segment_1, "2nd recursion branch");
+    UTL_PROFILER_EXCLUSIVE_BEGIN(segment_2, "2nd recursion branch");
     const double s2 = recursive_function(recursion + 1);
     const double s3 = recursive_function(recursion + 1);
-    UTL_PROFILER_END_EXCLUSIVE(segment_1)
+    UTL_PROFILER_EXCLUSIVE_END(segment_2);
     
     return s1 + s2 + s3;
 }
 
 // ...
 
-std::cout << "SUM = " << recursive_function(0);
+std::cout << "SUM = " << recursive_function(0) << '\n';
 
 // we expect that '1st recursion branch' will measure ~33% and
 // '2nd recursion branch' will measure ~66%
@@ -139,7 +158,16 @@ std::cout << "SUM = " << recursive_function(0);
 
 Output:
 ```
+SUM = 359.147
 
+------------------------------ UTL PROFILING RESULTS ------------------------------
+
+ Total runtime -> 0.73 sec
+
+ |                            Call Site |                Label |   Time | Time % |
+ |--------------------------------------|----------------------|--------|--------|
+ | example.cpp:15, recursive_function() | 2nd recursion branch | 0.49 s |  66.7% |
+ | example.cpp:11, recursive_function() | 1st recursion branch | 0.24 s |  33.3% |
 ```
 
 ## Why Recursion is a Rather Non-trivial Thing to Measure

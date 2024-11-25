@@ -122,9 +122,30 @@ void test_profiler_recursion_handling() {
     DO_NOT_OPTIMIZE_AWAY(sum);
 }
 
+void computation_1() { std::this_thread::sleep_for(std::chrono::milliseconds(300)); }
+void computation_2() { std::this_thread::sleep_for(std::chrono::milliseconds(200)); }
+void computation_3() { std::this_thread::sleep_for(std::chrono::milliseconds(400)); }
+void computation_4() { std::this_thread::sleep_for(std::chrono::milliseconds(600)); }
+void computation_5() { std::this_thread::sleep_for(std::chrono::milliseconds(100)); }
+
 int main() {
     //benchmark_profiling_overhead();
-    test_scope_profiler_precision();
-    test_segment_profiler_precision();
+    //test_scope_profiler_precision();
+    //test_segment_profiler_precision();
     //test_profiler_recursion_handling();
+    
+    // Profile a scope
+    UTL_PROFILER("Computation 1 & 2") {
+        computation_1();
+        computation_2();
+    }
+    
+    // Profile a single statement
+    UTL_PROFILER("Computation 3") computation_3();
+    
+    // Profile a code segment
+    UTL_PROFILER_BEGIN(segment_label, "Computation 4 & 5");
+    computation_4();
+    computation_5();
+    UTL_PROFILER_END(segment_label);
 }
