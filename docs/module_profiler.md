@@ -25,7 +25,7 @@ using time_point = clock::time_point;
 ## Methods
 
 > ```cpp
-> UTL_PROFILER(label)
+> UTL_PROFILER(label);
 > ```
 
 Profiles the following scope or expression. If profiled scope was entered at any point of the program, upon exiting `main()` the table with profiling results will be printed. Profiling results include:
@@ -39,10 +39,32 @@ Profiles the following scope or expression. If profiled scope was entered at any
 **Note:** Multiple profilers can exist at the same time. Profiled scopes can be nested. Profiler overhead corresponds to entering & exiting the profiled scope, while insignificant in most applications, it may affect runtime in a tight loop.
 
 > ```cpp
-> UTL_PROFILER_EXCLUSIVE(label)
+> UTL_PROFILER_EXCLUSIVE(label);
 > ```
 
 Similar to a `UTL_PROFILER`, but unlike a regular case only one `UTL_PROFILER_EXCLUSIVE` can exit at the same time. This is useful for profiling recursive functions, see [recursion profiling example](#profiling-recursion) and [why recursion is a rather non-trivial thing to measure](#why-recursion-is-a-rather-non-trivial-thing-to-measure).
+
+> ```cpp
+> UTL_PROFILER_BEGIN(segment_label, label);
+> UTL_PROFILER_END(segment_label);
+> 
+> UTL_PROFILER_EXCLUSIVE_BEGIN(segment_label, label);
+> UTL_PROFILER_EXCLUSIVE_END(segment_label);
+> ```
+
+Same thing as `UTL_PROFILER(label)`, except instead of measuring the time inside a following scope, the measurement happens between the pair of `UTL_PROFILER_BEGIN` & `UTL_PROFILER_END` macros with the same `segment_label`.
+
+Same thing for `EXCLUSIVE` versions.
+
+```cpp
+using clock;
+using duration   = clock::duration;
+using time_point = clock::time_point;
+```
+
+Alias for the underlying clock implementation. By default `clock` is [`std::chrono::steady_clock`](https://en.cppreference.com/w/cpp/chrono/steady_clock), however when the use of intrinsics is enabled with `#define UTL_PROFILER_OPTION_USE_x86_INTRINSICS_FOR_FREQUENCY <user_cpu_frequency_hz>` (see [example](micro-benchmarking-with-x86-intrinsics)) it switches to a custom implementation using `rdstc` ASM instruction, which tends to have a much lower overhead than the portable implementations, thus making profilers suitable for a more precise benchmarking on a hot path.
+
+`clock` is compatible with all [`<chrono>`](https://en.cppreference.com/w/cpp/chrono)  functionality and works like any other `std::chrono::` clock, providing a user with a way of leveraging fast time measurements of `rdstc` intrinsic by simply replacing the clock type inside a regular C++ code.
 
 ## Examples
 
@@ -202,7 +224,7 @@ which corresponds to the parts we were trying to measure and satisfied $T_1 + T_
 > [!Note]
 > There are some other non-trivial questions such as "how to automatically detect recursion and avoid double-counting the time spent inside the profiler that is nested under itself in the call graph", but those fall under the "implementation details" umbrella.
 
-## Microbenchmarking With x86 Intrinsics
+## Micro-benchmarking With x86 Intrinsics
 
 To enable the use of intrinsics add folowing `#define` before including the `proto_utils` header:
 
