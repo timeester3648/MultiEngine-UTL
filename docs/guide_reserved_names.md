@@ -4,19 +4,21 @@
 
 Due to the header-only nature of the library, all internal identifiers can be accessed from outside.
 
-Identifiers that are not a part of the public interface are considered **implementation identifiers**. All such identifiers are prefixed with `_` and follow a standardized naming convention that aims to reduce the probability of accidental name collisions.
+Identifiers that are not a part of the public interface are considered **implementation identifiers**. All such identifiers follow a standardized naming convention that aims to reduce the probability of accidental name collisions.
 
 ## Reserved Local Identifiers
 
 All identifiers residing inside a module namespace and prefixed with `_`:
+
 ```cpp
 utl::<module_name>::_<local_identifier_name>
 ```
 
 ## Reserved Global Identifiers
 
-All global identifiers prefixed with `_utl`:
+All global identifiers prefixed with `UTL_`:
+
 ```cpp
-_utl_<global_identifier_name>
+UTL_<global_identifier_name>
 ```
 
