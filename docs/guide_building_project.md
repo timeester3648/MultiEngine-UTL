@@ -4,9 +4,9 @@
 
 This project uses [CMake](https://cmake.org) build system.
 
-Unit testing for modules is implemented using [doctest](https://github.com/doctest/doctest) together with **CMake** testing facilities (see [CTest](https://cmake.org/cmake/help/latest/manual/ctest.1.html)). All tests can be found in [`tests/`](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/tests) split by per-module basis.
+Unit testing for modules is implemented using [doctest](https://github.com/doctest/doctest) together with **CMake** testing facilities (see [CTest](https://cmake.org/cmake/help/latest/manual/ctest.1.html)). All tests can be found in [`tests/`](https://github.com/DmitriBogdanov/prototyping_utils/tree/master/tests) split by per-module basis.
 
-Benchmarks are implemented using the [nanobench](https://github.com/martinus/nanobench) functionality and can be found in [`benchmarks/`](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/benchmarks) split by per-module basis.
+Benchmarks are implemented using the [nanobench](https://github.com/martinus/nanobench) functionality and can be found in [`benchmarks/`](https://github.com/DmitriBogdanov/prototyping_utils/tree/master/benchmarks) split by per-module basis.
 
 All tests and benchmarks compile with `-Wall -Wextra -Wpedantic -Werror` flags.
 
