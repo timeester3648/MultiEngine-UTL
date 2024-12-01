@@ -1,4 +1,4 @@
-#include "MACRO_DEFINE.hpp"
+#include "module_predef.hpp"
 #include "module_json.hpp"
 #include "module_math.hpp"
 #include "module_mvl.hpp"
@@ -11,7 +11,7 @@
 #define ANKERL_NANOBENCH_IMPLEMENT
 #include "thirdparty/nanobench.h"
 
-#define REPEAT(repeats) UTL_DEFINE_REPEAT(repeats)
+#define REPEAT(repeats_) for (int count_ = 0; count_ < repeats_; ++count_)
 #define DO_NOT_OPTIMIZE_AWAY ankerl::nanobench::doNotOptimizeAway
 
 namespace nb = ankerl::nanobench;

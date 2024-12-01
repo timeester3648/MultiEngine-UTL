@@ -64,7 +64,7 @@ using time_point = clock::time_point;
 
 Alias for the underlying clock implementation. By default `clock` is [`std::chrono::steady_clock`](https://en.cppreference.com/w/cpp/chrono/steady_clock), however when the use of intrinsics is enabled with `#define UTL_PROFILER_OPTION_USE_x86_INTRINSICS_FOR_FREQUENCY <user_cpu_frequency_hz>` (see [example](micro-benchmarking-with-x86-intrinsics)) it switches to a custom implementation using `rdstc` ASM instruction, which tends to have a much lower overhead than the portable implementations, thus making profilers suitable for a more precise benchmarking on a hot path.
 
-`clock` is compatible with all [`<chrono>`](https://en.cppreference.com/w/cpp/chrono)  functionality and works like any other `std::chrono::` clock, providing a user with a way of leveraging fast time measurements of `rdstc` intrinsic by simply replacing the clock type inside a regular C++ code.
+`clock` is compatible with all [`<chrono>`](https://en.cppreference.com/w/cpp/chrono)  functionality and works like any other `std::chrono::` clock, providing a user with a way of leveraging fast time measurements of `rdtsc` intrinsic by simply replacing the clock type inside a regular C++ code.
 
 ## Examples
 
@@ -219,7 +219,7 @@ This is exactly the problem solved by `UTL_PROFILER_EXCLUSIVE()`, as it guarante
 
 <img src ="images/profiler_recursion_exclusive_profiling_branch_2.svg">
 
-which corresponds to the parts we were trying to measure and satisfied $T_1 + T_2 = T$. The same logic can be generalized to an arbitrary recursion with $N$ different profilers.
+which corresponds to the parts we were trying to measure and satisfies $T_1 + T_2 = T$. The same logic can be generalized to an arbitrary recursion with $N$ different profilers.
 
 > [!Note]
 > There are some other non-trivial questions such as "how to automatically detect recursion and avoid double-counting the time spent inside the profiler that is nested under itself in the call graph", but those fall under the "implementation details" umbrella.
