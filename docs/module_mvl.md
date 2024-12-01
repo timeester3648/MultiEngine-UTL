@@ -7,7 +7,7 @@
 Unlike most existing matrix implementations, **mvl** focuses on data-oriented matrices that support arbitrary element types and can be used similarly to [std::vector](https://en.cppreference.com/w/cpp/container/vector). It's main goal is the simplicity of API and interoperability with most existing implementations.
 
 > [!Important]
-> Due to rather extensive API, seeing [usage examples](#example-1-declaring-and-indexing-a-matrix) first might be helpful.
+> Due to rather extensive API, seeing [usage examples](#declaring-and-indexing-a-matrix) first might be helpful.
 
 > [!Tip]
 > Use GitHub's built-in [table of contents](https://github.blog/changelog/2021-04-13-table-of-contents-support-in-markdown-files/) to navigate this page.
@@ -500,7 +500,7 @@ Useful when chaining mutating operations on a tensor with intent of saving the r
 
 Returns `std::move(*this)`. This is useful to avoid a copy when initializing objects with method chaining.
 
-See corresponding [example](#example-3-initializing-a-matrix-by-chaining-operations).
+See corresponding [example](#initializing-a-matrix-by-chaining-operations).
 
 ### Indexation
 
@@ -780,7 +780,7 @@ Converts tensor to string, formatted according to a chosen schema. All formats a
 | `as_raw_text`   | Export format. Formats tensor as a raw data separated by spaces and newlines (in case of matrices). |
 | `as_json_array` | Export format. Formats tensor as a 1- or 2-D [JSON](https://en.wikipedia.org/wiki/JSON) array. |
 
-See corresponding [example](#example-2-IO-formats) to get a better idea of what each output looks like.
+See corresponding [example](#io-formats) to get a better idea of what each output looks like.
 
 **Note 1:** Stringification works for any type with an existing `operator<<(std::ostream&, const T&)` overload.
 
@@ -971,10 +971,9 @@ struct SparseEntry2D {
 };
 ```
 
+## Examples
 
-
-
-## Example 1 (Declaring and indexing a matrix)
+### Declaring and indexing a matrix
 
 [ [Run this code](LINK) ]
 ```cpp
@@ -1013,7 +1012,7 @@ mvl::Matrix<int, Checking::BOUNDS> B = A;
 // B(3, 2) = 1; // will throw with a message "i (which is 3) >= this->rows() (which is 2)"
 ```
 
-## Example 2 (IO formats)
+### IO formats
 
 [ [Run this code](LINK) ]
 ```cpp
@@ -1082,7 +1081,7 @@ Tensor [size = 5] (3 x 4):
 ]
 ```
 
-## Example 3 (Initializing a matrix by chaining operations)
+### Initializing a matrix by chaining operations
 
 [ [Run this code](LINK) ]
 ```cpp
@@ -1112,7 +1111,7 @@ Tensor [size = 25] (5 x 5):
   [ 0.915286 0.287618 0.638074 0.489174    1.1951 ]
 ```
 
-## Example 4 (Wrapping external data into views)
+### Wrapping external data into views
 
 [ [Run this code](LINK) ]
 ```cpp
@@ -1135,7 +1134,7 @@ mvl::ConstMatrixView<float, mvl::Checking::NONE, mvl::Layout::CR> A(
 // MVL matrix functionality with no copying/conversion overhead
 ```
 
-## Example 5 (Usage with `utl::math`)
+### Usage with `utl::math`
 
 [ [Run this code](LINK) ]
 ```cpp
@@ -1165,7 +1164,7 @@ auto  y        = math::linspace(0., math::PI_TWO, math::Intervals(100));
 auto  grid     = mvl::Matrix<vertex_t>(x.size(), y.size(), [&](size_t i, size_t j){ return vertex_t{ x[i], y[j] }; });
 ```
 
-## Example 6 (Working with images)
+### Working with images
 
 [ [Run this code](LINK) ]
 ```cpp
@@ -1189,7 +1188,7 @@ mvl::Matrix<uint8_t> grayscale(w, h, [&](size_t i, size_t j){
 });
 ```
 
-## Example 7 (Working with sparse matrices)
+### Working with sparse matrices
 
 [ [Run this code](LINK) ]
 
