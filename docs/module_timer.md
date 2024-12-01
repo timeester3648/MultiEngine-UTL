@@ -59,9 +59,9 @@ Returns elapsed time as `std::string` with units.
 > std::string timer::elapsed_string_fullform();
 > ```
 
-### Datetime
-
 Returns elapsed time in format `%H hours %M min %S sec %MS ms`.
+
+### Datetime
 
 > ```cpp
 > std::string timer::datetime_string();

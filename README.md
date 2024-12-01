@@ -79,8 +79,8 @@ While the library itself consists of a single header with no embedded dependenci
 
 ## Work in progress
 
-* Finalizing `utl::json` module;
-* `utl::json` documentation;
+* Refactoring following modules: `utl::stre`, `utl::voidstream`, `utl::log`, `utl::mvl` to standard impl & documentation format.
+* Struct reflection in `utl::json` module;
 * `utl::mvl` Godbolt links;
 * Vector API in `utl::mvl`;
 * `utl::font` module;
@@ -91,8 +91,8 @@ While the library itself consists of a single header with no embedded dependenci
 * Coordinate transformations in `utl::math`;
 * More type traits in `utl::math`;
 * Potential `utl::async` module with threadpool implementation and parallel execution methods;
-* `stre::to_str()` implementation for `std::stack` and `std::queue`;
+* `log::stringify()` implementation for `std::stack` and `std::queue`.
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE.md](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/LICENSE.md) for details
+This project is licensed under the MIT License - see the [LICENSE.md](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/LICENSE.md) for details.

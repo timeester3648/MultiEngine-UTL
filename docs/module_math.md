@@ -14,7 +14,7 @@ double PI_HALF      = 0.5 * PI;
 double E            = 2.71828182845904523536;
 double GOLDEN_RATIO = 1.6180339887498948482;
 
-// Unary type traits
+// Type traits
 template<typename Type>
 struct is_addable_with_itself;
 
@@ -27,7 +27,7 @@ struct is_sized;
 template <typename FuncType, typename Signature>
 struct is_function_with_signature;
 
-// Standard math functions
+// Basic math functions
 template<typename Type>
 Type abs(Type x);
 
@@ -72,7 +72,7 @@ std::vector<FloatType> linspace(FloatType L1, FloatType L2, Intervals N);
 template<typename FloatType, typename FuncType>
 FloatType integrate_trapezoidal(FuncType f, FloatType L1, FloatType L2, Intervals N);
 
-// Misc helpers
+// Other utils
 template<typename UintType>
 UintType uint_difference(UintType a, UintType b);
 
@@ -102,6 +102,8 @@ Methods that deal with floating-point values require explicitly floating-point i
 
 ## Methods
 
+### Type traits
+
 > ```cpp
 > math::is_addable_with_itself
 > ```
@@ -129,6 +131,8 @@ Methods that deal with floating-point values require explicitly floating-point i
 `is_function_with_signature<FuncType, Signature>::value` returns at compile time whether `FuncType` is a callable with signature `Signature`.
 
 Useful when creating functions that accept callable type as a template argument, rather than [std::function](https://en.cppreference.com/w/cpp/utility/functional/function). This is usually done to avoid overhead introduced by `std::function` type erasure, however doing so removes explicit requirements imposed on a callable signature. Using this type trait in combination with [std::enable_if](https://en.cppreference.com/w/cpp/types/enable_if) allows template approach to keep explicit signature restrictions and overload method for multiple callable types.
+
+### Basic math functions
 
 > ```cpp
 > Type math::abs(Type x);
@@ -164,6 +168,8 @@ Computes $(-1)^{power}$ efficiently.
 
 Converts degrees to radians and back.
 
+### Meshing
+
 > ```cpp
 > struct Points {
 >     explicit Points(std::size_t count);
@@ -190,6 +196,8 @@ Meshes $[L_1, L_2]$ range into a regular 1D grid with $N$ intervals (which corre
 > ```
 
 Numericaly computes integral $I_h = \int\limits_{L_1}^{L_2} f(x) \mathrm{d} x$ over $N$ integration intervals using [trapezoidal rule](https://en.wikipedia.org/wiki/Trapezoidal_rule).
+
+### Other utils
 
 > ```cpp
 > UintType math::uint_difference(UintType a, UintType b);
@@ -225,16 +233,18 @@ Faster implementation of `ternary_branchless()` for integers. When second return
 
 Returns size in `units` occupied in memory by `count` elements of type `T`. Useful to estimate memory usage of arrays, matrices and other data structures in a human-readable way.
 
-## Example 1 (type traits)
+## Examples
 
-[ [Run this code](https://godbolt.org/#g:!((g:!((g:!((h:codeEditor,i:(filename:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,selection:(endColumn:14,endLineNumber:6,positionColumn:14,positionLineNumber:6,selectionStartColumn:14,selectionStartLineNumber:6,startColumn:14,startLineNumber:6),source:'%23include+%3Chttps://raw.githubusercontent.com/DmitriBogdanov/prototyping_utils/master/include/proto_utils.hpp%3E%0A%0Aint+main(int+argc,+char+**argv)+%7B%0A++++using+namespace+utl%3B%0A%0A++++std::cout%0A++++++++%3C%3C+std::boolalpha%0A++++++++%3C%3C+%22are+doubles+addable%3F++++-%3E+%22+%3C%3C+math::is_addable_with_itself%3Cdouble%3E::value+%3C%3C+%22%5Cn%22%0A++++++++%3C%3C+%22are+std::pairs+addable%3F+-%3E+%22+%3C%3C+math::is_addable_with_itself%3Cstd::pair%3Cint,+int%3E%3E::value+%3C%3C+%22%5Cn%22%3B%0A%0A++++return+0%3B%0A%7D%0A'),l:'5',n:'0',o:'C%2B%2B+source+%231',t:'0')),k:71.71783148269105,l:'4',n:'0',o:'',s:0,t:'0'),(g:!((g:!((h:compiler,i:(compiler:clang1600,filters:(b:'0',binary:'1',binaryObject:'1',commentOnly:'0',debugCalls:'1',demangle:'0',directives:'0',execute:'0',intel:'0',libraryCode:'0',trim:'1'),flagsViewOpen:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,libs:!(),options:'-std%3Dc%2B%2B17+-O2',overrides:!(),selection:(endColumn:1,endLineNumber:1,positionColumn:1,positionLineNumber:1,selectionStartColumn:1,selectionStartLineNumber:1,startColumn:1,startLineNumber:1),source:1),l:'5',n:'0',o:'+x86-64+clang+16.0.0+(Editor+%231)',t:'0')),header:(),l:'4',m:50,n:'0',o:'',s:0,t:'0'),(g:!((h:output,i:(compilerName:'x86-64+clang+16.0.0',editorid:1,fontScale:14,fontUsePx:'0',j:1,wrap:'1'),l:'5',n:'0',o:'Output+of+x86-64+clang+16.0.0+(Compiler+%231)',t:'0')),k:46.69421860597116,l:'4',m:50,n:'0',o:'',s:0,t:'0')),k:28.282168517308946,l:'3',n:'0',o:'',t:'0')),l:'2',n:'0',o:'',t:'0')),version:4) ]
+### Using math type traits
+
+[ [Run this code](https://godbolt.org/#g:!((g:!((g:!((h:codeEditor,i:(filename:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,selection:(endColumn:14,endLineNumber:6,positionColumn:14,positionLineNumber:6,selectionStartColumn:14,selectionStartLineNumber:6,startColumn:14,startLineNumber:6),source:'%23include+%3Chttps://raw.githubusercontent.com/DmitriBogdanov/prototyping_utils/master/include/proto_utils.hpp%3E%0A%0Aint+main(int+argc,+char+**argv)+%7B%0A++++using+namespace+utl%3B%0A%0A++++std::cout%0A++++++++%3C%3C+std::boolalpha%0A++++++++%3C%3C+%22are+doubles+addable%3F++++-%3E+%22+%3C%3C+math::is_addable_with_itself%3Cdouble%3E::value++++++++++++++%3C%3C+%22%5Cn%22%0A++++++++%3C%3C+%22are+std::pairs+addable%3F+-%3E+%22+%3C%3C+math::is_addable_with_itself%3Cstd::pair%3Cint,+int%3E%3E::value+%3C%3C+%22%5Cn%22%3B%0A%0A++++return+0%3B%0A%7D%0A'),l:'5',n:'0',o:'C%2B%2B+source+%231',t:'0')),k:71.71783148269105,l:'4',n:'0',o:'',s:0,t:'0'),(g:!((g:!((h:compiler,i:(compiler:clang1600,filters:(b:'0',binary:'1',binaryObject:'1',commentOnly:'0',debugCalls:'1',demangle:'0',directives:'0',execute:'0',intel:'0',libraryCode:'0',trim:'1',verboseDemangling:'0'),flagsViewOpen:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,libs:!(),options:'-std%3Dc%2B%2B17+-O2',overrides:!(),selection:(endColumn:1,endLineNumber:1,positionColumn:1,positionLineNumber:1,selectionStartColumn:1,selectionStartLineNumber:1,startColumn:1,startLineNumber:1),source:1),l:'5',n:'0',o:'+x86-64+clang+16.0.0+(Editor+%231)',t:'0')),header:(),l:'4',m:50,n:'0',o:'',s:0,t:'0'),(g:!((h:output,i:(compilerName:'x86-64+clang+16.0.0',editorid:1,fontScale:14,fontUsePx:'0',j:1,wrap:'1'),l:'5',n:'0',o:'Output+of+x86-64+clang+16.0.0+(Compiler+%231)',t:'0')),k:46.69421860597116,l:'4',m:50,n:'0',o:'',s:0,t:'0')),k:28.282168517308946,l:'3',n:'0',o:'',t:'0')),l:'2',n:'0',o:'',t:'0')),version:4) ]
 
 ```cpp
 using namespace utl;
 
 std::cout
     << std::boolalpha
-    << "are doubles addable?    -> " << math::is_addable_with_itself<double>::value << "\n"
+    << "are doubles addable?    -> " << math::is_addable_with_itself<double>::value              << "\n"
     << "are std::pairs addable? -> " << math::is_addable_with_itself<std::pair<int, int>>::value << "\n";
 ```
 
@@ -244,9 +254,9 @@ are doubles addable?    -> true
 are std::pairs addable? -> false
 ```
 
-## Example 2 (using math functions)
+### Using basic math functions
 
-[ [Run this code](https://godbolt.org/#z:OYLghAFBqd5QCxAYwPYBMCmBRdBLAF1QCcAaPECAMzwBtMA7AQwFtMQByARg9KtQYEAysib0QXACx8BBAKoBnTAAUAHpwAMvAFYTStJg1DIApACYAQuYukl9ZATwDKjdAGFUtAK4sGe1wAyeAyYAHI%2BAEaYxCAArKQADqgKhE4MHt6%2BekkpjgJBIeEsUTHxdpgOaUIETMQEGT5%2BXLaY9nkM1bUEBWGR0XG2NXUNWc0KQ93BvcX9sQCUtqhexMjsHOYAzMHI3lgA1CYbbggEBAkKIAD0l8RMAO4AdMCECF4RXkorsowED2gslwAIixCMQ8BZUMB0IZUAA3S4JYioIgEACeCWCwAA%2Bl5HLQFJcWExxtFLgolitMAikUQcXiFA8EAkEodsCYNABBdkc4IEPZE4IQXl7WrAZCkPbIBC1PYAKllothcwOAHYrJy9pq9h9MXtmGwFAkmKttQRaId1VyNVrxugQCglgRuVqXQcjoc3AczGYObRaPzMAQEBgFHsorRUHcRcRMJKBCTVIiRQx0Hs0QlY0xgAxko5kCATLE3AxzGZna7NR6PV6zEwIgoIABaSTKw6AmsVztd7tutzVolB%2B11hvN5U98fdqtHGuF4ul8sVqee0spbNNltu9ulic711L/lMQcgVcMddj3e7/fzosl70Lvfu6crgCOxDPm47F4v%2B4HSGPr/fL9L0fZc7xvedrUXECa2QN5MHfNtPyA8cf0PP9YKiQDkJ7K8wLnO9IIfPsn29LBsVpW50AgLgAA4NAeVsNi3b1sK1VCjzIrEKKYKjaPo89sNwstwIIjkuyEyiuNQLEyIgZQAElGOYsxWJddi/0k2lZN/e0FIE4DiNA4T8LLQi1Og68TPvczDJrLxeRkvAqCoaJGFWCBYi8CUuBVLwlKQlDoJ0kB7MERznNchh3M87zfP0ycLLw29TLEzshNnZLrLYxKzAIaJmGIVEsQiW4ooQegFAbAhiC8TAJQ2B4uDMCVm0alV/O3dT7Ty4gCqKkrDClCqqpquq9gapqWskNrGNsyzMrM7K5u9Hq%2BuKwhygcCBqtq7z4j2Rt5g/bcoNs4LVtqfqNtaCoCG20a9pao7TureaINSl6SNy/LLvWghNruqgxCUPaOpYhKzrQ7qfsKv6AeoYGxq4Z7xJyjL5w2S17xjAhlgYPYNAtbkTBVQFuQ4BZaE4WJeD8DgtFIVBOD7SxrD2cllhNTYeFIAhNAphYAGsQBVLgHlFlUaI2KQaLMAA2ABOLgNHiKmOEkWn%2BcZzheAuDRef5hY4FgGBEAdFgMXoMgKAgf5Lf6HZDGALg5Y0fWaFoHqLggCItYiYJLs4Hn/b6gB5CJtFuoPeH%2BNhBFDhhaFRLWsHeYA3DEfFo9ILAiSMcR6d4fAY0qWFMAuQvSEwVQKlxNYGd5VotdoPABsKjwsC16q8BYaOFioAxgAUAA1PBMDuUOMzpnn%2BEEEQxHYKQZEERQVHUSvdGaAwjBQaxrH0VuLkgBZUASdoK8bW021MVnLB8g7Q7MXg4WiMEsCPiAFgBtIXBTEYmirimHoRQSjZGSKkAQ/8wG5DSMAvoMQxg3UqAITowxPCND0N/FBEw4EzAQYMLoUCxg4KmCA/oXAv4UlWBISm1NNaVyZhwPYqgaJy0bHLSQkpt7AD2C7B49ENB7AgLgQgJAvTSzmLwPmhc5gLAQJgHi/RP76E4BrUgvdYj6zpgzRhusQD62kVoI2psIBIEdAkXE5BKB2zoNEUIrA1gsLYRwrhTteFy34fw3gmB8BEDfnoWewhRDiCXoE1eagtab1IHcW4CQ%2B4qI4DTUg2jn6cFDriCxfJUBUGYaw9hnDHZGHcZ4wREAPAW1scQcRFCpGGyFiASQHjFaSDMLRV2sQFaixdgktRGitFa10bYfRBsZH1LMDRB44zWlyxorEHyGwNA0QVo0hJGx6E6J1iMoxtCOBP2SQMzZhiBakDLsQFIzhJBAA%3D%3D) ]
+[ [Run this code](https://godbolt.org/#z:OYLghAFBqd5QCxAYwPYBMCmBRdBLAF1QCcAaPECAMzwBtMA7AQwFtMQByARg9KtQYEAysib0QXACx8BBAKoBnTAAUAHpwAMvAFYTStJg1DIApACYAQuYukl9ZATwDKjdAGFUtAK4sGe1wAyeAyYAHI%2BAEaYxCBmpAAOqAqETgwe3r56icmOAkEh4SxRMXF2mA6pQgRMxATpPn5ctpj2uQxVNQT5YZHRsbbVtfWZTQqDXcE9RX1mAJS2qF7EyOwc5gDMwcjeWADUJutuCAQE8QogAPQXxEwA7gB0wIQIXhFeSsuyjAT3aCwXABEWIRiHgLKhgOhDKgAG4XeLEVBEAgAT3iwWAAH0vI5aAoLiwmGNohctjtMPDEURsbiFPcEPF4gdsCYNABBVls4IEXaE4IQbm7GrAZCkXbIBA1XYAKmlwphs32AHYrOzdurdu8MbtmGwFPEmCtNQRaAdVRy1RqxugQChFgRORqnftDgc3PszGY2bRaLzMAQEBgFLsorRULchcRMOKBMTVAihQx0LtUfFo0xgAwko5kCATABWNwMcxmR3O9Vut0esxMCIKCAAWkkioOAOr5Y7na7LrcVcJAdttfrTcV3bHXcrh2rBaLJbL5cn7pLyUzjebLrbJfH2%2Bdi95TAHIBXDDXo53O73c8Lxc9893rqny4AjsRTxv2%2Bfz3v%2B0gjy%2B35%2BF4Pkut7XnOloLsB1bIK8mBvq2H6AWO34Hr%2BMFRABSHdpeoGzreEH3r2j6elgWLUjc6AQFwAAcGj3C26ybp6WEaihh6kZi5FMJRNF0WeWE4aWYH4WynaCRRnGoJipEQMoACSDFMWYLFOmxv4SdSMk/ra8n8UBREgUJeGlgRqlQVexl3mZBnVl43LSXgVBUNEjArBA%2BZeGKXBKl4imIchUHaSAdmCA5TkuQwbkeV5Pl6RO5m4TeJmiR2gkzklVmsQlZgENEzDECimIRDckUIPQCj1gQxBeJgYrrPcXBxLsTYNUqflbmptq5cQ%2BWFcVhgSuVlXVbVuz1Y1Yotd5DE2RZGWmVls2et1vVFYQZQOBAVU1V5%2BaTfm7XMZBNlBStNR9etLTlAQW0jbt%2B1xT2VZzeBKXHc9y15eda0EBtN1UGISi7YdynxSdqFdV9BU/X91CA6NXAHdh2XpXO6zmneUYEEsDC7BoZqciYSoApyHDzLQnD5rwfgcFopCoJwvaWNYuwKIsyzRhsPCkAQmhk/MADWIBKlw9wi0q1HrFI1FmAAbAAnFwGh7RTHCSNTfP05wvDnBoPN8/McCwDAiB2iw6L0GQFAQH8Ft9NshjAFwssaHrNC0N15wQBEmsRME52cNzfu9QA8hE2jXYHvB/GwgghwwtAoprWBvMAbhiHiUekFghJGOItO8PgUYVDCmDnAXpCYKo5Q4qsdPci0mu0Hg/UFR4WCa1VeAsFnpfEBESSYACmC58AzdGAbfAGMACgAGp4Jgtwh2mNPc/wggiGI7BSDIgiKCo6gV7oTQGBPpjM5Y%2Bgt%2BckDzKg8RtOXDbWq259WJY3nNSHZi8LC0SglgG%2BEB5h/VSC4JMwxGiVyTN0QoxQshJBSAISBCCcipFgb0GIowroVAEB0IYngGh6FAXg8YGDphYIGJ0FBowyGTDgX0LgID2YrAkOTSmGsK4Mw4LsVQ1FZYNllpIcUp9gC7GdvcOiGhdgQFwIQEgHopazF4LzAusx5gIEwNxPowD9CcHVqQHu%2BY9Y0zptwnWIA9aqK0IbE2EAkD2niDicglBbZ0GiKEVgqw%2BECKESIx24jZaSMkbwTA%2BAiAAL0OvYQohxA72ifvNQmtj6kFuDceIUd2EcCpqQUxv9OAhxxE4nkqAqC8P4YI4RDsjCBOCdIiAHhzbuOIIophKiDaCxAJIIJCtJBmBoi7fM8sRbOz0WrXgRiTGa3MbYSx%2Bs1GdLMNRe4Sz%2Bmy2ovmby6wNDUXlt0sZ6xOFmO1vMmxWSf65OmSc6x/NSB92SM4SQQA%3D%3D) ]
 ```cpp
 using namespace utl;
 
@@ -283,7 +293,7 @@ ternary_bitselect(true, 15, -5) = 15
 ternary_bitselect(false, 15) = 0
 ```
 
-## Example 3 (meshing and integrating)
+### Meshing and integrating
 
 [ [Run this code](https://godbolt.org/#g:!((g:!((g:!((h:codeEditor,i:(filename:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,selection:(endColumn:1,endLineNumber:9,positionColumn:1,positionLineNumber:9,selectionStartColumn:1,selectionStartLineNumber:9,startColumn:1,startLineNumber:9),source:'%23include+%3Chttps://raw.githubusercontent.com/DmitriBogdanov/prototyping_utils/master/include/proto_utils.hpp%3E%0A%0Aint+main(int+argc,+char+**argv)+%7B%0A++++using+namespace+utl%3B%0A%0A++++//+Mesh+interval+%5B0,+PI%5D+into+100+equal+intervals+%3D%3E+101+linearly+spaced+points+%0A++++auto+grid_1+%3D+math::linspace(0.,+math::PI,+math::Intervals(100))%3B%0A++++auto+grid_2+%3D+math::linspace(0.,+math::PI,+math::Points(+++101))%3B+//+same+as+above%0A%0A++++//+Get+array+memory+size%0A++++std::cout+%3C%3C+%22!'grid_1!'+occupies+%22+%3C%3C+math::memory_size%3Cdouble,+math::MemoryUnit::KB%3E(grid_1.size())+%3C%3C+%22+KB+in+memory%5Cn%5Cn%22%3B%0A%0A++++//+Integrate+a+function+over+an+interval%0A++++auto+f+%3D+%5B%5D(double+x)%7B+return+4.+/+(1.+%2B+std::tan(x))%3B+%7D%3B%0A++++double+integral+%3D+math::integrate_trapezoidal(f,+0.,+math::PI_HALF,+math::Intervals(200))%3B%0A++++std::cout+%3C%3C+%22Integral+evaluates+to:+%22+%3C%3C+integral+%3C%3C+%22+(should+be+~PI)%5Cn%22%3B%0A%0A++++return+0%3B%0A%7D%0A'),l:'5',n:'1',o:'C%2B%2B+source+%231',t:'0')),k:71.71783148269105,l:'4',n:'0',o:'',s:0,t:'0'),(g:!((g:!((h:compiler,i:(compiler:clang1600,filters:(b:'0',binary:'1',binaryObject:'1',commentOnly:'0',debugCalls:'1',demangle:'0',directives:'0',execute:'0',intel:'0',libraryCode:'0',trim:'1',verboseDemangling:'0'),flagsViewOpen:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,libs:!(),options:'-std%3Dc%2B%2B17+-O2',overrides:!(),selection:(endColumn:1,endLineNumber:1,positionColumn:1,positionLineNumber:1,selectionStartColumn:1,selectionStartLineNumber:1,startColumn:1,startLineNumber:1),source:1),l:'5',n:'0',o:'+x86-64+clang+16.0.0+(Editor+%231)',t:'0')),header:(),l:'4',m:50,n:'0',o:'',s:0,t:'0'),(g:!((h:output,i:(compilerName:'x86-64+clang+16.0.0',editorid:1,fontScale:14,fontUsePx:'0',j:1,wrap:'1'),l:'5',n:'0',o:'Output+of+x86-64+clang+16.0.0+(Compiler+%231)',t:'0')),k:46.69421860597116,l:'4',m:50,n:'0',o:'',s:0,t:'0')),k:28.282168517308946,l:'3',n:'0',o:'',t:'0')),l:'2',n:'0',o:'',t:'0')),version:4) ]
 ```cpp

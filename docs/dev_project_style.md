@@ -44,42 +44,6 @@ namespace utl::XXXXXXXXXXXX {
 
 Replace `XXXXXXXXXXXX` with **module name**.
 
-### Macro-Module template
-
-```cpp
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ DmitriBogdanov/prototyping_utils ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-//
-// Macro-Module:  UTL_XXXXXXXXXXXX
-// Documentation: https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/MACRO_XXXXXXXXXXXX.md
-// Source repo:   https://github.com/DmitriBogdanov/prototyping_utils
-//
-// This project is licensed under the MIT License
-//
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-#if !defined(UTL_PICK_MODULES) || defined(UTLMACRO_XXXXXXXXXXXX)
-#ifndef UTLHEADERGUARD_XXXXXXXXXXXX
-#define UTLHEADERGUARD_XXXXXXXXXXXX
-
-// _______________________ INCLUDES _______________________
-
-// NOTE: STD INCLUDES
-
-// ____________________ DEVELOPER DOCS ____________________
-
-// NOTE: DOCS
-
-// ____________________ IMPLEMENTATION ____________________
-
-// NOTE: IMPL
-
-#endif
-#endif // macro-module UTL_XXXXXXXXXXXX
-
-```
-
-Replace `XXXXXXXXXXXX` with **macro-module name**.
-
 ### Module tests template
 
 ```cpp
