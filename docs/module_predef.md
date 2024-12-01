@@ -1,4 +1,4 @@
-# UTL_PREDEF
+# utl::predef
 
 [<- back to README.md](https://github.com/DmitriBogdanov/prototyping_utils/tree/master)
 
@@ -222,7 +222,7 @@ Used mainly to detect presence of platform- or library-specific functions, which
 
 **Note 1**: Like a regular template class, this macro should be declared outside of functions.
 
-**Note 2**: The usefulness of this trait is rather dubious, considering it can't be used to conditionally compile platform-specific code with `if constexpr` since that would still require all branches to use existing identifiers, however since that somewhat arcane thing is already implemented there is little reason to take it out of the library, perhaps it might prove usefull in some context later on.
+**Note 2**: The usefulness of this trait is rather dubious, considering it can't be used to conditionally compile platform-specific code with `if constexpr` since that would still require all branches to use existing identifiers, however since that somewhat arcane thing is already implemented there is little reason to take it out of the library, perhaps it might prove useful in some context later on.
 
 ## Examples
 
