@@ -4176,7 +4176,7 @@ constexpr std::string_view compiler_full_name =
 #elif defined(UTL_PREDEF_COMPILER_IS_PGI)
     "Portland Group C/C++ Compiler"
 #elif defined(UTL_PREDEF_COMPILER_IS_IBMCPP)
-    "IBM XL C/C++ compiler"
+    "IBM XL C/C++ Compiler"
 #elif defined(UTL_PREDEF_COMPILER_IS_NVCC)
     "Nvidia Cuda Compiler Driver"
 #else
@@ -4414,7 +4414,6 @@ inline void _split_enum_args(const char* va_args, std::string* strings, int coun
         return _count;                                                                                                 \
     }                                                                                                                  \
     }
-// IMPLEMENTATION COMMENTS:
 // We declare namespace with enum inside to simulate enum-class while having '_strings' array
 // and 'to_string()', 'from_string()' methods bundled with it.
 //
@@ -4428,11 +4427,9 @@ inline void _split_enum_args(const char* va_args, std::string* strings, int coun
 // Upon further calls (enum -> string) conversion is done though taking '_strings[enum_val]',
 // while (string -> enum) conversion requires searching through '_strings' to find enum index
 
-
-// - is_function_present type trait -
 #define UTL_PREDEF_IS_FUNCTION_DEFINED(function_name_, return_type_, ...)                                              \
     template <typename ReturnType, typename... ArgTypes>                                                               \
-    class _utl_is_function_present_impl_##function_name_ {                                                             \
+    class _utl_is_function_defined_impl_##function_name_ {                                                             \
     private:                                                                                                           \
         typedef char no[sizeof(ReturnType) + 1];                                                                       \
                                                                                                                        \
@@ -4446,8 +4443,8 @@ inline void _split_enum_args(const char* va_args, std::string* strings, int coun
         enum { value = (sizeof(test<ArgTypes...>(std::declval<ArgTypes>()...)) == sizeof(ReturnType)) };               \
     };                                                                                                                 \
                                                                                                                        \
-    using is_function_present_##function_name_ =                                                                       \
-        _utl_is_function_present_impl_##function_name_<return_type_, __VA_ARGS__>;
+    using is_function_defined_##function_name_ =                                                                       \
+        _utl_is_function_defined_impl_##function_name_<return_type_, __VA_ARGS__>;
 // TASK:
 // We need to detect at compile time if function FUNC(ARGS...) exists.
 // FUNC identifier isn't guaranteed to be declared.
@@ -4483,10 +4480,10 @@ inline void _split_enum_args(const char* va_args, std::string* strings, int coun
 //
 // ALTERNATIVES: Perhaps some sort of tricky inline SFINAE can be done through C++14 generic lambdas.
 //
-// Note 1: Some versions of 'clangd' give a 'bugprone-sizeof-expression' warning for sizeof(*A),
+// NOTE 1: Some versions of 'clangd' give a 'bugprone-sizeof-expression' warning for sizeof(*A),
 // this is a false alarm.
 //
-// Note 2: Frankly, the usefullness of this is rather dubious since constructs like
+// NOTE 2: Frankly, the usefullness of this is rather dubious since constructs like
 //     if constexpr (is_function_defined_windown_specific) { <call the windows-specific function> }
 //     else { <call the linux-specific function> }
 // are still illegal due to 'if constexpr' requiting both branches to have defined identifiers,

@@ -4,6 +4,8 @@
 
 **predef** module contains macros and constant expressions for detecting compilation details, while also providing several helper macros for codegen.
 
+It uses known implementation-defined macros to deduce compilation details and abstracts them away behind a unified API.
+
 > [!Note]
 > There exists a very similar [boost library](https://www.boost.org/doc/libs/1_55_0/libs/predef/doc/html/index.html) with the same name, it supports more exotic platforms, but has a different API and doesn't provide some of the utilities defined in this module.
 
@@ -11,7 +13,7 @@
 
 ```cpp
 // Compiler detection
-#define UTL_PREDEF_COMPILER_IS_MSVC // exactly one of these macros will be defined
+#define UTL_PREDEF_COMPILER_IS_MSVC // only one of these macros will be defined
 #define UTL_PREDEF_COMPILER_IS_GCC
 #define UTL_PREDEF_COMPILER_IS_CLANG
 #define UTL_PREDEF_COMPILER_IS_LLVM
@@ -25,7 +27,7 @@ constexpr std::string_view compiler_name;
 constexpr std::string_view compiler_full_name;
 
 // Platform detection
-#define UTL_PREDEF_PLATFORM_IS_WINDOWS_X64 // exactly one of these macros will be defined
+#define UTL_PREDEF_PLATFORM_IS_WINDOWS_X64 // only one of these macros will be defined
 #define UTL_PREDEF_PLATFORM_IS_WINDOWS_X32
 #define UTL_PREDEF_PLATFORM_IS_CYGWIN
 #define UTL_PREDEF_PLATFORM_IS_ANDROID
@@ -37,7 +39,7 @@ constexpr std::string_view compiler_full_name;
 constexpr std::string_view platform_name;
 
 // Architecture detection
-#define UTL_PREDEF_ARCHITECTURE_IS_X86_64 // exactly one of these macros will be defined
+#define UTL_PREDEF_ARCHITECTURE_IS_X86_64 // only one of these macros will be defined
 #define UTL_PREDEF_ARCHITECTURE_IS_X86_32
 #define UTL_PREDEF_ARCHITECTURE_IS_ARM
 #define UTL_PREDEF_ARCHITECTURE_IS_UNKNOWN
@@ -73,15 +75,126 @@ std::string compilation_summary();
 
 ### Compiler detection
 
+```cpp
+// Compiler detection
+#define UTL_PREDEF_COMPILER_IS_MSVC
+#define UTL_PREDEF_COMPILER_IS_GCC
+#define UTL_PREDEF_COMPILER_IS_CLANG
+#define UTL_PREDEF_COMPILER_IS_LLVM
+#define UTL_PREDEF_COMPILER_IS_ICC
+#define UTL_PREDEF_COMPILER_IS_PGI
+#define UTL_PREDEF_COMPILER_IS_IBMCPP
+#define UTL_PREDEF_COMPILER_IS_NVCC
+#define UTL_PREDEF_COMPILER_IS_UNKNOWN
+```
+
+**Only one of these macros will be defined.** The macro that gets defined corresponds to the detected compiler. If no other option is suitable, unknown is used as a fallback.
+
+This is useful for compiler-specific conditional compilation.
+
+```cpp
+constexpr std::string_view compiler_name;
+```
+
+`constexpr` string that evaluates to the abbreviated name of the detected compiler.
+
+Possible values: `MSVC`, `GCC`, `clang`, `LLVM`, `ICC`, `PGI`, `IBMCPP`, `NVCC`, `<unknown>`.
+
+```cpp
+constexpr std::string_view compiler_full_name;
+```
+
+`constexpr` string that evaluates to the full name of the detected compiler.
+
+Possible values: `Microsoft Visual C++ Compiler`, `GNU C/C++ Compiler`, `Clang Compiler`, `LLVM Compiler`, `Inter C/C++ Compiler`, `Portland Group C/C++ Compiler`, `IBM XL C/C++ Compiler`, `Nvidia Cuda Compiler Driver`, `<unknown>`.
+
 ### Platform detection
+
+```cpp
+// Platform detection
+#define UTL_PREDEF_PLATFORM_IS_WINDOWS_X64
+#define UTL_PREDEF_PLATFORM_IS_WINDOWS_X32
+#define UTL_PREDEF_PLATFORM_IS_CYGWIN
+#define UTL_PREDEF_PLATFORM_IS_ANDROID
+#define UTL_PREDEF_PLATFORM_IS_LINUX
+#define UTL_PREDEF_PLATFORM_IS_UNIX
+#define UTL_PREDEF_PLATFORM_IS_MACOS
+#define UTL_PREDEF_PLATFORM_IS_UNKNOWN
+```
+
+**Only one of these macros will be defined.** The macro that gets defined corresponds to the detected platform. If no other option is suitable, unknown is used as a fallback.
+
+This is useful for platform-specific conditional compilation.
+
+```cpp
+constexpr std::string_view platform_name;
+```
+
+`constexpr` string that evaluates to the name of the detected platform.
+
+Possible values: `Windows64`, `Windows32`, `Windows (CYGWIN)`, `Android`, `Linux`, `Unix-like OS`, `MacOS`, `<unknown>`. 
 
 ### Architecture detection
 
+```cpp
+#define UTL_PREDEF_ARCHITECTURE_IS_X86_64
+#define UTL_PREDEF_ARCHITECTURE_IS_X86_32
+#define UTL_PREDEF_ARCHITECTURE_IS_ARM
+#define UTL_PREDEF_ARCHITECTURE_IS_UNKNOWN
+```
+
+**Only one of these macros will be defined.** The macro that gets defined corresponds to the detected CPU architecture. If no other option is suitable, unknown is used as a fallback.
+
+This is useful for architecture-specific conditional compilation.
+
+```cpp
+constexpr std::string_view architecture_name;
+```
+
+`constexpr` string that evaluates to the name of the detected CPU architecture.
+
+Possible values: `x86-64`, `x86-32`, `ARM`, `<unknown>`
+
 ### Language standard detection
+
+```cpp
+#define UTL_PREDEF_STANDARD_IS_23_PLUS
+#define UTL_PREDEF_STANDARD_IS_20_PLUS
+#define UTL_PREDEF_STANDARD_IS_17_PLUS
+#define UTL_PREDEF_STANDARD_IS_14_PLUS
+#define UTL_PREDEF_STANDARD_IS_11_PLUS
+#define UTL_DEFINE_STANDARD_IS_UNKNOWN
+```
+
+**Multiple of these macros can be defined.** Macro that get defined correspond to the available C++ standard. If no other option is suitable, unknown is used as a fallback.
+
+This is useful for conditional compilation based on available standard.
+
+```cpp
+constexpr std::string_view standard_name;
+```
+
+`constexpr` string that evaluates to the name of the detected C++ standard. Possible values: `C++23`, `C++20`, `C++17`, `C++14`, `C++11`, `<unknown>`.
+
+**Note:** Considering that this is a C++17 library, the should be no feasible way to get values below `C++17`, however they are still provided for the sake of implementation completeness, shall the source code be copied directly.
 
 ### Compilation mode detection
 
-### Other utils
+```cpp
+#define UTL_PREDEF_MODE_IS_DEBUG
+```
+
+Defined when compiling in debug mode. Works as an alias for `_DEBUG`, provided for the sake of feature completeness.
+
+```cpp
+constexpr bool debug;
+```
+
+`constexpr` bool that evaluates to `true` when compiling in debug mode.
+
+This is useful for `if constexpr` conditional compilation of debug code.
+
+### Other Utils
 
 > ```cpp
 > UTL_PREDEF_VA_ARGS_COUNT(...)
