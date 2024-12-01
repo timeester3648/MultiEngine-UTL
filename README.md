@@ -79,13 +79,11 @@ While the library itself consists of a single header with no embedded dependenci
 
 ## Work in progress
 
-* Refactoring following modules: `utl::stre`, `utl::voidstream`, `utl::log`, `utl::mvl` to standard impl & documentation format.
+* Deprecating/refactoring following modules: `utl::stre`, `utl::voidstream`.
+* Finishing following modules: `utl::log`, `utl::mvl`.
 * Struct reflection in `utl::json` module;
-* `utl::mvl` Godbolt links;
-* Vector API in `utl::mvl`;
 * `utl::font` module;
 * Directory selection for temp file creation in `utl::shell`;
-* `timer::benchmark()`;
 * `utl::bitflag` module with shortcuts for various enum bitflag operations;
 * `stre::centered()` stream modifier;
 * Coordinate transformations in `utl::math`;
