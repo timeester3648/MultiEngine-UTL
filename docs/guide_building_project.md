@@ -19,7 +19,7 @@ git clone https://github.com/DmitriBogdanov/prototyping_utils.git &&
 cd "prototyping_utils/"
 ```
 
-Build the project:
+Configure & build the project:
 
 ```bash
 bash actions.sh clear config build
@@ -70,6 +70,7 @@ cmake -D CMAKE_CXX_COMPILER=g++ -B "build/" -S .
 Build the project:
 
 ```bash
+bash "scripts/create_single_header.sh"
 cmake --build "build/"
 ```
 
