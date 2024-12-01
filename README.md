@@ -27,23 +27,20 @@ Secondary design goals also include:
 
 | Module | Short description |
 | - | - |
-| [**utl::json**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_json.md) | Lightweight JSON parsing and serializing |
+| [**utl::json**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_json.md) | JSON parsing and serializing |
+| [**utl::log**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_log.md) | Logging library |
 | [**utl::math**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_math.md) | Math-related utilities |
 | [**utl::mvl**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_mvl.md) | Flexible API for vector and matrix operations |
+| [**utl::predef**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_predef.md) | Detection of architectures, compilers, platforms and etc. |
 | [**utl::profiler**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_profiler.md) | Quick scope & expression profiling macros |
-| [**utl::progressbar**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_progressbar.md) | Configurable progress bars for CLI apps |
-| [**utl::random**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_random.md) | Convenient random functions |
+| [**utl::progressbar**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_progressbar.md) | Progress bars for CLI apps |
+| [**utl::random**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_random.md) | Sensible random functions |
 | [**utl::shell**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_shell.md) | Command-line related utilities |
 | [**utl::sleep**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_sleep.md) | Precise sleep implementations |
 | [**utl::stre**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_stre.md) | String conversion extensions |
 | [**utl::table**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_table.md) | ASCII Table rendering tools |
 | [**utl::timer**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_timer.md) | Timing methods |
 | [**utl::voidstream**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_voidstream.md) | `std::ostream` API silencing method |
-
-| Macro-Module | Short description |
-| - | - |
-| [**UTL_DEFINE**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/MACRO_DEFINE.md) | Automatic codegen macros |
-| [**UTL_LOG**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/MACRO_LOG.md) | Simple debug/release logging macros |
 
 ## See also
 

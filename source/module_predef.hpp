@@ -331,12 +331,12 @@ inline void _split_enum_args(const char* va_args, std::string* strings, int coun
     inline std::string _strings[_count];                                                                               \
                                                                                                                        \
     inline std::string to_string(enum_name_ enum_val) {                                                                \
-        if (_strings[0].empty()) { _split_enum_args(#__VA_ARGS__, _strings, _count); }                             \
+        if (_strings[0].empty()) { utl::predef::_split_enum_args(#__VA_ARGS__, _strings, _count); }                             \
         return _strings[enum_val];                                                                                     \
     }                                                                                                                  \
                                                                                                                        \
     inline enum_name_ from_string(const std::string& enum_str) {                                                       \
-        if (_strings[0].empty()) { _split_enum_args(#__VA_ARGS__, _strings, _count); }                             \
+        if (_strings[0].empty()) { utl::predef::_split_enum_args(#__VA_ARGS__, _strings, _count); }                             \
         for (int i = 0; i < _count; ++i) {                                                                             \
             if (_strings[i] == enum_str) { return static_cast<enum_name_>(i); }                                        \
         }                                                                                                              \
@@ -359,7 +359,7 @@ inline void _split_enum_args(const char* va_args, std::string* strings, int coun
 
 
 // - is_function_present type trait -
-#define UTL_PREDEF_IS_FUNCTION_PRESENT(function_name_, return_type_, ...)                                              \
+#define UTL_PREDEF_IS_FUNCTION_DEFINED(function_name_, return_type_, ...)                                              \
     template <typename ReturnType, typename... ArgTypes>                                                               \
     class _utl_is_function_present_impl_##function_name_ {                                                             \
     private:                                                                                                           \
