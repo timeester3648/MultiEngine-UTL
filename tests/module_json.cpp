@@ -1,10 +1,5 @@
 // _______________ TEST FRAMEWORK & MODULE  _______________
 
-#include <initializer_list>
-#include <string>
-#include <type_traits>
-#include <unordered_map>
-#include <vector>
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include "thirdparty/doctest.h"
 

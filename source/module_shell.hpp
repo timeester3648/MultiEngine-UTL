@@ -15,7 +15,7 @@
 // _______________________ INCLUDES _______________________
 
 #include <cstddef>       // size_t
-#include <cstdlib>       // atexit(), system()
+#include <cstdlib>       // atexit(), system(), rand()
 #include <filesystem>    // filesystem::remove(), filesystem::path, filesystem::exists()
 #include <fstream>       // ofstream, ifstream
 #include <sstream>       // ostringstream

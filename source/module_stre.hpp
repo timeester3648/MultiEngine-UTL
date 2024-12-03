@@ -8,12 +8,17 @@
 //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+#include <exception>
+#include <stdexcept>
+#include <vector>
 #if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_STRE)
 #ifndef UTLHEADERGUARD_STRE
 #define UTLHEADERGUARD_STRE
 
 // _______________________ INCLUDES _______________________
 
+#include <algorithm>   // transform()
+#include <cctype>      // tolower(), toupper()
 #include <cstddef>     // size_t
 #include <iomanip>     // setfill(), setw()
 #include <ostream>     // ostream
@@ -83,170 +88,174 @@
 
 namespace utl::stre {
 
-// ===================
-// --- Type Traits ---
-// ===================
-
-template <typename Type, typename = void>
-struct is_printable : std::false_type {};
-
-template <typename Type>
-struct is_printable<Type, std::void_t<decltype(std::declval<std::ostream&>() << std::declval<Type>())>>
-    : std::true_type {};
-
-template <typename Type, typename = void, typename = void>
-struct is_iterable_through : std::false_type {};
-
-template <typename Type>
-struct is_iterable_through<Type, std::void_t<decltype(++std::declval<Type>().begin())>,
-                           std::void_t<decltype(std::declval<Type>().end())>> : std::true_type {};
-
-template <typename Type, typename = void, typename = void>
-struct is_const_iterable_through : std::false_type {};
-
-template <typename Type>
-struct is_const_iterable_through<Type, std::void_t<decltype(++std::declval<Type>().cbegin())>,
-                                 std::void_t<decltype(std::declval<Type>().cend())>> : std::true_type {};
-
-template <typename Type, typename = void, typename = void>
-struct is_tuple_like : std::false_type {};
-
-template <typename Type>
-struct is_tuple_like<Type, std::void_t<decltype(std::get<0>(std::declval<Type>()))>,
-                     std::void_t<decltype(std::tuple_size<Type>::value)>> : std::true_type {};
-
-template <typename Type>
-struct is_string : std::is_convertible<Type, std::string_view> {};
-
 // ================
-// --- to_str() ---
+// --- Trimming ---
 // ================
 
-// --- Delimers ---
-// ----------------
-
-constexpr auto _array_delimer_l = "[ ";
-constexpr auto _array_delimer_m = ", ";
-constexpr auto _array_delimer_r = " ]";
-constexpr auto _tuple_delimer_l = "< ";
-constexpr auto _tuple_delimer_m = ", ";
-constexpr auto _tuple_delimer_r = " >";
-
-// --- Predeclarations ---
-// -----------------------
-
-// 'false_type' half of 'is_to_str_convertible' should be declared before 'to_str()' to resolve circular dependency
-template <typename Type, typename = void>
-struct is_to_str_convertible : std::false_type {};
-
-
-// 'to_str(tuple)' should be predeclared to resolve circular dependency between 'to_str(container)' and 'to_str(tuple)'
-template <template <typename... Params> class TupleLikeType, typename... Args,
-          std::enable_if_t<!utl::stre::is_printable<TupleLikeType<Args...>>::value, bool>              = true,
-          std::enable_if_t<!utl::stre::is_const_iterable_through<TupleLikeType<Args...>>::value, bool> = true,
-          std::enable_if_t<utl::stre::is_tuple_like<TupleLikeType<Args...>>::value, bool>              = true>
-[[nodiscard]] std::string to_str(const TupleLikeType<Args...>& tuple);
-
-// --- Implementation ---
-// ----------------------
-
-// - to_str(printable) -
-template <typename Type, std::enable_if_t<utl::stre::is_printable<Type>::value, bool> = true>
-[[nodiscard]] std::string to_str(const Type& value) {
-    std::ostringstream ss;
-
-    ss << value;
-
-    return ss.str();
+template <class T>
+[[nodiscard]] std::string trim_left(T&& str, char trimmed_char = ' ') {
+    std::string res = std::forward<std::string>(str);  // when 'str' is an r-value, we can avoid the copy
+    res.erase(0, res.find_first_not_of(trimmed_char)); // seems to be the fastest way of doing it
+    return res;
 }
 
-// - to_str(container) -
-template <typename ContainerType, std::enable_if_t<!utl::stre::is_printable<ContainerType>::value, bool> = true,
-          std::enable_if_t<utl::stre::is_const_iterable_through<ContainerType>::value, bool>                  = true,
-          std::enable_if_t<utl::stre::is_to_str_convertible<typename ContainerType::value_type>::value, bool> = true>
-[[nodiscard]] std::string to_str(const ContainerType& container) {
+template <class T>
+[[nodiscard]] std::string trim_right(T&& str, char trimmed_char = ' ') {
+    std::string res = std::forward<std::string>(str);
+    res.erase(res.find_last_not_of(trimmed_char) + 1);
+    return res;
+}
 
-    std::ostringstream ss;
+template <class T>
+[[nodiscard]] std::string trim(T&& str, char trimmed_char = ' ') {
+    return trim_right(trim_left(std::forward<std::string>(str), trimmed_char), trimmed_char);
+}
 
-    // Special case for empty containers
-    if (container.cbegin() == container.cend()) {
-        ss << _array_delimer_l << _array_delimer_r;
-        return ss.str();
+// ===============
+// --- Padding ---
+// ===============
+
+[[nodiscard]] std::string pad_left(std::string_view str, std::size_t length, char padding_char = ' ') {
+    if (length > str.size()) {
+        std::string res;
+        res.reserve(length);
+        res.append(length - str.size(), padding_char);
+        res += str;
+        return res;
+    } else return std::string(str);
+}
+
+[[nodiscard]] std::string pad_right(std::string_view str, std::size_t length, char padding_char = ' ') {
+    if (length > str.size()) {
+        std::string res;
+        res.reserve(length);
+        res += str;
+        res.append(length - str.size(), padding_char);
+        return res;
+    } else return std::string(str);
+}
+
+[[nodiscard]] std::string pad(std::string_view str, std::size_t length, char padding_char = ' ') {
+    if (length > str.size()) {
+        std::string res;
+        res.reserve(length);
+        const std::size_t left_pad_size = (length - str.size()) / 2;
+        res.append(left_pad_size, padding_char);
+        res += str;
+        const std::size_t right_pad_size = length - str.size() - left_pad_size;
+        res.append(right_pad_size, padding_char);
+        return res;
+        // we try to pad evenly on both sides, but one of the pads (the right one to be exact)
+        // may be a character longer than the other if the length difference is odd
+    } else return std::string(str);
+}
+
+[[nodiscard]] std::string pad_with_leading_zeroes(unsigned int number, std::size_t length = 12) {
+    const std::string number_str = std::to_string(number);
+
+    if (length > number_str.size()) {
+        std::string res;
+        res.reserve(length);
+        res.append(length - number_str.size(), '0');
+        res += number_str;
+        return res;
+    } else return number_str;
+    // we do this instead of using 'std::ostringstream' with 'std::setfill('0')' + 'std::setw()'
+    // so we don't need streams as a dependency. Plus it is faster that way.
+}
+
+// ========================
+// --- Case conversions ---
+// ========================
+
+template <class T>
+[[nodiscard]] std::string to_lower(T&& str) {
+    std::string res = std::forward<std::string>(str); // when 'str' is an r-value, we can avoid the copy
+    std::transform(res.begin(), res.end(), res.begin(), [](unsigned char c) { return std::tolower(c); });
+    return res;
+    // note that 'std::tolower()', 'std::toupper()' can only apply to unsigned chars, calling it on signed char
+    // is UB. Implementation above was directly taken from https://en.cppreference.com/w/cpp/string/byte/tolower
+}
+
+template <class T>
+[[nodiscard]] std::string to_upper(T&& str) {
+    std::string res = std::forward<std::string>(str);
+    std::transform(res.begin(), res.end(), res.begin(), [](unsigned char c) { return std::toupper(c); });
+    return res;
+}
+
+// ========================
+// --- Substring checks ---
+// ========================
+
+// Note:
+// C++20 adds 'std::basic_string<T>::starts_with()', 'std::basic_string<T>::ends_with()',
+// 'std::basic_string<T>::contains()', making these functions pointless in a new standard.
+
+[[nodiscard]] bool starts_with(std::string_view str, std::string_view substr) {
+    return str.size() >= substr.size() && str.compare(0, substr.size(), substr) == 0;
+}
+
+[[nodiscard]] bool ends_with(std::string_view str, std::string_view substr) {
+    return str.size() >= substr.size() && str.compare(str.size() - substr.size(), substr.size(), substr) == 0;
+}
+
+[[nodiscard]] bool contains(std::string_view str, std::string_view substr) {
+    return str.find(substr) != std::string_view::npos;
+}
+
+// ==========================
+// --- Token manipulation ---
+// ==========================
+
+template <class T>
+[[nodiscard]] std::string replace_all_occurences(T&& str, std::string_view from, std::string_view to) {
+    std::string res = std::forward<std::string>(str);
+
+    std::size_t i = 0;
+    while ((i = res.find(from, i)) != std::string::npos) { // locate substring to replace
+        res.replace(i, from.size(), to);                   // replace
+        i += to.size();                                    // step over the replaced region
+    }
+    // Note: Not stepping over the replaced regions causes self-similar replacements
+    // like "abc" -> "abcabc" to fall into an infinite loop, we don't want that.
+
+    return res;
+}
+
+// Note:
+// Most "split by delimer" implementations found online seem to be horrifically inefficient
+// with unnecessary copying/erasure/intermediate tokens, stringstreams and etc.
+//
+// We can just scan through the string view once, while keeping track of the last segment between
+// two delimiters, no unnecessary work, the only place where we do a copy is during emplacement into
+// the vector where it's unavoidable
+[[nodiscard]] std::vector<std::string> split_by_delimiter(std::string_view str, std::string_view delimiter, bool keep_empty_tokens = false) {
+    if (delimiter.empty()) return {std::string(str)};
+    // handle empty delimiter explicitly so we can't fall into an infinite loop
+
+    std::vector<std::string> tokens;
+    std::size_t              cursor        = 0;
+    std::size_t              segment_start = cursor;
+
+    while ((cursor = str.find(delimiter, cursor)) != std::string_view::npos) {
+        if (keep_empty_tokens || segment_start != cursor) tokens.emplace_back(str.substr(segment_start, cursor - segment_start));
+        // don't emplace empty tokens in case of leading/trailing/repeated delimiter
+        cursor += delimiter.size();
+        segment_start = cursor;
     }
 
-    // Iterate throught the container 'looking forward' by one step
-    // so we can know not to place the last delimer. Using -- or std::prev()
-    // is not and option since we only require iterators to be forward-iterable
-    ss << _array_delimer_l;
-
-    auto it_next = container.cbegin(), it = it_next++;
-    for (; it_next != container.cend(); ++it_next, ++it) ss << utl::stre::to_str(*it) << _array_delimer_m;
-
-    ss << utl::stre::to_str(*it) << _array_delimer_r;
-
-    return ss.str();
+    if (keep_empty_tokens || segment_start != str.size()) tokens.emplace_back(str.substr(segment_start));
+    // 'cursor' is now at 'npos', so we compare to the size instead
+    
+    return tokens;
 }
-
-// - to_str(tuple) helpers -
-template <typename TupleElemType>
-[[nodiscard]] std::string _deduce_and_perform_string_conversion(const TupleElemType& elem) {
-    std::ostringstream temp_ss;
-
-    if constexpr (utl::stre::is_to_str_convertible<TupleElemType>::value) temp_ss << utl::stre::to_str(elem);
-    else temp_ss << elem;
-
-    return temp_ss.str();
-}
-
-template <typename TupleLikeType, std::size_t... Is>
-void _print_tuple_fold(std::ostringstream& ss, const TupleLikeType& tuple, std::index_sequence<Is...>) {
-    ((ss << (Is == 0 ? "" : _tuple_delimer_m) << _deduce_and_perform_string_conversion(std::get<Is>(tuple))), ...);
-} // prints tuple to stream
-
-// - to_str(tuple) -
-template <template <typename... Params> class TupleLikeType, typename... Args,
-          std::enable_if_t<!utl::stre::is_printable<TupleLikeType<Args...>>::value, bool>,
-          std::enable_if_t<!utl::stre::is_const_iterable_through<TupleLikeType<Args...>>::value, bool>,
-          std::enable_if_t<utl::stre::is_tuple_like<TupleLikeType<Args...>>::value, bool>>
-[[nodiscard]] std::string to_str(const TupleLikeType<Args...>& tuple) {
-
-    std::ostringstream ss;
-
-    // Print tuple using C++17 variadic folding with index sequence
-    ss << _tuple_delimer_l;
-    _print_tuple_fold(ss, tuple, std::index_sequence_for<Args...>{});
-    ss << _tuple_delimer_r;
-
-    return ss.str();
-}
-
-// - is_to_str_convertible -
-template <typename Type>
-struct is_to_str_convertible<Type, std::void_t<decltype(utl::stre::to_str(std::declval<Type>()))>> : std::true_type {};
-
-// ===========================
-// --- Inline stringstream ---
-// ===========================
-
-class InlineStream {
-public:
-    template <typename Type>
-    InlineStream& operator<<(const Type& arg) {
-        this->ss << arg;
-        return *this;
-    }
-
-    inline operator std::string() const { return this->ss.str(); }
-
-private:
-    std::ostringstream ss;
-};
 
 // ===================
-// --- Misc. Utils ---
+// --- Other utils ---
 // ===================
 
-[[nodiscard]] inline std::string repeat_symbol(char symbol, size_t repeats) { return std::string(repeats, symbol); }
+[[nodiscard]] inline std::string repeat_char(char ch, size_t repeats) { return std::string(repeats, ch); }
 
 [[nodiscard]] inline std::string repeat_string(std::string_view str, size_t repeats) {
     std::string res;
@@ -255,11 +264,44 @@ private:
     return res;
 }
 
-template <typename IntegerType, std::enable_if_t<std::is_integral<IntegerType>::value, bool> = true>
-[[nodiscard]] std::string pad_with_zeroes(IntegerType number, std::streamsize total_size = 10) {
-    std::ostringstream ss;
-    ss << std::setfill('0') << std::setw(total_size) << number;
-    return ss.str();
+// Mostly useful to print strings with special chars in console and look at their contents.
+[[nodiscard]] std::string escape_control_chars(std::string_view str) {
+    std::string res;
+    res.reserve(str.size()); // no necesseraly correct, but it's a godd first guess
+
+    for (const char c : str) {
+        // Control characters with dedicated escape sequences get escaped with those sequences
+        if (c == '\a') res += "\\a";
+        else if (c == '\b') res += "\\b";
+        else if (c == '\f') res += "\\f";
+        else if (c == '\n') res += "\\n";
+        else if (c == '\r') res += "\\r";
+        else if (c == '\t') res += "\\t";
+        else if (c == '\v') res += "\\v";
+        // Other non-printable chars get replaced with their codes
+        else if (!std::isprint(static_cast<unsigned char>(c))) {
+            res += '\\';
+            res += std::to_string(static_cast<int>(c));
+        }
+        // Printable chars are appended as is.
+        else
+            res += c;
+    }
+    // Note: This could be implemented faster using the 'utl::json' method of handling escapes with buffering and
+    // a lookup table, however I don't see much practical reason to complicate this implementation like that.
+
+    return res;
+}
+
+[[nodiscard]] std::size_t index_of_difference(std::string_view str_1, std::string_view str_2) {
+    using namespace std::string_literals;
+    if (str_1.size() != str_2.size())
+        throw std::logic_error("String {"s + std::string(str_1) + "} of size "s + std::to_string(str_1.size()) +
+                               " and {"s + std::string(str_2) + "} of size "s + std::to_string(str_2.size()) +
+                               " do not have a meaningful index of difference due to incompatible sizes."s);
+    for (std::size_t i = 0; i < str_1.size(); ++i)
+        if (str_1[i] != str_2[i]) return i;
+    return str_1.size();
 }
 
 } // namespace utl::stre

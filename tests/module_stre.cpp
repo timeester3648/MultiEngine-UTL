@@ -1,101 +1,243 @@
-// __________ TEST FRAMEWORK & LIBRARY  __________
+// _______________ TEST FRAMEWORK & MODULE  _______________
 
-#include <random>
-#include <string>
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include "thirdparty/doctest.h"
 
 #include "module_stre.hpp"
 
-// ________________ TEST INCLUDES ________________
+// _______________________ INCLUDES _______________________
 
-#include <array>
-#include <cuchar>
-#include <map>
-#include <random>
-#include <tuple>
-#include <unordered_map>
-#include <vector>
+// NOTE: STD INCLUDES
 
-// _____________ TEST IMPLEMENTATION _____________
+// ____________________ DEVELOPER DOCS ____________________
 
-TEST_CASE_TEMPLATE("(stre::is_string<T> == true) for T = ", T,
-    // String types
-    char*,
-    const char*,
-    std::string,
-    std::string_view
-) {
-    CHECK(utl::stre::is_string<T>::value == true);
-}
+// NOTE: DOCS
 
-TEST_CASE_TEMPLATE("(stre::is_string<T> == false) for T = ", T,
-    // Types that clearly aren't a string
-    int,
-    double,
-    // Types that can be mistaken for a string
-    std::array<char, 4>,
-    std::vector<char>,
-    // Types that denote string with a non-standard encoding
-    unsigned char*,
-    wchar_t*,
-    std::wstring,
-    std::wstring_view,
-    char16_t*,
-    std::u16string,
-    std::u16string_view,
-    char32_t*,
-    std::u32string,
-    std::u32string_view
-) {
-    CHECK(utl::stre::is_string<T>::value == false);
-}
+// ____________________ IMPLEMENTATION ____________________
 
-TEST_CASE_TEMPLATE("(stre::is_to_str_convertible<T> == true) for T = ", T,
-    // "Directly printable" types
-    char*,
-    const char*,
-    std::string,
-    std::string_view,
-    int,
-    unsigned int,
-    float,
-    double,
-    // "Complex" types
-    std::vector<int>,                                                                         // vector
-    std::tuple<int, double, std::string>,                                                     // tuple
-    std::vector<std::vector<int>>,                                                            // vector of vectors
-    std::unordered_map<std::string, int>,                                                     // map
-    std::tuple<std::vector<bool>, std::vector<std::string>, std::vector<std::pair<int, int>>> // tuple of vectors
-) {
-    CHECK(utl::stre::is_to_str_convertible<T>::value == true);
-}
+using namespace utl;
 
-TEST_CASE("stre::to_str() performs as expected") {
-    
-    std::vector<int>                     test1 = { 1, 2, 3 };
-    std::vector<std::vector<int>>        test2 = { { 1, 2 }, { 3 }, { 4, 5, 6 } };
-    std::tuple<int, double, std::string> test3 = { 17, 0.5, "text" };
-    std::map<std::string, int>           test4 = { { "key1", 1 }, { "key2", 2 } };
-    
-    CHECK(utl::stre::to_str(test1) == std::string("[ 1, 2, 3 ]"                     ));
-    CHECK(utl::stre::to_str(test2) == std::string("[ [ 1, 2 ], [ 3 ], [ 4, 5, 6 ] ]"));
-    CHECK(utl::stre::to_str(test3) == std::string("< 17, 0.5, text >"               ));
-    CHECK(utl::stre::to_str(test4) == std::string("[ < key1, 1 >, < key2, 2 > ]"    ));
+template <class Func>
+bool check_if_throws(Func f) {
+    bool throws = false;
+    try {
+        f();
+    } catch (...) { throws = true; }
+    return throws;
 }
 
 TEST_CASE("Formatting utils perform as expected") {
-    
-    std::string result = (utl::stre::InlineStream() << "Value is " << 3 << '\n');
-    CHECK(result == std::string("Value is 3\n"));
-    
-    CHECK(utl::stre::pad_with_zeroes(15,   4) == std::string("0015"));
-    CHECK(utl::stre::pad_with_zeroes(137,  3) == std::string("137" ));
-    CHECK(utl::stre::pad_with_zeroes(4321, 2) == std::string("4321"));
-    
-    CHECK(utl::stre::repeat_symbol('k', 6) == std::string("kkkkkk"));
-    CHECK(utl::stre::repeat_symbol('k', 0) == std::string(""));
-    
-    CHECK(utl::stre::repeat_string("xo", 3) == std::string("xoxoxo"));
-    CHECK(utl::stre::repeat_string("xo", 0) == std::string(""));
+
+    CHECK(stre::pad_with_leading_zeroes(15, 4) == "0015");
+    CHECK(stre::pad_with_leading_zeroes(174, 10) == "0000000174");
+    CHECK(stre::pad_with_leading_zeroes(137, 3) == "137");
+    CHECK(stre::pad_with_leading_zeroes(4321, 2) == "4321");
+
+    CHECK(stre::repeat_char('k', 6) == "kkkkkk");
+    CHECK(stre::repeat_char('k', 0) == "");
+
+    CHECK(stre::repeat_string("xo", 3) == "xoxoxo");
+    CHECK(stre::repeat_string("xo", 0) == "");
+}
+
+TEST_CASE("Trimming") {
+    CHECK(stre::trim_left("   XXX   ") == "XXX   ");
+    CHECK(stre::trim_left("XXX") == "XXX");
+
+    CHECK(stre::trim_right("   XXX   ") == "   XXX");
+    CHECK(stre::trim_right("XXX") == "XXX");
+
+    CHECK(stre::trim("   XXX   ") == "XXX");
+    CHECK(stre::trim("XXX") == "XXX");
+
+    CHECK(stre::trim("00000010001000000", '0') == "10001");
+}
+
+TEST_CASE("Padding") {
+    CHECK(stre::pad_left("XXX", 6) == "   XXX");
+    CHECK(stre::pad_left("XXX", 3) == "XXX");
+    CHECK(stre::pad_left("XXX", 0) == "XXX");
+    CHECK(stre::pad_left("XXX", 6, '-') == "---XXX");
+
+    CHECK(stre::pad_right("XXX", 6) == "XXX   ");
+    CHECK(stre::pad_right("XXX", 3) == "XXX");
+    CHECK(stre::pad_right("XXX", 0) == "XXX");
+    CHECK(stre::pad_right("XXX", 6, '-') == "XXX---");
+
+    CHECK(stre::pad("XXX", 9) == "   XXX   ");
+    CHECK(stre::pad("XXX", 8) == "  XXX   ");
+    CHECK(stre::pad("XXX", 3) == "XXX");
+    CHECK(stre::pad("XXX", 0) == "XXX");
+    CHECK(stre::pad("XXX", 9, '-') == "---XXX---");
+}
+
+TEST_CASE("Case conversions") {
+    CHECK(stre::to_lower("Lorem Ipsum") == "lorem ipsum");
+    CHECK(stre::to_lower("XXX") == "xxx");
+    CHECK(stre::to_lower("Some \t\n\r VERY \17 StRanGe text -=14") == "some \t\n\r very \17 strange text -=14");
+
+    CHECK(stre::to_upper("lorem ipsum") == "LOREM IPSUM");
+    CHECK(stre::to_upper("xxx") == "XXX");
+    CHECK(stre::to_upper("some \t\n\r very \17 strange text -=14") == "SOME \t\n\r VERY \17 STRANGE TEXT -=14");
+}
+
+TEST_CASE("Substring checks") {
+    CHECK(stre::starts_with("Lorem Ipsum", "Lorem"));
+    CHECK(!stre::starts_with("Lorem Ipsum", "Ipsum"));
+
+    CHECK(stre::ends_with("Lorem Ipsum", "Ipsum"));
+    CHECK(!stre::ends_with("Lorem Ipsum", "Lorem"));
+
+    CHECK(stre::contains("Some \t\r\n rather 17 bizzare TeXt", "\t\r\n"));
+    CHECK(stre::contains("Some \t\r\n rather 17 bizzare TeXt", " bizzare TeXt"));
+    CHECK(!stre::contains("Some \t\r\n rather 17 bizzare TeXt", "15"));
+}
+
+TEST_CASE("Splitting string by delimiter (keep_empty_tokens = false)") {
+    { // simplest case
+        const auto tokens = stre::split_by_delimiter("aaa,bbb,ccc", ",");
+        CHECK(tokens.size() == 3);
+        CHECK(tokens[0] == "aaa");
+        CHECK(tokens[1] == "bbb");
+        CHECK(tokens[2] == "ccc");
+    }
+
+    { // leading delimers
+        const auto tokens = stre::split_by_delimiter("(---)lorem(---)ipsum", "(---)");
+        CHECK(tokens.size() == 2);
+        CHECK(tokens[0] == "lorem");
+        CHECK(tokens[1] == "ipsum");
+    }
+
+    { // leading + repeating delimers
+        const auto tokens = stre::split_by_delimiter("___lorem_________ipsum", "___");
+        CHECK(tokens.size() == 2);
+        CHECK(tokens[0] == "lorem");
+        CHECK(tokens[1] == "ipsum");
+    }
+
+    { // leading + repeating + trailing delimers
+        const auto tokens = stre::split_by_delimiter("xxAxxxxxBxCxDxxEx", "x");
+        CHECK(tokens.size() == 5);
+        CHECK(tokens[0] == "A");
+        CHECK(tokens[1] == "B");
+        CHECK(tokens[2] == "C");
+        CHECK(tokens[3] == "D");
+        CHECK(tokens[4] == "E");
+    }
+
+    { // non-empty string with a single delimer-like token
+        const auto tokens = stre::split_by_delimiter(",,", ",,,");
+        CHECK(tokens.size() == 1);
+        CHECK(tokens[0] == ",,");
+    }
+
+    { // non-empty string with no tokens
+        const auto tokens = stre::split_by_delimiter(".........", "...");
+        CHECK(tokens.size() == 0);
+    }
+
+    { // empty string with no tokens
+        const auto tokens = stre::split_by_delimiter("", "...");
+        CHECK(tokens.size() == 0);
+    }
+
+    { // non-empty string with empty delimer
+        const auto tokens = stre::split_by_delimiter("text", "");
+        CHECK(tokens.size() == 1);
+        CHECK(tokens[0] == "text");
+    }
+}
+
+TEST_CASE("Splitting string by delimiter (keep_empty_tokens = true)") {
+    { // simplest case
+        const auto tokens = stre::split_by_delimiter("aaa,bbb,ccc", ",", true);
+        CHECK(tokens.size() == 3);
+        CHECK(tokens[0] == "aaa");
+        CHECK(tokens[1] == "bbb");
+        CHECK(tokens[2] == "ccc");
+    }
+
+    { // leading delimers
+        const auto tokens = stre::split_by_delimiter("(---)lorem(---)ipsum", "(---)", true);
+        CHECK(tokens.size() == 3);
+        CHECK(tokens[0] == "");
+        CHECK(tokens[1] == "lorem");
+        CHECK(tokens[2] == "ipsum");
+    }
+
+    { // leading + repeating delimers
+        const auto tokens = stre::split_by_delimiter("___lorem_________ipsum", "___", true);
+        CHECK(tokens.size() == 5);
+        CHECK(tokens[0] == "");
+        CHECK(tokens[1] == "lorem");
+        CHECK(tokens[2] == "");
+        CHECK(tokens[3] == "");
+        CHECK(tokens[4] == "ipsum");
+    }
+
+    { // leading + repeating + trailing delimers
+        const auto tokens = stre::split_by_delimiter("xxAxxxxxBxCxDxxEx", "x", true);
+        CHECK(tokens.size() == 13);
+        CHECK(tokens[0] == "");
+        CHECK(tokens[1] == "");
+        CHECK(tokens[2] == "A");
+        CHECK(tokens[3] == "");
+        CHECK(tokens[4] == "");
+        CHECK(tokens[5] == "");
+        CHECK(tokens[6] == "");
+        CHECK(tokens[7] == "B");
+        CHECK(tokens[8] == "C");
+        CHECK(tokens[9] == "D");
+        CHECK(tokens[10] == "");
+        CHECK(tokens[11] == "E");
+        CHECK(tokens[12] == "");
+    }
+
+    { // non-empty string with a single delimer-like token
+        const auto tokens = stre::split_by_delimiter(",,", ",,,", true);
+        CHECK(tokens.size() == 1);
+        CHECK(tokens[0] == ",,");
+    }
+
+    { // non-empty string with no tokens
+        const auto tokens = stre::split_by_delimiter(".........", "...", true);
+        CHECK(tokens.size() == 4);
+        CHECK(tokens[0] == "");
+        CHECK(tokens[1] == "");
+        CHECK(tokens[2] == "");
+        CHECK(tokens[3] == "");
+    }
+
+    { // empty string with no tokens
+        const auto tokens = stre::split_by_delimiter("", "...", true);
+        CHECK(tokens.size() == 1);
+        CHECK(tokens[0] == "");
+    }
+
+    { // non-empty string with empty delimer
+        const auto tokens = stre::split_by_delimiter("text", "", true);
+        CHECK(tokens.size() == 1);
+        CHECK(tokens[0] == "text");
+    }
+}
+
+TEST_CASE("Other utils") {
+    CHECK(stre::replace_all_occurences("xxxAAxxxAAxxx", "AA", "BBB") == "xxxBBBxxxBBBxxx");
+    CHECK(stre::replace_all_occurences("Some very very cool text ending with very", "very", "really") ==
+          "Some really really cool text ending with really");
+    CHECK(stre::replace_all_occurences("very short string", "super long replacement target",
+                                       "even longer replacement string just to test thing out") == "very short string");
+
+    CHECK(stre::escape_control_chars("Here is \t\n Johny!") == R"(Here is \t\n Johny!)");
+    CHECK(stre::escape_control_chars("Lorem \r\r\f\a be the Ipsum!") == R"(Lorem \r\r\f\a be the Ipsum!)");
+    CHECK(stre::escape_control_chars("Let this string be untouched!") == R"(Let this string be untouched!)");
+
+    CHECK(stre::index_of_difference("0123X56789", "0123456789") == 4);
+    CHECK(stre::index_of_difference("0123456789", "A123456789") == 0);
+    CHECK(stre::index_of_difference("012345678G", "012345678F") == 9);
+    CHECK(stre::index_of_difference("xxx", "xxx") == 3);
+
+    const bool incompatible_sizes_throw = check_if_throws([]() { return stre::index_of_difference("xxx", "xxxx"); });
+    CHECK(incompatible_sizes_throw);
 }

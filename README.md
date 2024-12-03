@@ -37,7 +37,7 @@ Secondary design goals also include:
 | [**utl::random**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_random.md) | Sensible random functions |
 | [**utl::shell**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_shell.md) | Command-line related utilities |
 | [**utl::sleep**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_sleep.md) | Precise sleep implementations |
-| [**utl::stre**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_stre.md) | String conversion extensions |
+| [**utl::stre**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_stre.md) | Efficient implementations of common string utils |
 | [**utl::table**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_table.md) | ASCII Table rendering tools |
 | [**utl::timer**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_timer.md) | Timing methods |
 | [**utl::voidstream**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_voidstream.md) | `std::ostream` API silencing method |
@@ -79,7 +79,7 @@ While the library itself consists of a single header with no embedded dependenci
 
 ## Work in progress
 
-* Deprecating/refactoring following modules: `utl::stre`, `utl::voidstream`.
+* Deprecating/refactoring following modules: `utl::voidstream`.
 * Finishing following modules: `utl::log`, `utl::mvl`.
 * Struct reflection in `utl::json` module;
 * `utl::font` module;
