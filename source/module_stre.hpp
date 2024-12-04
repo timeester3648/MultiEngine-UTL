@@ -94,21 +94,21 @@ namespace utl::stre {
 
 template <class T>
 [[nodiscard]] std::string trim_left(T&& str, char trimmed_char = ' ') {
-    std::string res = std::forward<std::string>(str);  // when 'str' is an r-value, we can avoid the copy
+    std::string res = std::forward<T>(str);  // when 'str' is an r-value, we can avoid the copy
     res.erase(0, res.find_first_not_of(trimmed_char)); // seems to be the fastest way of doing it
     return res;
 }
 
 template <class T>
 [[nodiscard]] std::string trim_right(T&& str, char trimmed_char = ' ') {
-    std::string res = std::forward<std::string>(str);
+    std::string res = std::forward<T>(str);
     res.erase(res.find_last_not_of(trimmed_char) + 1);
     return res;
 }
 
 template <class T>
 [[nodiscard]] std::string trim(T&& str, char trimmed_char = ' ') {
-    return trim_right(trim_left(std::forward<std::string>(str), trimmed_char), trimmed_char);
+    return trim_right(trim_left(std::forward<T>(str), trimmed_char), trimmed_char);
 }
 
 // ===============
@@ -170,7 +170,7 @@ template <class T>
 
 template <class T>
 [[nodiscard]] std::string to_lower(T&& str) {
-    std::string res = std::forward<std::string>(str); // when 'str' is an r-value, we can avoid the copy
+    std::string res = std::forward<T>(str); // when 'str' is an r-value, we can avoid the copy
     std::transform(res.begin(), res.end(), res.begin(), [](unsigned char c) { return std::tolower(c); });
     return res;
     // note that 'std::tolower()', 'std::toupper()' can only apply to unsigned chars, calling it on signed char
@@ -179,7 +179,7 @@ template <class T>
 
 template <class T>
 [[nodiscard]] std::string to_upper(T&& str) {
-    std::string res = std::forward<std::string>(str);
+    std::string res = std::forward<T>(str);
     std::transform(res.begin(), res.end(), res.begin(), [](unsigned char c) { return std::toupper(c); });
     return res;
 }
@@ -210,7 +210,7 @@ template <class T>
 
 template <class T>
 [[nodiscard]] std::string replace_all_occurences(T&& str, std::string_view from, std::string_view to) {
-    std::string res = std::forward<std::string>(str);
+    std::string res = std::forward<T>(str);
 
     std::size_t i = 0;
     while ((i = res.find(from, i)) != std::string::npos) { // locate substring to replace
