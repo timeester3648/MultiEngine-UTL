@@ -1,12 +1,20 @@
-#include "module_predef.hpp"
 #include "module_json.hpp"
+#include "module_log.hpp"
 #include "module_math.hpp"
 #include "module_mvl.hpp"
+#include "module_parallel.hpp"
+#include "module_predef.hpp"
 #include "module_profiler.hpp"
+#include "module_progressbar.hpp"
 #include "module_random.hpp"
 #include "module_shell.hpp"
 #include "module_sleep.hpp"
+#include "module_stre.hpp"
+#include "module_table.hpp"
+#include "module_timer.hpp"
+
 #include <chrono>
+#include <utility>
 
 #define ANKERL_NANOBENCH_IMPLEMENT
 #include "thirdparty/nanobench.h"
@@ -32,3 +40,5 @@ template <class Func>
 void benchmark(const char* name, Func lambda) {
     bench.run(name, lambda);
 }
+
+using namespace utl;

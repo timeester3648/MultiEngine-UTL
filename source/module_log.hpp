@@ -75,7 +75,9 @@ std::size_t _get_thread_index(const std::thread::id id) {
 
 template <class IntType, std::enable_if_t<std::is_integral<IntType>::value, bool> = true>
 unsigned int _integer_digit_count(IntType value) {
-    unsigned int digits = (value < 0) ? 1 : 0;
+    unsigned int digits = (value <= 0) ? 1 : 0;
+    // (value <  0) => we add 1 digit because of '-' in front
+    // (value == 0) => we add 1 digit for '0' because the loop doesn't account for zero integers
     while (value) {
         value /= 10;
         ++digits;
@@ -262,11 +264,21 @@ void append_stringified(std::string& str, const Tuplelike<Args...>& value) {
     str += " >";
 }
 
-template <class T>
-std::string stringify(const T& value) {
-    std::string str;
-    append_stringified(str, value);
-    return str;
+template <class... Args>
+std::string stringify(Args&&... args) {
+    std::string buffer;
+    (utl::log::append_stringified(buffer, std::forward<Args>(args)), ...);
+    return buffer;
+}
+
+template <class... Args>
+void print(Args&&... args) {
+    std::cout << stringify(std::forward<Args>(args)...);
+}
+
+template <class... Args>
+void println(Args&&... args) {
+    std::cout << stringify(std::forward<Args>(args)...) << '\n';
 }
 
 

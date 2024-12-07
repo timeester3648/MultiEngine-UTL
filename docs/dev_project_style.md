@@ -1,4 +1,4 @@
-# Project style
+# Project style guide
 
 This file contains specifications that ensure a standardized style of source files, documentation, commits and etc.
 
