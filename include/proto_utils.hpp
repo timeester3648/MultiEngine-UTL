@@ -4351,7 +4351,7 @@ void task(Func&& func, Args&&... args) {
 }
 
 template <class Func, class... Args>
-auto task_with_future(Func&& func, Args&&... args) -> std::invoke_result_t<std::decay_t<Func>, std::decay_t<Args>...> {
+auto task_with_future(Func&& func, Args&&... args) -> std::future<std::invoke_result_t<std::decay_t<Func>, std::decay_t<Args>...>> {
     return static_thread_pool().add_task_with_future(std::forward<Func>(func), std::forward<Args>(args)...);
 }
 

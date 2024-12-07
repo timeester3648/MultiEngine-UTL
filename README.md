@@ -31,6 +31,7 @@ Secondary design goals also include:
 | [**utl::log**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_log.md) | Logging library |
 | [**utl::math**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_math.md) | Math-related utilities |
 | [**utl::mvl**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_mvl.md) | Flexible API for vector and matrix operations |
+| [**utl::parallel**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_parallel.md) | Thread pool, async tasks, parallel for, parallel reductions and etc. |
 | [**utl::predef**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_predef.md) | Detection of architectures, compilers, platforms and etc. |
 | [**utl::profiler**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_profiler.md) | Quick scope & expression profiling macros |
 | [**utl::progressbar**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_progressbar.md) | Progress bars for CLI apps |
