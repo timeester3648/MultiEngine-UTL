@@ -4135,6 +4135,36 @@ std::size_t max_thread_count() {
 constexpr std::size_t _min_size(std::size_t a, std::size_t b) noexcept { return (b < a) ? b : a; }
 constexpr std::size_t _max_size(std::size_t a, std::size_t b) noexcept { return (b < a) ? a : b; }
 
+// Template for automatic loop unrolling.
+//
+// It is used in 'parallel::reduce()' to speed up a tight loop while
+// leaving the used with ability to easily control that unrolling.
+//
+// Benchmarks indicate speedups ~130% to ~400% depending on CPU, compiler and options
+// large unrolling (32) seems to be the best on benchmarks, however it may bloat the binary
+// and take over too many branch predictor slots in case of min/max reductions, 4-8 seems
+// like a reasonable sweetspot for most machines. We use 4 as a less intrusive option.
+//
+// One may think that it is a job of compiler to perform such optimizations, yet even with
+// '-Ofast -funroll-all-loop' and GCC unroll pragmas it fails to do them reliably.
+//
+// The reason it fails to do so is pretty clear for '-O2' and below - strictly speaking, most binary
+// operations on floats are non-commutative (sum depends on the order of addition, for example), however
+// since reduction is inherently not-order-preserving there is no harm in reordering operations some more
+// and unrolling the loop so compiler will be able to use SIMD if sees it as possile (it often does).
+//
+// Why unrolling still fails with '-Ofast' which reduce conformance and allows reordering
+// of math operations is unclear, but it is how it happens when actually measured.
+//
+template <class T, T... inds, class F>
+constexpr void _unroll_impl(std::integer_sequence<T, inds...>, F&& f) {
+    (f(std::integral_constant<T, inds>{}), ...);
+}
+template <class T, T count, class F>
+constexpr void _unroll(F&& f) {
+    _unroll_impl(std::make_integer_sequence<T, count>{}, std::forward<F>(f));
+}
+
 // ===================
 // --- Thread pool ---
 // ===================
@@ -4351,7 +4381,8 @@ void task(Func&& func, Args&&... args) {
 }
 
 template <class Func, class... Args>
-auto task_with_future(Func&& func, Args&&... args) -> std::future<std::invoke_result_t<std::decay_t<Func>, std::decay_t<Args>...>> {
+auto task_with_future(Func&& func, Args&&... args)
+    -> std::future<std::invoke_result_t<std::decay_t<Func>, std::decay_t<Args>...>> {
     return static_thread_pool().add_task_with_future(std::forward<Func>(func), std::forward<Args>(args)...);
 }
 
@@ -4373,24 +4404,25 @@ constexpr std::size_t default_grains_per_thread = 4;
 
 template <class Idx>
 struct IndexRange {
-    Idx         first;
-    Idx         last;
-    std::size_t grain_size;
+    const Idx         first;
+    const Idx         last;
+    const std::size_t grain_size;
 
     IndexRange() = delete;
-    IndexRange(Idx first, Idx last, std::size_t grain_size) : first(first), last(last), grain_size(grain_size) {}
+    constexpr IndexRange(Idx first, Idx last, std::size_t grain_size)
+        : first(first), last(last), grain_size(grain_size) {}
     IndexRange(Idx first, Idx last)
         : IndexRange(first, last, _max_size(1, (last - first) / (get_thread_count() * default_grains_per_thread))){};
 };
 
 template <class Iter>
 struct Range {
-    Iter        begin;
-    Iter        end;
-    std::size_t grain_size;
+    const Iter        begin;
+    const Iter        end;
+    const std::size_t grain_size;
 
     Range() = delete;
-    Range(Iter begin, Iter end, std::size_t grain_size) : begin(begin), end(end), grain_size(grain_size) {}
+    constexpr Range(Iter begin, Iter end, std::size_t grain_size) : begin(begin), end(end), grain_size(grain_size) {}
     Range(Iter begin, Iter end)
         : Range(begin, end, _max_size(1, (end - begin) / (get_thread_count() * default_grains_per_thread))) {}
 
@@ -4450,7 +4482,9 @@ void for_loop(Container& container, Func&& func) {
 // --- 'Parallel reduce' API ---
 // =============================
 
-template <class Iter, class BinaryOp, class T = typename Iter::value_type>
+constexpr std::size_t default_unroll = 4;
+
+template <std::size_t unroll = default_unroll, class Iter, class BinaryOp, class T = typename Iter::value_type>
 auto reduce(Range<Iter> range, BinaryOp&& op) -> T {
 
     std::mutex result_mutex;
@@ -4459,16 +4493,39 @@ auto reduce(Range<Iter> range, BinaryOp&& op) -> T {
     // than doing so would be correct for some non-trivial 'T' and 'op'
 
     for_loop(Range<Iter>{range.begin + 1, range.end, range.grain_size}, [&](Iter low, Iter high) {
-        // (parallel section) Compute partial result
-        T partial_result = *low;
-        for (auto it = low + 1; it != high; ++it) partial_result = op(partial_result, *it);
+        // constexpr std::size_t unroll = 8; // size for the SIMD unroll
+        const std::size_t range_size = high - low;
 
-        // (critical section) Add partial result to the global one
-        const std::lock_guard<std::mutex> result_lock(result_mutex);
-        result = op(result, partial_result);
+        if (range_size < unroll) {
+            // (parallel section) Compute partial result
+            T partial_result = *low;
+            for (auto it = low + 1; it != high; ++it) partial_result = op(partial_result, *it);
+
+            // (critical section) Add partial result to the global one
+            const std::lock_guard<std::mutex> result_lock(result_mutex);
+            result = op(result, partial_result);
+        } else {
+            // (parallel section) Compute partial result (unrolled for SIMD)
+            // Reduce unrallable part
+            std::array<T, unroll> partial_results;
+            _unroll<std::size_t, unroll>([&](std::size_t j) { partial_results[j] = *(low + j); });
+            for (auto it = low + unroll; it < high; it += unroll)
+                _unroll<std::size_t, unroll>(
+                    [&](std::size_t j) { partial_results[j] = op(partial_results[j], *(it + j)); });
+            // Reduce emaining elements
+            for (auto it = high - range_size % unroll; it < high; ++it)
+                partial_results[0] = op(partial_results[0], *it);
+            // Collect the result
+            for (std::size_t i = 1; i < partial_results.size(); ++i)
+                partial_results[0] = op(partial_results[0], partial_results[i]);
+
+            // (critical section) Add partial result to the global one
+            const std::lock_guard<std::mutex> result_lock(result_mutex);
+            result = op(result, partial_results[0]);
+        }
     });
-    
-    // Note:
+
+    // Note 1:
     // We could also collect results into an array of partial results and then reduce it on the
     // main thread at the end, but that leads to a much less clean implementation and doesn't
     // seem to be measurably faster.
@@ -4476,14 +4533,14 @@ auto reduce(Range<Iter> range, BinaryOp&& op) -> T {
     return result;
 }
 
-template <class Container, class BinaryOp>
+template <std::size_t unroll = default_unroll, class Container, class BinaryOp>
 auto reduce(Container& container, BinaryOp&& op) -> typename Container::value_type {
-    return reduce(Range{container}, std::forward<BinaryOp>(op));
+    return reduce<unroll>(Range{container}, std::forward<BinaryOp>(op));
 }
 
-template <class Container, class BinaryOp>
+template <std::size_t unroll = default_unroll, class Container, class BinaryOp>
 auto reduce(const Container& container, BinaryOp&& op) -> typename Container::value_type {
-    return reduce(Range{container}, std::forward<BinaryOp>(op));
+    return reduce<unroll>(Range{container}, std::forward<BinaryOp>(op));
 }
 
 // --- Pre-defined binary ops ---

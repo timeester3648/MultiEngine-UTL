@@ -8,6 +8,7 @@ endmacro()
 
 add_utl_bencmark(benchmark_json)
 add_utl_bencmark(benchmark_log)
+add_utl_bencmark(benchmark_mvl)
 add_utl_bencmark(benchmark_parallel)
 add_utl_bencmark(benchmark_profiler)
 

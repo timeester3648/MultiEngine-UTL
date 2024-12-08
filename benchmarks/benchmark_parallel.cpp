@@ -2,8 +2,6 @@
 
 #include "benchmark.hpp"
 
-#include "module_mvl.hpp"
-#include "module_parallel.hpp"
 #include <cstddef>
 #include <functional>
 
@@ -199,10 +197,18 @@ void benchmark_sum() {
         sum_parallel_reduce = 0;
         sum_parallel_reduce = parallel::reduce(A, parallel::sum<double>());
     });
+    
+    // parallel::reduce()
+    double sum_parallel_reduce_1;
+    parallel::set_thread_count(thread_count);
+    benchmark("parallel::reduce<1>() (loop unrolling disabled)", [&]() {
+        sum_parallel_reduce_1 = 0;
+        sum_parallel_reduce_1 = parallel::reduce<1>(A, parallel::sum<double>());
+    });
 
     // Verify correctness
     log::println();
-    table::create({40, 20});
+    table::create({50, 20});
     table::hline();
     table::cell("Method", "Control sum");
     table::hline();
@@ -212,9 +218,10 @@ void benchmark_sum() {
 #endif
     table::cell("Naive std::async", sum_async);
     table::cell("parallel::reduce()", sum_parallel_reduce);
+    table::cell("parallel::reduce<1>() (loop unrolling disabled)", sum_parallel_reduce_1);
 }
 
 int main() {
-    //benchmark_sum();
+    benchmark_sum();
     //benchmark_matrix_multiplication();
 }

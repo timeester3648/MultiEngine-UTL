@@ -2,7 +2,6 @@
 
 #include "benchmark.hpp"
 
-#include "module_log.hpp"
 #include <chrono>
 #include <climits>
 #include <fstream>

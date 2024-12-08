@@ -311,6 +311,8 @@ Overloads **(2)** and **(3)** construct range spanning `container.begin()` to `c
 
 **Note 2:** Be wary of passing binary operations as function pointers since that makes inlining more difficult. Lambdas and functor-classes don't experience the same issue, see [pre-defined binary operations](#pre-defined-binary-operations).
 
+**Note 3:** It is not unusual to see super-linear speedup since `parallel::reduce()` unrolls reduction loops for SIMD.
+
 #### Pre-defined binary operations
 
 ```cpp
@@ -418,7 +420,7 @@ assert( subrange_sum == (5'000'000 - 100) * 2 );
 
 While `utl::parallel` does not claim to provide superior performance to complex vendor-optimized libraries such as [OpenMP](https://en.wikipedia.org/wiki/OpenMP), [Intel TBB](https://github.com/uxlfoundation/oneTBB), [MPI](https://www.open-mpi.org) and etc., it provides a significant boost in both speed and convenience relative to the explicit use of [std::async](https://en.cppreference.com/w/cpp/thread/async) and [std::thread](https://en.cppreference.com/w/cpp/thread/thread) due to its ability to reuse threads and automatically distribute workload.
 
-Below are some of the [benchmarks](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/benchmarks/benchmark_parallel.cpp) comparing performance of different approaches on basic tasks:
+Below are some of the [benchmarks](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/benchmarks/benchmark_parallel.cpp) comparing performance of different approaches on basic tasks using:
 
 ```
 ====== BENCHMARKING ON: Parallel vector sum ======
@@ -432,15 +434,16 @@ Data memory usage -> 190.73486328125 MiB
 |   100.0% |               18.86 |               53.03 |    2.1% |      2.34 | `Serial version`
 |   380.0% |                4.96 |              201.53 |    0.1% |      0.61 | `OpenMP reduce`
 |   288.2% |                6.54 |              152.83 |    1.1% |      0.88 | `Naive std::async()`
-|   378.3% |                4.99 |              200.59 |    0.1% |      0.61 | `parallel::reduce()`
+|   441.8% |                4.18 |              239.40 |    0.5% |      0.51 | `parallel::reduce()`
+|   366.8% |                5.03 |              198.80 |    0.2% |      0.61 | `parallel::reduce<1>() (loop unrolling disabled)`
 
-|----------------------------------------|--------------------|
-|                                  Method|         Control sum|
-|----------------------------------------|--------------------|
-|                                  Serial|         2.50000e+07|
-|                           OpenMP reduce|         2.50000e+07|
-|                        Naive std::async|         2.50000e+07|
-|                      parallel::reduce()|         2.50000e+07|
+|--------------------------------------------------|--------------------|
+|                                            Method|         Control sum|
+|--------------------------------------------------|--------------------|
+|                                            Serial|         2.50000e+07|
+|                                  Naive std::async|         2.50000e+07|
+|                                parallel::reduce()|         2.50000e+07|
+|   parallel::reduce<1>() (loop unrolling disabled)|         2.50000e+07|
 
 
 ====== BENCHMARKING ON: Repeated matrix multiplication ======
@@ -474,4 +477,6 @@ Data memory usage -> 8.23974609375 MiB
 //
 // Note 3: Speedup over 4x can happens on small matrices (like here)
 //         due to utilization of muliple cache lines in a distributed case.
+//         In case of reductions it is cause by SIMD unrolling, a version
+//         with no unrolling performs similarly to OpenMP.
 ```
