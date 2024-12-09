@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <functional>
+#include <vector>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -133,8 +134,8 @@ void benchmark_matrix_multiplication() {
 }
 
 void benchmark_sum() {
-    constexpr std::size_t N            = 25'000'000; // should be divisible by 'worker_count'
-    constexpr std::size_t thread_count = 4;
+    constexpr std::size_t N            = 30'000'000; // should be divisible by 'worker_count'
+    constexpr std::size_t thread_count = 7;
     
     log::println("\n\n====== BENCHMARKING ON: Parallel vector sum ======\n");
     log::println("Threads           -> ", thread_count);
@@ -195,7 +196,7 @@ void benchmark_sum() {
     parallel::set_thread_count(thread_count);
     benchmark("parallel::reduce()", [&]() {
         sum_parallel_reduce = 0;
-        sum_parallel_reduce = parallel::reduce(A, parallel::sum<double>());
+        sum_parallel_reduce = parallel::reduce<7>(A, parallel::sum<double>());
     });
     
     // parallel::reduce()
@@ -205,10 +206,11 @@ void benchmark_sum() {
         sum_parallel_reduce_1 = 0;
         sum_parallel_reduce_1 = parallel::reduce<1>(A, parallel::sum<double>());
     });
-
+    
     // Verify correctness
     log::println();
     table::create({50, 20});
+    table::set_formats({table::DEFAULT(), table::FIXED(10)});
     table::hline();
     table::cell("Method", "Control sum");
     table::hline();

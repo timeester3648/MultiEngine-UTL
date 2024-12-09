@@ -8,10 +8,6 @@
 //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-#include <memory>
-#include <sys/cdefs.h>
-#include <utility>
-#include <vector>
 #if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_PARALLEL)
 #ifndef UTLHEADERGUARD_PARALLEL
 #define UTLHEADERGUARD_PARALLEL
@@ -21,16 +17,21 @@
 #include <condition_variable> // condition_variable
 #include <cstddef>            // size_t
 #include <functional>         // bind()
-#include <future>             // future
-#include <mutex>              // mutex, recursive_mutex
+#include <future>             // future<>, packaged_task<>
+#include <mutex>              // mutex, recursive_mutex, lock_guard<>, unique_lock<>
 #include <queue>              // queue<>
 #include <thread>             // thread
-#include <type_traits>
+#include <type_traits>        // decay_t<>, invoke_result_t<>
+#include <utility>            // forward<>()
+#include <vector>             // vector
 
 // ____________________ DEVELOPER DOCS ____________________
 
 // In C++20 'std::jthread' can be used to simplify code a bit, no reason not to do so.
-// #include "module_log.hpp"
+//
+// In C++20 '_unroll<>()' template can be improved to take index as a template-lambda-explicit-argument
+// rather than a regular arg, ensuring its constexpr'ness. This may lead to a slight performance boost
+// as truly manual unrolling seems to be slightly faster than automatic one.
 
 // ____________________ IMPLEMENTATION ____________________
 
@@ -52,6 +53,16 @@ std::size_t max_thread_count() {
 constexpr std::size_t _min_size(std::size_t a, std::size_t b) noexcept { return (b < a) ? b : a; }
 constexpr std::size_t _max_size(std::size_t a, std::size_t b) noexcept { return (b < a) ? a : b; }
 
+// We REALLY don't want compiler to mess up inlining of binary operations or unrolling template
+// since that alone can tank the performance so we force inlining just to be sure
+#if defined(_MSC_VER) || defined(_MSC_FULL_VER)
+#define utl_parallel_force_inline __forceinline
+#elif defined(__GNUC__) || defined(__clang__) || defined(__INTEL_COMPILER)
+#define utl_parallel_force_inline __attribute__((always_inline))
+#else
+#define utl_parallel_force_inline
+#endif
+
 // Template for automatic loop unrolling.
 //
 // It is used in 'parallel::reduce()' to speed up a tight loop while
@@ -63,7 +74,7 @@ constexpr std::size_t _max_size(std::size_t a, std::size_t b) noexcept { return 
 // like a reasonable sweetspot for most machines. We use 4 as a less intrusive option.
 //
 // One may think that it is a job of compiler to perform such optimizations, yet even with
-// '-Ofast -funroll-all-loop' and GCC unroll pragmas it fails to do them reliably.
+// GCC '-Ofast -funroll-all-loop' and GCC unroll pragmas it fails to do them reliably.
 //
 // The reason it fails to do so is pretty clear for '-O2' and below - strictly speaking, most binary
 // operations on floats are non-commutative (sum depends on the order of addition, for example), however
@@ -73,12 +84,12 @@ constexpr std::size_t _max_size(std::size_t a, std::size_t b) noexcept { return 
 // Why unrolling still fails with '-Ofast' which reduce conformance and allows reordering
 // of math operations is unclear, but it is how it happens when actually measured.
 //
-template <class T, T... inds, class F>
-constexpr void _unroll_impl(std::integer_sequence<T, inds...>, F&& f) {
-    (f(std::integral_constant<T, inds>{}), ...);
+template <class T, T... indeces, class F>
+utl_parallel_force_inline constexpr void _unroll_impl(std::integer_sequence<T, indeces...>, F&& f) {
+    (f(std::integral_constant<T, indeces>{}), ...);
 }
 template <class T, T count, class F>
-constexpr void _unroll(F&& f) {
+utl_parallel_force_inline constexpr void _unroll(F&& f) {
     _unroll_impl(std::make_integer_sequence<T, count>{}, std::forward<F>(f));
 }
 
@@ -321,9 +332,9 @@ constexpr std::size_t default_grains_per_thread = 4;
 
 template <class Idx>
 struct IndexRange {
-    const Idx         first;
-    const Idx         last;
-    const std::size_t grain_size;
+    Idx         first;
+    Idx         last;
+    std::size_t grain_size;
 
     IndexRange() = delete;
     constexpr IndexRange(Idx first, Idx last, std::size_t grain_size)
@@ -334,9 +345,9 @@ struct IndexRange {
 
 template <class Iter>
 struct Range {
-    const Iter        begin;
-    const Iter        end;
-    const std::size_t grain_size;
+    Iter        begin;
+    Iter        end;
+    std::size_t grain_size;
 
     Range() = delete;
     constexpr Range(Iter begin, Iter end, std::size_t grain_size) : begin(begin), end(end), grain_size(grain_size) {}
@@ -378,7 +389,7 @@ void for_loop(IndexRange<Idx> range, Func&& func) {
 template <class Iter, class Func>
 void for_loop(Range<Iter> range, Func&& func) {
     for (Iter i = range.begin; i < range.end; i += range.grain_size)
-        task(std::forward<Func>(func), i, i + _min_size(range.grain_size, static_cast<int>(range.end - i)));
+        task(std::forward<Func>(func), i, i + _min_size(range.grain_size, range.end - i));
 
     wait_for_tasks();
 }
@@ -410,42 +421,51 @@ auto reduce(Range<Iter> range, BinaryOp&& op) -> T {
     // than doing so would be correct for some non-trivial 'T' and 'op'
 
     for_loop(Range<Iter>{range.begin + 1, range.end, range.grain_size}, [&](Iter low, Iter high) {
-        // constexpr std::size_t unroll = 8; // size for the SIMD unroll
         const std::size_t range_size = high - low;
 
-        if (range_size < unroll) {
-            // (parallel section) Compute partial result
-            T partial_result = *low;
-            for (auto it = low + 1; it != high; ++it) partial_result = op(partial_result, *it);
+        // Execute unrolled loop if unrolling is enabled and the range is sufficiently large
+        if constexpr (unroll > 1)
+            if (range_size > unroll) {
+                // (parallel section) Compute partial result (unrolled for SIMD)
+                // Reduce unrollable part
+                std::array<T, unroll> partial_results;
+                _unroll<std::size_t, unroll>([&](std::size_t j) { partial_results[j] = *(low + j); });
+                Iter it = low + unroll;
+                for (; it < high - unroll; it += unroll)
+                    _unroll<std::size_t, unroll>(
+                        [&, it](std::size_t j) { partial_results[j] = op(partial_results[j], *(it + j)); });
+                // Reduce remaining elements
+                for (; it < high; ++it)
+                    partial_results[0] = op(partial_results[0], *it);
+                // Collect the result
+                for (std::size_t i = 1; i < partial_results.size(); ++i)
+                    partial_results[0] = op(partial_results[0], partial_results[i]);
 
-            // (critical section) Add partial result to the global one
-            const std::lock_guard<std::mutex> result_lock(result_mutex);
-            result = op(result, partial_result);
-        } else {
-            // (parallel section) Compute partial result (unrolled for SIMD)
-            // Reduce unrallable part
-            std::array<T, unroll> partial_results;
-            _unroll<std::size_t, unroll>([&](std::size_t j) { partial_results[j] = *(low + j); });
-            for (auto it = low + unroll; it < high; it += unroll)
-                _unroll<std::size_t, unroll>(
-                    [&](std::size_t j) { partial_results[j] = op(partial_results[j], *(it + j)); });
-            // Reduce emaining elements
-            for (auto it = high - range_size % unroll; it < high; ++it)
-                partial_results[0] = op(partial_results[0], *it);
-            // Collect the result
-            for (std::size_t i = 1; i < partial_results.size(); ++i)
-                partial_results[0] = op(partial_results[0], partial_results[i]);
+                // (critical section) Add partial result to the global one
+                const std::lock_guard<std::mutex> result_lock(result_mutex);
+                result = op(result, partial_results[0]);
 
-            // (critical section) Add partial result to the global one
-            const std::lock_guard<std::mutex> result_lock(result_mutex);
-            result = op(result, partial_results[0]);
-        }
+                return; // skip the non-unrolled version
+            }
+
+        // Fallback onto a regular reduction loop otherwise
+        // (parallel section) Compute partial result
+        T partial_result = *low;
+        for (auto it = low + 1; it != high; ++it) partial_result = op(partial_result, *it);
+
+        // (critical section) Add partial result to the global one
+        const std::lock_guard<std::mutex> result_lock(result_mutex);
+        result = op(result, partial_result);
     });
 
     // Note 1:
     // We could also collect results into an array of partial results and then reduce it on the
     // main thread at the end, but that leads to a much less clean implementation and doesn't
     // seem to be measurably faster.
+
+    // Note 2:
+    // 'if constexpr (unroll > 1)' ensures that unrolling logic will have no effect
+    //  whatsoever on the non-unrolled version of the template, it will not even compile.
 
     return result;
 }
@@ -470,17 +490,7 @@ auto reduce(const Container& container, BinaryOp&& op) -> typename Container::va
 //    binary op is 'struct sum' => speedup ~370%
 // This is caused by failed inlining and seems to be the reason why standard library implements
 // 'std::plus' as a functor class and not a free-standing function. I spent 2 hours of my life
-// and 4 rewrites of 'parallel::reduce()' on this.
-
-// We REALLY don't want compiler to mess up inlining of binary operations since
-// that alone can tank the performance so we force inlining just to be sure
-#if defined(_MSC_VER) || defined(_MSC_FULL_VER)
-#define utl_parallel_force_inline __forceinline
-#elif defined(__GNUC__) || defined(__clang__) || defined(__INTEL_COMPILER)
-#define utl_parallel_force_inline __attribute__((always_inline))
-#else
-#define utl_parallel_force_inline
-#endif
+// and 4 rewrites of 'parallel::reduce()' on this. Force-inline just to be sure.
 
 template <class T>
 struct sum {

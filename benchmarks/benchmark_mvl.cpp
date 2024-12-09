@@ -55,6 +55,12 @@ double sum_regular(const std::vector<double>& vec) {
     return s;
 }
 
+double sum_raw_ptr(const double* vec, std::size_t N) {
+    double s = 0;
+    for (std::size_t i = 0; i < N; ++i) s += vec[i];
+    return s;
+}
+
 #define UNROLL(j_) s1 += vec[i + j_]
 
 double sum_unroll_2(const std::vector<double>& vec) {
@@ -218,6 +224,13 @@ void benchmark_simd_unrolling() {
     benchmark("sum_regular", [&] {
         sum = 0;
         sum += sum_regular(vec);
+    });
+    
+    log::println(sum);
+    
+    benchmark("sum_raw_ptr", [&] {
+        sum = 0;
+        sum += sum_raw_ptr(vec.data(), vec.size());
     });
     
     log::println(sum);
