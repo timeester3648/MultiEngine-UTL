@@ -410,7 +410,7 @@ void for_loop(Container& container, Func&& func) {
 // --- 'Parallel reduce' API ---
 // =============================
 
-constexpr std::size_t default_unroll = 4;
+constexpr std::size_t default_unroll = 1;
 
 template <std::size_t unroll = default_unroll, class Iter, class BinaryOp, class T = typename Iter::value_type>
 auto reduce(Range<Iter> range, BinaryOp&& op) -> T {

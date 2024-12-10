@@ -599,10 +599,10 @@ TEST_CASE("Col-major ordering and transposition behave as expected") {
             {4, 5,  6,  7},
             {8, 9, 10, 11}
         };
-        
+
         // TEMP:
         // Commented out while writing ctors
-        
+
         // col-major -> row-major
         mvl::Matrix<int, mvl::Checking::NONE, mvl::Layout::RC> row_matrix(initial_col_matrix);
         // row-major -> col-major
@@ -741,14 +741,14 @@ TEST_CASE("Matrix block subview case") {
 
     // Check other block views on the original matrix
     CHECK_MATRIX(matrix.row(3), {
-                                 {19, 0, 0, 22, 23, 0}
+                                    {19, 0, 0, 22, 23, 0}
     });
 
     CHECK_MATRIX(matrix.col(2), {
-                                 {3},  //
-                                 {0},  //
-                                 {15}, //
-                                 {0},  //
-                                 {27}  //
-                             });
+                                    {3},  //
+                                    {0},  //
+                                    {15}, //
+                                    {0},  //
+                                    {27}  //
+                                });
 }

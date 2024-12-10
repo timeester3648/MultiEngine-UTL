@@ -61,6 +61,11 @@ constexpr std::string_view standard_name;
 
 constexpr bool debug;
 
+// Optimization macros
+#define UTL_PREDEF_FORCE_INLINE
+#define UTL_PREDEF_ASSUME
+[[noreturn]] void unreachable();
+
 // Other utils
 std::string compilation_summary();
 
@@ -193,6 +198,36 @@ Defined when compiling in debug mode. Works as an alias for `_DEBUG`, provided f
 `constexpr` bool that evaluates to `true` when compiling in debug mode.
 
 This is useful for `if constexpr` conditional compilation of debug code.
+
+### Optimization macros
+
+```cpp
+#define UTL_PREDEF_FORCE_INLINE
+```
+
+Hints (`MSVC`) or forces (`GCC`, `clang` and `ICX`) function inlining using compiler built-ins.
+
+**Note**: Compiles to nothing if there is no suitable compiler support.
+
+```cpp
+#define UTL_PREDEF_ASSUME(condition)
+```
+
+Equivalent to [C++23 `[[assume(condition)]]`](https://en.cppreference.com/w/cpp/language/attributes/assume) that supports earlier standards using `MSVC` and `clang` built-ins.
+
+Invokes undefined behavior in statement `condition` evaluates to false, which provides compiler with additional optimization opportunities since implementations may assume that undefined behavior can never happen and the statement always holds.
+
+**Note**: Compiles to nothing if there is no suitable compiler support.
+
+```cpp
+[[noreturn]] void unreachable();
+```
+
+Equivalent to [C++23 std::unreachable](https://en.cppreference.com/w/cpp/utility/unreachable) that supports earlier standards using `MSVC`, `clang` and `GCC` built-ins.
+
+Compiler implementation may use this to optimize impossible code branches away.
+
+**Note**: Compiles to nothing if there is no suitable compiler support.
 
 ### Other utils
 

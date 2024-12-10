@@ -12,7 +12,7 @@
 
 // _____________ BENCHMARK IMPLEMENTATION _____________
 
-// Benchmark for repeated parallel matrix multiplication
+// Benchmark for: repeated parallel matrix multiplication
 //    for (repeats) C += A * B;
 // assuming naive implementation.
 //
@@ -133,9 +133,14 @@ void benchmark_matrix_multiplication() {
     // Threadpool seems to perform ~acсording to the sensible expectations.
 }
 
+// Benchmark for: parallel vector sum
+//    for (repeats) C += A * B;
+//
+// We use control sum to verify the result.
+//
 void benchmark_sum() {
-    constexpr std::size_t N            = 30'000'000; // should be divisible by 'worker_count'
-    constexpr std::size_t thread_count = 7;
+    constexpr std::size_t N            = 50'000'000; // should be divisible by 'worker_count'
+    constexpr std::size_t thread_count = 4;
     
     log::println("\n\n====== BENCHMARKING ON: Parallel vector sum ======\n");
     log::println("Threads           -> ", thread_count);
@@ -196,15 +201,15 @@ void benchmark_sum() {
     parallel::set_thread_count(thread_count);
     benchmark("parallel::reduce()", [&]() {
         sum_parallel_reduce = 0;
-        sum_parallel_reduce = parallel::reduce<7>(A, parallel::sum<double>());
+        sum_parallel_reduce = parallel::reduce(A, parallel::sum<double>());
     });
     
     // parallel::reduce()
-    double sum_parallel_reduce_1;
+    double sum_parallel_reduce_unrolled;
     parallel::set_thread_count(thread_count);
-    benchmark("parallel::reduce<1>() (loop unrolling disabled)", [&]() {
-        sum_parallel_reduce_1 = 0;
-        sum_parallel_reduce_1 = parallel::reduce<1>(A, parallel::sum<double>());
+    benchmark("parallel::reduce<4>() (loop unrolling enabled)", [&]() {
+        sum_parallel_reduce_unrolled = 0;
+        sum_parallel_reduce_unrolled = parallel::reduce<4>(A, parallel::sum<double>());
     });
     
     // Verify correctness
@@ -220,7 +225,7 @@ void benchmark_sum() {
 #endif
     table::cell("Naive std::async", sum_async);
     table::cell("parallel::reduce()", sum_parallel_reduce);
-    table::cell("parallel::reduce<1>() (loop unrolling disabled)", sum_parallel_reduce_1);
+    table::cell("parallel::reduce<4>() (loop unrolling enabled))", sum_parallel_reduce_unrolled);
 }
 
 int main() {

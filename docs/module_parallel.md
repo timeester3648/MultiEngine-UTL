@@ -434,16 +434,16 @@ Data memory usage -> 190.73486328125 MiB
 |   100.0% |               18.86 |               53.03 |    2.1% |      2.34 | `Serial version`
 |   380.0% |                4.96 |              201.53 |    0.1% |      0.61 | `OpenMP reduce`
 |   288.2% |                6.54 |              152.83 |    1.1% |      0.88 | `Naive std::async()`
-|   441.8% |                4.18 |              239.40 |    0.5% |      0.51 | `parallel::reduce()`
-|   366.8% |                5.03 |              198.80 |    0.2% |      0.61 | `parallel::reduce<1>() (loop unrolling disabled)`
+|   373.5% |                9.99 |              100.13 |    0.2% |      1.22 | `parallel::reduce()`
+|   430.9% |                8.66 |              115.41 |    0.7% |      1.06 | `parallel::reduce<4>() (loop unrolling enabled)`
 
 |--------------------------------------------------|--------------------|
 |                                            Method|         Control sum|
 |--------------------------------------------------|--------------------|
-|                                            Serial|         2.50000e+07|
-|                                  Naive std::async|         2.50000e+07|
-|                                parallel::reduce()|         2.50000e+07|
-|   parallel::reduce<1>() (loop unrolling disabled)|         2.50000e+07|
+|                                            Serial| 50000000.0000000000|
+|                                  Naive std::async| 50000000.0000000000|
+|                                parallel::reduce()| 50000000.0000000000|
+|   parallel::reduce<4>() (loop unrolling enabled))| 50000000.0000000000|
 
 
 ====== BENCHMARKING ON: Repeated matrix multiplication ======
@@ -475,8 +475,8 @@ Data memory usage -> 8.23974609375 MiB
 //
 // Note 2: Not sure why OpenMP doesn't give as much speedup as expected.
 //
-// Note 3: Speedup over 4x can happens on small matrices (like here)
+// Note 3: Speedup over 4x can happen on small matrices (like in this measurement)
 //         due to utilization of muliple cache lines in a distributed case.
-//         In case of reductions it is cause by SIMD unrolling, a version
+//         In case of reductions it is caused by SIMD unrolling, a version
 //         with no unrolling performs similarly to OpenMP.
 ```

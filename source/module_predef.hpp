@@ -253,6 +253,37 @@ constexpr bool debug =
 #endif
     ;
 
+// ===========================
+// --- Optimization Macros ---
+// ===========================
+
+#if defined(UTL_PREDEF_COMPILER_IS_MSVC)
+#define UTL_PREDEF_FORCE_INLINE __forceinline
+#elif defined(UTL_PREDEF_COMPILER_IS_GCC) || defined(UTL_PREDEF_COMPILER_IS_CLANG) || defined(UTL_PREDEF_COMPILER_IS_CLANG)
+#define UTL_PREDEF_FORCE_INLINE __attribute__((always_inline))
+#else
+#define UTL_PREDEF_FORCE_INLINE
+#endif
+
+#if defined(UTL_PREDEF_STANDARD_IS_23_PLUS)
+#define UTL_PREDEF_ASSUME [[assume(__VA_ARGS__))]]
+#elif defined(UTL_PREDEF_COMPILER_IS_MSVC)
+__assume(__VA_ARGS__)
+#elif defined(UTL_PREDEF_COMPILER_IS_CLANG)
+__builtin_assume(__VA_ARGS__)
+#else // no equivalent GCC built-in
+#endif
+
+[[noreturn]] void unreachable() {
+#if defined(UTL_PREDEF_STANDARD_IS_23_PLUS)
+std::unreachable();
+#elif defined(UTL_PREDEF_COMPILER_IS_MSVC)
+__assume(false);
+#elif defined(UTL_PREDEF_COMPILER_IS_GCC) || defined(UTL_PREDEF_COMPILER_IS_CLANG)
+__builtin_unreachable();
+#endif
+}
+
 // ===================
 // --- Other Utils ---
 // ===================

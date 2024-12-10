@@ -2255,6 +2255,9 @@ template <typename IntType, std::enable_if_t<std::is_integral<IntType>::value, b
 //
 //    => [+] DIFFICULT, BUT WORKABLE, BEST APPROACH SO FAR
 
+// TEMP:
+#include "module_log.hpp"
+
 // ____________________ IMPLEMENTATION ____________________
 
 namespace utl::mvl {
@@ -2503,7 +2506,7 @@ struct SparseEntry2D {
 
 template <typename T>
 [[nodiscard]] bool _sparse_entry_2d_ordering(const SparseEntry2D<T>& left, const SparseEntry2D<T>& right) {
-    return (left.i < right.i) && (left.j < right.j);
+    return (left.i < right.i) || (left.j < right.j);
 }
 
 struct Index2D {
@@ -2514,7 +2517,7 @@ struct Index2D {
 };
 
 [[nodiscard]] inline bool _index_2d_sparse_ordering(const Index2D& l, const Index2D& r) noexcept {
-    return (l.i < r.i) && (l.j < r.j);
+    return (l.i < r.i) || (l.j < r.j);
 }
 
 // Shortcut template used to deduce type of '_data' based on ownership inside mixins
@@ -2552,6 +2555,17 @@ _utl_define_operator_support_type_trait(_supports_addition, +);
 _utl_define_operator_support_type_trait(_supports_multiplication, *);
 _utl_define_operator_support_type_trait(_supports_comparison, <);
 _utl_define_operator_support_type_trait(_supports_eq_comparison, ==);
+
+#define _utl_define_unary_operator_support_type_trait(trait_name_, operator_)                                          \
+    template <typename Type, typename = void>                                                                          \
+    struct trait_name_ : std::false_type {};                                                                           \
+                                                                                                                       \
+    template <typename Type>                                                                                           \
+    struct trait_name_<Type, std::void_t<decltype(operator_ std::declval<Type>())>> : std::true_type {};               \
+                                                                                                                       \
+    static_assert(true)
+
+_utl_define_unary_operator_support_type_trait(_supports_unary_minus, -);
 
 // =====================================
 // --- Boilerplate Generation Macros ---
@@ -3487,6 +3501,50 @@ public:
         return *this;
     }
 
+    // --- Linear Algebra ---
+    // ----------------------
+
+public: // MARK:
+    using owning_type = GenericTensor<self::value_type, self::params::dimension, self::params::type,
+                                      Ownership::CONTAINER, self::params::checking, self::params::layout>;
+
+    // _utl_reqs(_supports_unary_minus<value_type>::value)
+    // [[nodiscard]] owning_type operator-() const {
+    //     owning_type res = *this;
+    //     res.for_each([](reference elem){ elem = -elem; });
+    //     return res;
+    //     // NOTE: It is possible to optimize this by moving '*this' into res if 'self::params::ownership' is CONTAINER
+    //     // and '*this' is an r-value. For l-values we have to make a copy in any case. Doing this adds much more
+    //     // boilerplate so we'll leave this optimization for later. We would have to declare 3 implementations for
+    //     every
+    //     // operator:
+    //     //    (1) _reqs(lhs::ownership == CONTAINER) +   &-qualified   <- copies
+    //     //    (2) _reqs(lhs::ownership == CONTAINER) +  &&-qualified   <- reuses r-value
+    //     //    (3) _reqs(lhs::ownership != CONTAINER) + non-qualified   <- copies
+    //     // this holds the case for following operators:
+    //     //    unary -
+    //     //    unary +
+    //     //    +
+    //     //    -
+    //     //    *
+    //     //    .elementwise_product()
+    //     // We could avoid this all by using C++23 "deducing this" and just 'std::forward' this into the result,
+    //     // but such riches are currently beyond reasonable reach.
+    //     //
+    //     // Another way to avoid the need for boilerplate would be to use expression template, which is theoreticallu
+    //     // the optimal solution for performance, however it introduces a whole another layer of complexity
+    //     considering
+    //     // already extremely generic way tensors are handled.
+    //     //
+    //     // It seems however that we could just use non-member operators and forward 'lhs' as a usual argument.
+    // }
+    //
+    // _utl_reqs(_supports_addition<value_type>::value)
+    // [[nodiscard]] owning_type operator+() const {
+    //     owning_type res = *this;
+    //     res.for_each([](reference elem){ elem = -elem; });
+    // }
+
     // --- Constructors ---
     // --------------------
 
@@ -4064,6 +4122,171 @@ as_json_array(const GenericTensor<T, Dimension::MATRIX, type, ownership, checkin
 
 } // namespace format
 
+// ================================
+// --- Linear Algebra Operators ---
+// ================================
+
+// MARK:
+
+// Note 1:
+// Since operators are enclosed in the 'mvl::' namespace, they will not interfere with anything global,
+// they will only be considered for types defined in this namespace due to ADL.
+
+// Note 2:
+// We declare operators as non-members so we can take 1st argument as a forwarding reference.
+// In C++23 we could use "deducing this" and have them as members, but before that there is no
+// other way to reuse possibly r-value lhs arguments that can be moved instead of copying. At least
+// not without having to write 3 separate ref-qualified implementations which is a PITA.
+
+template <class Tensor, class OwningType = typename std::decay_t<Tensor>::owning_type>
+OwningType operator-(Tensor&& tensor) {
+    OwningType res = std::forward<Tensor>(tensor);
+    // if possible (aka tensor is an r-value and has a suitable move-constructor to move into 'OwningType')
+    // tensor will move rather than copy, which makes the whole operation much faster
+    res.for_each([](typename OwningType::reference elem) { elem = -elem; });
+    return res;
+}
+
+template <class LeftTensor, class RightTensor,
+          std::enable_if_t<LeftTensor::params::dimension == Dimension::MATRIX &&
+                               RightTensor::params::dimension == Dimension::MATRIX,
+                           bool> = true>
+[[nodiscard]] bool _check_tensor_extents(const LeftTensor& lhs, const RightTensor& rhs,
+                                         const char* operator_name) noexcept {
+    if (lhs.rows() != rhs.rows())
+        throw std::runtime_error(_stringify(operator_name, ": Incompatible matrix dimensions, lhs.rows() is ",
+                                            lhs.rows(), ", rhs.rows() is ", rhs.rows(), "."));
+    if (lhs.cols() != rhs.cols())
+        throw std::runtime_error(_stringify(operator_name, ": Incompatible matrix dimensions, lhs.cols() is ",
+                                            lhs.cols(), ", rhs.cols() is ", rhs.cols(), "."));
+}
+
+template <class LeftTensor, class RightTensor, class OwningType = typename std::decay_t<LeftTensor>::owning_type>
+OwningType operator-(LeftTensor&& lhs, RightTensor&& rhs) {
+    _check_tensor_extents(lhs, rhs, "Binary operator-");
+    OwningType res = std::forward<LeftTensor>(lhs);
+    res.for_each([](typename OwningType::reference elem) { elem = -elem; });
+    return res;
+}
+
+// Every binary operator is split into 4 implementations due to lhs/rhs sparsity.
+// We will use '+' as an example, but this holds true for any other operator.
+//
+// Note that in general case binary operators can't be assumed to be commutative,
+// which means we have to preserve the order of lhs/rhs.
+//
+// (1) dense + dense => dense
+//
+// Pseudocode:
+//    if (lhs is r-value) res = forward(lhs), res.for_each({ res(i, j) = res(i, j) + rhs(i, j)})
+//    else                res = forward(rhs), res.for_each({ res(i, j) = lhs(i, j) + res(i, j)})
+//
+// Regular dense addition with respect to r-value reuse. O(N^2).
+//
+// (2) dense + sparse => dense
+//
+// Pseudocode:
+//    res = forward(lhs), rhs.for_each({ res(i, j) = res(i, j) + rhs(i, j) })
+//
+// Sparse matrix merges into dense, r-value dense is reused. O(N).
+//
+// (3) sparse + dense => dense
+//
+// Pseudocode:
+//    res = forward(rhs), lhs.for_each({ res(i, j) = lhs(i, j) + res(i, j) }), O(N)
+//
+// Sparse matrix merges into dense, r-value dense is reused. O(N).
+//
+// (4) sparse + sparse => sparse
+//
+// Pseudocode:
+//    Iterate through the sorted coordinate lists while merging them into one,
+//    elements present in only one of the arrays get assigned,
+//    elements present in both arrays get added.
+//
+// Sparse matrices merge their sparsity patterns. O(N).
+
+// Functions that take 2 sparse entries with same indeces (this is assumed but not checked)
+// and return a sparse entry with the same indeces and value equal to 'op(left.value, right.value)'.
+//
+// Declaring these functions saves us from having to duplicate implementations of 'apply_binary_operator()'
+// for 1D and 2D sparse entries that have different number of constructor args. Instread, those cases will
+// be handled by '_sparse_entry_binary_op_result()' that is overloaded to work with both.
+//
+// 4x code duplication to ensure perfect forwaring is horrible , but it is less verbose and error-prone
+// than trying to figure out proper SFINAE restrictions.
+template <typename T>
+[[nodiscard]] SparseEntry2D<T> _sparse_entry_binary_op_result(SparseEntry2D<T>&& left, SparseEntry2D<T>&& right) {
+    return {left.i, left.j, std::move(left) + std::move(right)};
+}
+template <typename T>
+[[nodiscard]] SparseEntry2D<T> _sparse_entry_binary_op_result(const SparseEntry2D<T>& left, SparseEntry2D<T>&& right) {
+    return {left.i, left.j, left + std::move(right)};
+}
+template <typename T>
+[[nodiscard]] SparseEntry2D<T> _sparse_entry_binary_op_result(SparseEntry2D<T>&& left, const SparseEntry2D<T>& right) {
+    return {left.i, left.j, std::move(left) + right};
+}
+template <typename T>
+[[nodiscard]] SparseEntry2D<T> _sparse_entry_binary_op_result(const SparseEntry2D<T>& left,
+                                                              const SparseEntry2D<T>& right) {
+    return {left.i, left.j, left + right};
+}
+template <typename T>
+[[nodiscard]] SparseEntry1D<T> _sparse_entry_binary_op_result(SparseEntry1D<T>&& left, SparseEntry1D<T>&& right) {
+    return {left.i, std::move(left) + std::move(right)};
+}
+template <typename T>
+[[nodiscard]] SparseEntry1D<T> _sparse_entry_binary_op_result(const SparseEntry1D<T>& left, SparseEntry1D<T>&& right) {
+    return {left.i, left + std::move(right)};
+}
+template <typename T>
+[[nodiscard]] SparseEntry1D<T> _sparse_entry_binary_op_result(SparseEntry1D<T>&& left, const SparseEntry1D<T>& right) {
+    return {left.i, std::move(left) + right};
+}
+template <typename T>
+[[nodiscard]] SparseEntry1D<T> _sparse_entry_binary_op_result(const SparseEntry1D<T>& left,
+                                                              const SparseEntry1D<T>& right) {
+    return {left.i, left + right};
+}
+
+template <class SparseLHS, class SparseRHS, class DecayedLHS = typename std::decay_t<SparseLHS>>
+auto operator+(SparseLHS&& lhs, SparseRHS&& rhs) -> typename DecayedLHS::owning_type {
+    using sparse_entry_type = typename DecayedLHS::sparse_entry_type;
+    // using value_type        = typename DecayedLHS::value_type;
+    using owning_type       = typename DecayedLHS::owning_type;
+
+    std::vector<sparse_entry_type> res_triplets;
+    res_triplets.reserve(std::max(lhs.size(), rhs.size()));
+    // not enough when matrices have different sparsity patterns, but good enough for initial guess
+
+    std::size_t i = 0;
+    std::size_t j = 0;
+
+    // Merge sparsity patterns
+    while (i < lhs.size() && j < rhs.size()) {
+        // entry present only in lhs sparsity pattern
+        if (_sparse_entry_2d_ordering(lhs._data[i], rhs._data[j])) {
+            res_triplets.emplace_back(std::forward<sparse_entry_type>(lhs._data[i++]));
+        }
+        // entry present only in rhs sparsity pattern
+        else if (_sparse_entry_2d_ordering(rhs._data[j], lhs._data[i])) {
+            res_triplets.emplace_back(std::forward<sparse_entry_type>(rhs._data[j++]));
+        }
+        // entry present in both sparsity patterns
+        else {
+            res_triplets.emplace_back(
+                sparse_entry_type{lhs._data[i].i, lhs._data[i].j, lhs._data[i++].value + rhs._data[j++].value});
+        }
+    }
+    // Copy the rest of lhs (if needed)
+    while (i < lhs.size()) res_triplets.emplace_back(std::forward<sparse_entry_type>(lhs._data[i++]));
+    // Copy the rest of rhs (if needed)
+    while (j < rhs.size()) res_triplets.emplace_back(std::forward<sparse_entry_type>(rhs._data[j++]));
+
+    return owning_type(lhs.rows(), lhs.cols(), std::move(res_triplets));
+}
+
 // Clear out internal macros
 #undef _utl_define_operator_support_type_trait
 #undef _utl_template_arg_defs
@@ -4493,7 +4716,7 @@ void for_loop(Container& container, Func&& func) {
 // --- 'Parallel reduce' API ---
 // =============================
 
-constexpr std::size_t default_unroll = 4;
+constexpr std::size_t default_unroll = 1;
 
 template <std::size_t unroll = default_unroll, class Iter, class BinaryOp, class T = typename Iter::value_type>
 auto reduce(Range<Iter> range, BinaryOp&& op) -> T {

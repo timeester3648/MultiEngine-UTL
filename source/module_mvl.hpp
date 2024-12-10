@@ -100,6 +100,48 @@
 //    as missing immediately upon writing the whole name.
 //
 //    => [+] DIFFICULT, BUT WORKABLE, BEST APPROACH SO FAR
+//
+// NOTES ON ALGEBRAIC OPERATIONS:
+//
+// While it is certainly possible to implement all the necessary operators, especially if doing so in a "dumb"
+// way that takes everything by const reference and returns a copy, doing things in a "smart" way with perfect
+// forwarding and proper r-value reuse (which would reduce the number of copies in a chain of N operator from
+// N to 1) is absolutely horrific due to the necessity to SFINAE-restrict all implemenations. Doing this part
+// of the library would be both much cleaner and easier in C++20 (and C++23) with following features being the key:
+//    - C++20 concepts        - makes restricting operations much easier and cleaner than with SFINAE
+//    - C++23 Deducing 'this' - allows operators to perfectly forward '*this' which allows them to be declared as
+//                              member functions and not as free-standing ones, this considerably reduces the
+//                              room to mess things up by implementing improper operator restrictions.
+// An example and some key notes on how to properly handle perfect forwarding and operators is saved in one of
+// the backup snippets, but in the nutshell there are following points:
+//    1. All unary and binary operators ('-', '+', '*' and etc.) can benefit from reusing r-values and moving
+//       one of the arguments into the result rather than copy. This can only happen to CONTAINER args that
+//       correspond to the return type.
+//    2. Binary operators have following return types for different tensors:
+//       -  dense +  dense =>  dense      (complexity O(N^2))
+//       -  dense + sparse =>  dense      (complexity O(N)  )
+//       - sparse +  dense =>  dense      (complexity O(N)  )
+//       - sparse + sparse => sparse      (complexity O(N)  )
+//       return types inherit option arguments from the lhs and always have 'ownership == CONTAINER',
+//       while argument can be anything, including views. To implement the list above efficiently there
+//       is no other way but to make 4 separate implementation, tailored for each level of sparsity.
+//       Working snippet for 'sparse + sparse' and pseudocode for others can be found in backups.
+//    3. All binary operators can be written in a generic form like 'apply_binary_operator(A, B, op)'
+//       and specialized with operator functors froms std <functional>. All we need for individual
+//       operators is to figure out correct boilerplate with perfrect forwarding.
+//
+// NOTES ON SPAN:
+// 
+// We can easily implement Matlab-like API to take matrix blocks like this:
+//    matrix(Span{0, 10}, 4)
+// which would be equivalent to
+//    matrix.block(0, 4, 10, 1)
+// we only need a thin 'Span' POD with 2 members and a few overloads for 'operator()' that redirect span
+// to 'this->block(...)'
+//
+// NOTES ON NAMING:
+//
+// Macro naming is a bit of a mess as of now.
 
 // ____________________ IMPLEMENTATION ____________________
 
@@ -349,7 +391,7 @@ struct SparseEntry2D {
 
 template <typename T>
 [[nodiscard]] bool _sparse_entry_2d_ordering(const SparseEntry2D<T>& left, const SparseEntry2D<T>& right) {
-    return (left.i < right.i) && (left.j < right.j);
+    return (left.i < right.i) || (left.j < right.j);
 }
 
 struct Index2D {
@@ -360,7 +402,7 @@ struct Index2D {
 };
 
 [[nodiscard]] inline bool _index_2d_sparse_ordering(const Index2D& l, const Index2D& r) noexcept {
-    return (l.i < r.i) && (l.j < r.j);
+    return (l.i < r.i) || (l.j < r.j);
 }
 
 // Shortcut template used to deduce type of '_data' based on ownership inside mixins
@@ -398,6 +440,17 @@ _utl_define_operator_support_type_trait(_supports_addition, +);
 _utl_define_operator_support_type_trait(_supports_multiplication, *);
 _utl_define_operator_support_type_trait(_supports_comparison, <);
 _utl_define_operator_support_type_trait(_supports_eq_comparison, ==);
+
+#define _utl_define_unary_operator_support_type_trait(trait_name_, operator_)                                          \
+    template <typename Type, typename = void>                                                                          \
+    struct trait_name_ : std::false_type {};                                                                           \
+                                                                                                                       \
+    template <typename Type>                                                                                           \
+    struct trait_name_<Type, std::void_t<decltype(operator_ std::declval<Type>())>> : std::true_type {};               \
+                                                                                                                       \
+    static_assert(true)
+
+_utl_define_unary_operator_support_type_trait(_supports_unary_minus, -);
 
 // =====================================
 // --- Boilerplate Generation Macros ---
@@ -1912,6 +1965,7 @@ as_json_array(const GenericTensor<T, Dimension::MATRIX, type, ownership, checkin
 
 // Clear out internal macros
 #undef _utl_define_operator_support_type_trait
+#undef _utl_define_unary_operator_support_type_trait
 #undef _utl_template_arg_defs
 #undef _utl_template_arg_vals
 #undef _utl_require
