@@ -852,7 +852,7 @@ A generic function for applying binary operator `op` to all elements of the tens
 > template <class L, class R> owning_reflection operator*(const L& left, const R& right);
 > ```
 
-Returns the matrix product $res_{ij} = \sum\limits_{k = 1}^{N} left_{ik} right_{kj}$.
+Returns the matrix product $c_{ij} = \sum_{k = 1}^{N} a_{ik} b_{kj}$.
 
 Operator is only compiled if `value_type` of both tensors is the same and supports operators `+=` and `*`.
 
