@@ -254,12 +254,13 @@ constexpr bool debug =
     ;
 
 // ===========================
-// --- Optimization Macros ---
+// --- Optimization macros ---
 // ===========================
 
 #if defined(UTL_PREDEF_COMPILER_IS_MSVC)
 #define UTL_PREDEF_FORCE_INLINE __forceinline
-#elif defined(UTL_PREDEF_COMPILER_IS_GCC) || defined(UTL_PREDEF_COMPILER_IS_CLANG) || defined(UTL_PREDEF_COMPILER_IS_CLANG)
+#elif defined(UTL_PREDEF_COMPILER_IS_GCC) || defined(UTL_PREDEF_COMPILER_IS_CLANG) ||                                  \
+    defined(UTL_PREDEF_COMPILER_IS_CLANG)
 #define UTL_PREDEF_FORCE_INLINE __attribute__((always_inline))
 #else
 #define UTL_PREDEF_FORCE_INLINE
@@ -276,11 +277,11 @@ __builtin_assume(__VA_ARGS__)
 
 [[noreturn]] void unreachable() {
 #if defined(UTL_PREDEF_STANDARD_IS_23_PLUS)
-std::unreachable();
+    std::unreachable();
 #elif defined(UTL_PREDEF_COMPILER_IS_MSVC)
-__assume(false);
+    __assume(false);
 #elif defined(UTL_PREDEF_COMPILER_IS_GCC) || defined(UTL_PREDEF_COMPILER_IS_CLANG)
-__builtin_unreachable();
+    __builtin_unreachable();
 #endif
 }
 
@@ -362,30 +363,30 @@ inline void _split_enum_args(const char* va_args, std::string* strings, int coun
     inline std::string _strings[_count];                                                                               \
                                                                                                                        \
     inline std::string to_string(enum_name_ enum_val) {                                                                \
-        if (_strings[0].empty()) { utl::predef::_split_enum_args(#__VA_ARGS__, _strings, _count); }                             \
+        if (_strings[0].empty()) { utl::predef::_split_enum_args(#__VA_ARGS__, _strings, _count); }                    \
         return _strings[enum_val];                                                                                     \
     }                                                                                                                  \
                                                                                                                        \
     inline enum_name_ from_string(const std::string& enum_str) {                                                       \
-        if (_strings[0].empty()) { utl::predef::_split_enum_args(#__VA_ARGS__, _strings, _count); }                             \
+        if (_strings[0].empty()) { utl::predef::_split_enum_args(#__VA_ARGS__, _strings, _count); }                    \
         for (int i = 0; i < _count; ++i) {                                                                             \
             if (_strings[i] == enum_str) { return static_cast<enum_name_>(i); }                                        \
         }                                                                                                              \
         return _count;                                                                                                 \
     }                                                                                                                  \
     }
-// We declare namespace with enum inside to simulate enum-class while having '_strings' array
-// and 'to_string()', 'from_string()' methods bundled with it.
-//
-// To count number of enum elements we add fake '_count' value at the end, which ends up being enum size
-//
-// '_strings' is declared compile-time, but gets filled through lazy evaluation upon first
-// 'to_string()' or 'from_string()' call. To fill it we interpret #__VA_ARGS__ as a single string
-// with some comma-separated identifiers. Those identifiers get split by commas, trimmed from
-// whitespaces and added to '_strings'
-//
-// Upon further calls (enum -> string) conversion is done though taking '_strings[enum_val]',
-// while (string -> enum) conversion requires searching through '_strings' to find enum index
+    // We declare namespace with enum inside to simulate enum-class while having '_strings' array
+    // and 'to_string()', 'from_string()' methods bundled with it.
+    //
+    // To count number of enum elements we add fake '_count' value at the end, which ends up being enum size
+    //
+    // '_strings' is declared compile-time, but gets filled through lazy evaluation upon first
+    // 'to_string()' or 'from_string()' call. To fill it we interpret #__VA_ARGS__ as a single string
+    // with some comma-separated identifiers. Those identifiers get split by commas, trimmed from
+    // whitespaces and added to '_strings'
+    //
+    // Upon further calls (enum -> string) conversion is done though taking '_strings[enum_val]',
+    // while (string -> enum) conversion requires searching through '_strings' to find enum index
 
 #define UTL_PREDEF_IS_FUNCTION_DEFINED(function_name_, return_type_, ...)                                              \
     template <typename ReturnType, typename... ArgTypes>                                                               \

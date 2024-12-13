@@ -7,7 +7,7 @@ This file contains a rough road-map of planned features.
 ### Minimal task list
 
 Before migration following tasks are to be finished:
-- `utl::parallel` module
+- `utl::parallel` module **(done ✔)**
 - `utl::mvl` module (at least basic linear algebra ops & sparse matrix optimization)
 - `utl::log` documentation
 - Tidy-up the benchmarks (using standard `benchmark.hpp`)

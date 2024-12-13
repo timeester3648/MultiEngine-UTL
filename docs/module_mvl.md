@@ -94,6 +94,9 @@ class GenericTensor {
     using pointer         = T*;
     using const_pointer   = const T*;
     
+    using owning_reflection = GenericTensor<value_type, params::dimension, params::type,
+                                            Ownership::CONTAINER, params::checking, params::layout>;
+    
     // - Iterators -
     using               iterator;
     using       reverse_iterator;
@@ -279,7 +282,7 @@ class GenericTensor {
     GenericTensor(const GenericTensor<...>& other);
     
     // 'StridedMatrix' ctors (requires MATRIX && DENSE && CONTAINER)
-    explicit GenericTensor(size_type rows, size_type cols, size_type row_stride, size_type col_stride, const_reference value = value_type());
+    explicit GenericTensor(size_type rows, size_type cols, size_type row_stride, size_type col_stride,const_reference value = value_type());
     explicit GenericTensor(size_type rows, size_type cols, size_type row_stride, size_type col_stride, Callable<value_type(size_type, size_type)> init_func);
     explicit GenericTensor(size_type rows, size_type cols, size_type row_stride, size_type col_stride, pointer data_ptr);
     GenericTensor(std::initializer_list<std::initializer_list<value_type>> init_list, size_type row_stride, size_type col_stride);
@@ -310,6 +313,28 @@ namespace format {
     std::string as_json_array(const GenericTensor<Args...> &tensor);
 }
 
+// - Linear algebra operators -
+// Note:: In all operators below 'owning_reflection' is a shortcut for 'typename std::decay<L>::owning_reflection'
+
+// Unary operators
+template <class L> owning_reflection operator+(L&& left);
+template <class L> owning_reflection operator-(L&& left);
+
+template <class L, class Op> owning_reflection apply_unary_op(L&& left, Op&& op);
+
+// Binary operators
+template <class L, class R> owning_reflection           operator+(L&& left, R&& right);
+template <class L, class R> owning_reflection           operator-(L&& left, R&& right);
+template <class L, class R> owning_reflection elementwise_product(L&& left, R&& right);
+
+template <class L, class R> owning_reflection operator*(const L& left, const R& right);
+
+template <class L, class R, class Op> owning_reflection apply_binary_op(L&& left, R&& right, Op&& op);
+
+// Augmented assignment operators
+template <class L, class R> L& operator+=(L&& left, R&& right);
+template <class L, class R> L& operator-=(L&& left, R&& right);
+
 // - Typedefs -
 template <typename T, Checking checking = Checking::NONE, Layout layout = Layout::RC>
 using Matrix = GenericTensor<T, Dimension::MATRIX, Type::DENSE, Ownership::CONTAINER, checking, layout>;
@@ -327,8 +352,7 @@ template <typename T, Checking checking = Checking::NONE, Layout layout = Layout
 using StridedMatrixView = GenericTensor<T, Dimension::MATRIX, Type::STRIDED, Ownership::VIEW, checking, layout>;
 
 template <typename T, Checking checking = Checking::NONE, Layout layout = Layout::RC>
-using ConstStridedMatrixView =
-    GenericTensor<T, Dimension::MATRIX, Type::STRIDED, Ownership::CONST_VIEW, checking, layout>;
+using ConstStridedMatrixView = GenericTensor<T, Dimension::MATRIX, Type::STRIDED, Ownership::CONST_VIEW, checking, layout>;
 
 template <typename T, Checking checking = Checking::NONE>
 using SparseMatrix = GenericTensor<T, Dimension::MATRIX, Type::SPARSE, Ownership::CONTAINER, checking, Layout::SPARSE>;
@@ -337,8 +361,7 @@ template <typename T, Checking checking = Checking::NONE>
 using SparseMatrixView = GenericTensor<T, Dimension::MATRIX, Type::SPARSE, Ownership::VIEW, checking, Layout::SPARSE>;
 
 template <typename T, Checking checking = Checking::NONE>
-using ConstSparseMatrixView =
-    GenericTensor<T, Dimension::MATRIX, Type::SPARSE, Ownership::CONST_VIEW, checking, Layout::SPARSE>;
+using ConstSparseMatrixView = GenericTensor<T, Dimension::MATRIX, Type::SPARSE, Ownership::CONST_VIEW, checking, Layout::SPARSE>;
 ```
 
 > [!Note]
@@ -379,6 +402,21 @@ Useful for implementing templates over tensor types and conditional compilation 
 > ```
 
 A set of member types analogous to member types of [std::vector](https://en.cppreference.com/w/cpp/container/vector).
+
+> ```cpp
+> using owning_reflection = GenericTensor<value_type, params::dimension, params::type,
+>                                            Ownership::CONTAINER, params::checking, params::layout>;
+> ```
+
+Reflection of the tensor type with `ownership` set to `CONTAINER`.
+
+This is a return type of most algebraic operators, for example, addition `MatrixView<T> + MatrixView<T>` logically produces a `Matrix<T>`. See the table below for reference:
+
+| `GenericTensor`                                              | `GenericTensor::owning_reflection` |
+| ------------------------------------------------------------ | ---------------------------------- |
+| `Matrix<T>` or `MatrixView<T>` or `ConstMatrixView<T>`       | `Matrix<T>`                        |
+| `StridedMatrix<T>` or `StridedMatrixView<T>` or `ConstStridedMatrixView<T>` | `StridedMatrix<T>`                 |
+| `SparseMatrix<T>` or `SparseMatrixView<T>` or `ConstSparseMatrixView<T>` | `SparseMatrix<T>`                  |
 
 ### Iterators
 
@@ -757,6 +795,86 @@ Inserts given `triplets` into a sparse matrix.
 > ```
 
 Erases entries with given `indices` from the sparse matrix.
+
+### Linear algebra operators
+
+#### Unary operators
+
+> ```cpp
+> // Unary operators
+> template <class L> owning_reflection operator+(L&& left);
+> template <class L> owning_reflection operator-(L&& left);
+> ```
+
+Returns the result of applying unary operator `+` or `-` to all elements of the tensor `left`.
+
+Operators are only compiled if `value_type` of the tensor supports a corresponding unary operator.
+
+**Note:** Here and in all other methods of this section `owning_reflection` is a shortcut name for `typename std::decay<L>::owning_reflection`. This type represents the fact that while we can perform algebraic operations on matrix views, the resulting matrix will be a proper "owning" one.
+
+> ```cpp
+> template <class L, class Op> owning_reflection apply_unary_op(L&& left, Op&& op);
+> ```
+
+A generic function for applying unary operator `op` to all elements of the tensor `left`.
+
+#### Binary operators
+
+> ```cpp
+> // Binary operators
+> template <class L, class R> owning_reflection           operator+(L&& left, R&& right);
+> template <class L, class R> owning_reflection           operator-(L&& left, R&& right);
+> template <class L, class R> owning_reflection elementwise_product(L&& left, R&& right);
+> ```
+
+Returns the result of applying binary operator `+`, `-` or `*` to all pairs of elements in `left` and `right` tensors.
+
+Operators are only compiled if `value_type` of both tensors is the same and supports a corresponding binary operator.
+
+**Note 1:** Both binary and unary operators will reuse [r-value](https://en.cppreference.com/w/cpp/language/value_category) arguments to avoid allocations if possible. This means that a long chain of operators like `A + B + C - (-D)` will usually only allocate once and then propagate that temporary throughout the chain, only computing the actual operations.
+
+**Note 2:** All operators are aware of matrix sparsity and will select appropriate implementations. Implementations have following time complexities:
+
+| Type of `L`          | Type of `R`          | Element-wise binary operator complexity |
+| -------------------- | -------------------- | --------------------------------------- |
+| `DENSE` or `STRIDED` | `DENSE` or `STRIDED` | $O(N^2)$                                |
+| `DENSE` or `STRIDED` | `SPARSE`             | $O(N)$                                  |
+| `SPARSE`             | `DENSE` or `STRIDED` | $O(N)$                                  |
+| `SPARSE`             | `SPARSE`             | $O(N)$                                  |
+
+> ```cpp
+> template <class L, class R, class Op> owning_reflection apply_binary_op(L&& left, R&& right, Op&& op);
+> ```
+
+A generic function for applying binary operator `op` to all elements of the tensor `left`.
+
+> ```cpp
+> template <class L, class R> owning_reflection operator*(const L& left, const R& right);
+> ```
+
+Returns the matrix product $res_{ij} = \sum\limits_{k = 1}^{N} left_{ik} right_{kj}$.
+
+Operator is only compiled if `value_type` of both tensors is the same and supports operators `+=` and `*`.
+
+**Note 1:** Matrix product is aware of matrix memory layout and will select the appropriate iteration order. [Loop tiling](https://en.wikipedia.org/wiki/Loop_nest_optimization) is used to improve cache efficiency at large sizes. It should be noted however that `mvl` is not a linear algebra library at its core and will be significantly outperformed by dedicated [BLAS](https://en.wikipedia.org/wiki/Basic_Linear_Algebra_Subprograms) routines in the task of number crunching.
+
+**Note 2:** Matrix product is aware of matrix sparsity and will select appropriate implementations. Implementations have following time complexities:
+
+| Type of `L`          | Type of `R`          | Matrix product complexity |
+| -------------------- | -------------------- | ------------------------- |
+| `DENSE` or `STRIDED` | `DENSE` or `STRIDED` | $O(N^3)$                  |
+| `DENSE` or `STRIDED` | `SPARSE`             | $O(N^2)$                  |
+| `SPARSE`             | `DENSE` or `STRIDED` | $O(N^2)$                  |
+| `SPARSE`             | `SPARSE`             | $O(N)$                    |
+
+#### Augmented assignment operators
+
+> ```cpp
+> // Augmented assignment operators
+> template <class L, class R> L& operator+=(L&& left, R&& right);
+> template <class L, class R> L& operator-=(L&& left, R&& right);
+
+**TODO:** This behaviour is not yet finalized, there are still some considerations to make.
 
 ### Tensor IO formats
 

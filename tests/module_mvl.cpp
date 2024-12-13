@@ -1,6 +1,7 @@
 // __________ TEST FRAMEWORK & LIBRARY  __________
 
 #include <cstddef>
+#include <functional>
 #include <numeric>
 #include <pstl/glue_execution_defs.h> // TODO: What is that? How did it get here?
 #include <type_traits>
@@ -751,4 +752,70 @@ TEST_CASE("Matrix block subview case") {
                                     {0},  //
                                     {27}  //
                                 });
+}
+
+struct substractable {
+    int val;
+    substractable operator-(const substractable& other) const {
+        return { this->val - other.val };
+    }
+};
+
+TEST_CASE("Testing algebraic operations") {
+    mvl::SparseMatrix<int> A(3, 3,
+                             {
+                                 {0, 0, 10},
+                                 {1, 1, 20},
+                                 {2, 2, 30}
+    });
+
+    const mvl::SparseMatrix<int> B(3, 3,
+                                   {
+                                       {0, 2, 3},
+                                       {1, 2, 6},
+                                       {2, 2, 9}
+    });
+
+    mvl::Matrix<int> C = {
+        {0, 2, 4}, //
+        {0, 6, 8}, //
+        {0, 0, 0}  //
+    };
+
+    const mvl::Matrix<int> D = {
+        {1, 0, 0}, //
+        {2, 0, 0}, //
+        {3, 2, 1}  //
+    };
+    
+    // Sparse / sparse operators
+    CHECK_MATRIX(A + B, {
+                            {10,  0,  3}, //
+                            { 0, 20,  6}, //
+                            { 0,  0, 39}, //
+    });
+    
+    CHECK_MATRIX(A.clone() += B, {
+                            {10,  0,  3}, //
+                            { 0, 20,  6}, //
+                            { 0,  0, 39}, //
+    });
+    
+    // Dense / dense & dense / sparse operators
+    CHECK_MATRIX(D + C + D + D - C + C + A, {
+                                                {13,  2,  4}, //
+                                                { 6, 26,  8}, //
+                                                { 9,  6, 33}, //
+    });
+    
+    // Dense / sparse & sparse / dense operators
+    CHECK_MATRIX(A + C + A, {
+                                                {20,  2,  4}, //
+                                                { 0, 46,  8}, //
+                                                { 0,  0, 60}, //
+    });
+ 
+    UTL_LOG_WARN("Before mathmul.");
+    CHECK_MATRIX(C * D, {{16, 8, 4}, {36, 16, 8}, {0, 0, 0}});
+    UTL_LOG_WARN("After mathmul.");
 }
