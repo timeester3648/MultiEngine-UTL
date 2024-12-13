@@ -115,9 +115,6 @@
 //
 // Macro naming is a bit of a mess as of now.
 
-// TEMP:
-#include "module_log.hpp"
-
 // ____________________ IMPLEMENTATION ____________________
 
 namespace utl::mvl {

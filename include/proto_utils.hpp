@@ -2269,9 +2269,6 @@ template <typename IntType, std::enable_if_t<std::is_integral<IntType>::value, b
 //
 // Macro naming is a bit of a mess as of now.
 
-// TEMP:
-#include "module_log.hpp"
-
 // ____________________ IMPLEMENTATION ____________________
 
 namespace utl::mvl {
@@ -4509,7 +4506,7 @@ L& operator+=(L&& left, R&& right) {
 template <class L, class R, _are_tensors_with_same_value_type_enable_if<L, R> = true,
           class value_type                               = typename std::decay_t<L>::value_type,
           _has_assignment_op_minus_enable_if<value_type> = true>
-auto operator-=(L&& left, R&& right) {
+L& operator-=(L&& left, R&& right) {
     return (left = std::move(left) - right);
 }
 

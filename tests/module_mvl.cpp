@@ -815,7 +815,5 @@ TEST_CASE("Testing algebraic operations") {
                                                 { 0,  0, 60}, //
     });
  
-    UTL_LOG_WARN("Before mathmul.");
     CHECK_MATRIX(C * D, {{16, 8, 4}, {36, 16, 8}, {0, 0, 0}});
-    UTL_LOG_WARN("After mathmul.");
 }
