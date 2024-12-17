@@ -10,6 +10,7 @@
 
 #include <cstddef>
 
+#include <sstream>
 #include <string>
 #include <utility>
 
@@ -25,6 +26,7 @@
 #include <chrono>        // steady_clock
 #include <fstream>       // ofstream
 #include <iostream>      // cout
+#include <list>          // list<>
 #include <mutex>         // lock_guard<>, mutex
 #include <ostream>       // ostream
 #include <stdexcept>     // std::runtime_error
@@ -34,7 +36,6 @@
 #include <type_traits>   // is_integral_v<>, is_floating_point_v<>, is_same_v<>, is_convertible_to_v<>
 #include <unordered_map> // unordered_map<>
 #include <vector>        // vector<>
-#include <list>          // list<>
 
 // ____________________ DEVELOPER DOCS ____________________
 
@@ -86,158 +87,120 @@ unsigned int _integer_digit_count(IntType value) {
     // Note: There is probably a faster way of doing it
 }
 
-template <typename T>
-constexpr int _log_10_ceil(T num) {
-    return num < 10 ? 1 : 1 + _log_10_ceil(num / 10);
-}
-
 using clock = std::chrono::steady_clock;
 
 using ms = std::chrono::microseconds;
 
 inline const clock::time_point _program_entry_time_point = clock::now();
 
-// Grows string by 'size_increase' and returns pointer to the old ending
-// in a possibly reallocated string. This function is used in multiple places
-// to expand string buffer before formatting a known amount of characters into it.
-// inline char* _grow_string(std::string& buffer, std::size_t size_increase) {
-//     const std::size_t old_buffer_size = buffer.size();
-//     buffer.resize(old_buffer_size + size_increase);
-//     return buffer.data() + old_buffer_size;
-// }
-
 // =======================
 // --- Stringification ---
 // =======================
 
-template <typename Type, typename = void, typename = void>
-struct is_iterable_through : std::false_type {};
+// --- Internal type traits ---
+// ----------------------------
 
-template <typename Type>
-struct is_iterable_through<Type, std::void_t<decltype(++std::declval<Type>().begin())>,
-                           std::void_t<decltype(std::declval<Type>().end())>> : std::true_type {};
+#define utl_log_define_trait(trait_name_, ...)                                                                         \
+    template <class T, class = void>                                                                                   \
+    struct trait_name_ : std::false_type {};                                                                           \
+                                                                                                                       \
+    template <class T>                                                                                                 \
+    struct trait_name_<T, std::void_t<decltype(__VA_ARGS__)>> : std::true_type {};                                     \
+                                                                                                                       \
+    template <class T>                                                                                                 \
+    constexpr bool trait_name_##_v = trait_name_<T>::value;
 
-template <typename Type, typename = void, typename = void>
-struct is_index_sequence_expandable : std::false_type {};
+utl_log_define_trait(_has_string_append, std::string() += std::declval<T>());
+utl_log_define_trait(_has_begin, ++std::declval<T>().begin());
+utl_log_define_trait(_has_end, ++std::declval<T>().end());
+utl_log_define_trait(_has_get, std::get<0>(std::declval<T>()));
+utl_log_define_trait(_has_tuple_size, std::tuple_size<T>::value);
+utl_log_define_trait(_has_ostream_insert, std::declval<std::ostream>() << std::declval<T>());
 
-template <typename Type>
-struct is_index_sequence_expandable<Type, std::void_t<decltype(std::get<0>(std::declval<Type>()))>,
-                                    std::void_t<decltype(std::tuple_size<Type>::value)>> : std::true_type {};
+#undef utl_log_define_trait
+
+// --- Internal utils ---
+// ----------------------
+
+template <class>
+inline constexpr bool _always_false_v = false;
+
+template <typename T>
+constexpr int _log_10_ceil(T num) {
+    return num < 10 ? 1 : 1 + _log_10_ceil(num / 10);
+}
+
+template <typename T>
+constexpr std::size_t _max_float_digits =
+    4 + std::numeric_limits<T>::max_digits10 + std::max(2, _log_10_ceil(std::numeric_limits<T>::max_exponent10));
+// should be the smallest buffer size to account for all possible 'std::to_chars()' outputs,
+// see [https://stackoverflow.com/questions/68472720/stdto-chars-minimal-floating-point-buffer-size]
+
+// --- Stringifiers ---
+// --------------------
 
 template <class T>
-constexpr bool is_stringified_as_integer_v =
-    std::is_integral_v<T> && !std::is_same_v<T, char> && !std::is_same_v<T, bool>;
+void append_stringified(std::string& str, const T& value);
 
-template <class T>
-constexpr bool is_stringified_as_float_v = std::is_floating_point_v<T>;
-
-template <class T>
-constexpr bool is_stringified_as_bool_v = std::is_same_v<T, bool>;
-
-template <class T>
-constexpr bool is_stringified_as_string_v = std::is_same_v<T, char> || std::is_convertible_v<T, std::string_view>;
-
-template <class T>
-constexpr bool is_stringified_as_string_convertible_v =
-    std::is_convertible_v<T, std::string> && !is_stringified_as_string_v<T>;
-// 'std::filesystem::path' can convert to 'std::string' but not to 'std::string_view', and if it gets
-// interpreted as an array nasty things will happen as the array tries to iterate over path entries.
-// Don't know any other types with this issue, but if they exist the workaround will be the same.
-
-template <class T>
-constexpr bool is_stringified_as_array_v =
-    is_iterable_through<T>::value && !is_stringified_as_string_v<T> && !is_stringified_as_string_convertible_v<T>;
-// 'std::string' and similar types are also iterable through, don't want to treat them as arrays
-
-template <class T>
-constexpr bool is_stringified_as_tuple_v = is_index_sequence_expandable<T>::value && !is_stringified_as_array_v<T>;
-// 'std::array<>' is both iterable and idx sequence expandable like a tuple, we don't want to treat it like tuple
+void _append_stringified_bool(std::string& str, bool value) { str += value ? "true" : "false"; }
 
 // Fast implementation for stringifying an integer and appending it to 'std::string'
-template <class Integer, std::enable_if_t<is_stringified_as_integer_v<Integer>, bool> = true>
-void append_stringified(std::string& str, Integer value) {
+template <class T>
+void _append_stringified_integer(std::string& str, T value) {
 
     // Note:
     // We could count the digits of 'value', preallocate buffer for exactly however many characters
     // we need and format directly to it, however benchmarks showed that it is actually inferior to
     // just doing things the usual way with a stack-allocated middle-man buffer.
-
-    if (value == 0) { // 'std::to_chars' converts 0 to "" due to skipping leading zeroes, we want "0" instead
-        str += '0';
-        return;
-    }
-
-    std::array<char, std::numeric_limits<Integer>::digits10> buffer;
+    std::array<char, std::numeric_limits<T>::digits10> buffer;
     const auto [number_end_ptr, error_code] = std::to_chars(buffer.data(), buffer.data() + buffer.size(), value);
 
     if (error_code != std::errc())
         throw std::runtime_error(
-            "stringify_integer() encountered std::to_chars() formatting error while serializing a value.");
+            "Integer stringification encountered std::to_chars() formatting error while serializing a value.");
 
     str.append(buffer.data(), number_end_ptr - buffer.data());
 }
 
 // Fast implementation for stringifying a float and appending it to 'std::string'
-template <class Float, std::enable_if_t<is_stringified_as_float_v<Float>, bool> = true>
-void append_stringified(std::string& str, Float value) {
-
-    constexpr int max_exponent = std::numeric_limits<Float>::max_exponent10;
-    constexpr int max_digits   = 4 + std::numeric_limits<Float>::max_digits10 + std::max(2, _log_10_ceil(max_exponent));
-    // should be the smallest buffer size to account for all possible 'std::to_chars()' outputs,
-    // see [https://stackoverflow.com/questions/68472720/stdto-chars-minimal-floating-point-buffer-size]
-
-    std::array<char, max_digits> buffer;
+template <class T>
+void _append_stringified_float(std::string& str, T value) {
+    std::array<char, _max_float_digits<T>> buffer;
     const auto [number_end_ptr, error_code] = std::to_chars(buffer.data(), buffer.data() + buffer.size(), value);
 
     if (error_code != std::errc())
         throw std::runtime_error(
-            "stringify_integer() encountered std::to_chars() formatting error while serializing a value.");
+            "Float stringification encountered std::to_chars() formatting error while serializing a value.");
 
     str.append(buffer.data(), number_end_ptr - buffer.data());
 }
 
-template <class Bool, std::enable_if_t<is_stringified_as_bool_v<Bool>, bool> = true>
-void append_stringified(std::string& str, Bool value) {
-    str += value ? "true" : "false";
-}
-
-// Note that 'Stringlike' includes 'char' because the only thing we care
-// about is being able to append the value directly with 'std::string::operator+='
-template <class Stringlike, std::enable_if_t<is_stringified_as_string_v<Stringlike>, bool> = true>
-void append_stringified(std::string& str, const Stringlike& value) {
+template <class T>
+void _append_stringified_stringlike(std::string& str, const T& value) {
     str += value;
+    // 'std::string' has operator '+=' for following types:
+    // 1) 'const std::string&'
+    // 2) char-like (includes all integral types)
+    // 3) 'std::string_view'-convertible
 }
 
-template <class StringConvertible,
-          std::enable_if_t<is_stringified_as_string_convertible_v<StringConvertible>, bool> = true>
-void append_stringified(std::string& str, const StringConvertible& value) {
+template <class T>
+void _append_stringified_string_convertible(std::string& str, const T& value) {
     str += std::string(value);
 }
 
-// Tuple stringification relies on variadic template over the index sequence, but such template
-// cannot have default arguments like 'enable_if_t<...> = true' at the end, preventing us from
-// doing the usual SFINAE.
-//
-// We can SFINAE in a wrapper method 'append_stringified()' and make variadic implementation a separate function,
-// avoiding all issues. This is canonical to how 'std::integer_sequence' is usually used, see cppreference:
-// https://en.cppreference.com/w/cpp/utility/integer_sequence.
-//
-// Due to recursive 'append_stringified()' calls during tuple and array stringification,
-// to be able to handle nested tuples & arrays we need to satisfy following relations:
-//      'append_stringified(tuple)'             -> knows '_append_stringified_tuple_impl(tuple)'
-//     '_append_stringified_tuple_impl(tuple)'  -> knows  'append_stringified(array)' and 'append_stringified(tuple)'
-//      'append_stringified(array)'             -> knows  'append_stringified(tuple)'
-// which is why we predeclare all the necessary 'append_stringified()' and then have the impl.
+template <class T>
+void _append_stringified_array(std::string& str, const T& value) {
+    str += "{ ";
+    if (value.begin() != value.end())
+        for (auto it = value.begin();;) {
+            append_stringified(str, *it);
+            if (++it == value.end()) break; // prevents trailing comma
+            str += ", ";
+        }
+    str += " }";
+}
 
-// Predeclare
-template <class Arraylike, std::enable_if_t<is_stringified_as_array_v<Arraylike>, bool> = true>
-void append_stringified(std::string& str, const Arraylike& value);
-
-template <template <typename... Params> class Tuplelike, typename... Args,
-          std::enable_if_t<is_stringified_as_tuple_v<Tuplelike<Args...>>, bool> = true>
-void append_stringified(std::string& str, const Tuplelike<Args...>& value);
-
-// Implement
 template <class Tuplelike, std::size_t... Idx>
 void _append_stringified_tuple_impl(std::string& str, Tuplelike value, std::index_sequence<Idx...>) {
     ((Idx == 0 ? "" : str += ", ", append_stringified(str, std::get<Idx>(value))), ...);
@@ -245,29 +208,52 @@ void _append_stringified_tuple_impl(std::string& str, Tuplelike value, std::inde
     // in the same fashion, we can fold over 2 functions by doing '( ( f(args), g(args) ), ... )'
 }
 
-template <class Arraylike, std::enable_if_t<is_stringified_as_array_v<Arraylike>, bool>>
-void append_stringified(std::string& str, const Arraylike& value) {
-    str += "{ ";
-    for (auto it = value.begin();;) {
-        append_stringified(str, *it);
-        if (++it != value.end()) str += ", "; // prevents trailing comma
-        else break;
-    }
-    str += " }";
-}
-
-template <template <typename...> class Tuplelike, typename... Args,
-          std::enable_if_t<is_stringified_as_tuple_v<Tuplelike<Args...>>, bool>>
-void append_stringified(std::string& str, const Tuplelike<Args...>& value) {
+template <template <class...> class Tuplelike, class... Args>
+void _append_stringified_tuple(std::string& str, const Tuplelike<Args...>& value) {
     str += "< ";
     _append_stringified_tuple_impl(str, value, std::index_sequence_for<Args...>{});
     str += " >";
 }
 
+template <class T>
+void _append_stringified_printable(std::string& str, const T& value) {
+    str += (std::ostringstream() << value).str(); // rather slow but at this point there is no other option
+}
+
+// --- Public API ---
+// ------------------
+
+template <class T>
+void append_stringified(std::string& str, const T& value) {
+    // Bool
+    if constexpr (std::is_same_v<T, bool>) _append_stringified_bool(str, value);
+    // Char
+    else if constexpr (std::is_same_v<T, char>) _append_stringified_stringlike(str, value);
+    // Integral
+    else if constexpr (std::is_integral_v<T>) _append_stringified_integer(str, value);
+    // Floating-point
+    else if constexpr (std::is_floating_point_v<T>) _append_stringified_float(str, value);
+    // 'std::string_view'-convertible (most strings and string-like types)
+    else if constexpr (std::is_convertible_v<T, std::string_view>) _append_stringified_stringlike(str, value);
+    // 'std::string'-convertible (some "nastier" string-like types, mainly 'std::path')
+    else if constexpr (std::is_convertible_v<T, std::string>) _append_stringified_string_convertible(str, value);
+    // Array-like
+    else if constexpr (_has_begin_v<T> && _has_end_v<T>) _append_stringified_array(str, value);
+    // Tuple-like
+    else if constexpr (_has_get_v<T> && _has_tuple_size_v<T>) _append_stringified_tuple(str, value);
+    // 'std::ostream' printable
+    else if constexpr (_has_ostream_insert_v<T>) _append_stringified_printable(str, value);
+    // No valid stringification exists
+    else static_assert(_always_false_v<T>, "No valid stringification exists for the type.");
+
+    // Note: Using if-constexpr chain here allows us to pick and choose priority of different branches,
+    // removing any possible ambiguity we could encounter doing things through SFINAE or overloads.
+}
+
 template <class... Args>
 std::string stringify(Args&&... args) {
     std::string buffer;
-    (utl::log::append_stringified(buffer, std::forward<Args>(args)), ...);
+    (append_stringified(buffer, std::forward<Args>(args)), ...);
     return buffer;
 }
 
@@ -280,7 +266,6 @@ template <class... Args>
 void println(Args&&... args) {
     std::cout << stringify(std::forward<Args>(args)...) << '\n';
 }
-
 
 // ===============
 // --- Options ---
@@ -483,7 +468,7 @@ public:
 
 class Logger {
 private:
-    inline static std::vector<Sink>          sinks;
+    inline static std::vector<Sink>        sinks;
     inline static std::list<std::ofstream> managed_files;
     // we don't want 'managed_files' to reallocate its elements at any point
     // since that would leave corresponding sinks with dangling references,

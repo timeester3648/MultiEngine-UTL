@@ -10,48 +10,14 @@
 #include <array>
 #include <cstddef>
 #include <set>
+#include <sstream>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 // _____________ BENCHMARK IMPLEMENTATION _____________
 
 using SparseMat = mvl::SparseMatrix<double>;
-
-// SparseMat matmul(const SparseMat &A, const SparseMat &B) {
-//     assert(A.cols() == B.rows());
-
-//     // // Convert triplets to Eigen format (can be avoided by implementing necessary interface in mvl::SparseEnty2D)
-//     // std::vector<Eigen::Triplet<SparseMat::value_type>> triplets_A;
-//     // triplets_A.reserve(mvl_A.size());
-//     // for (const auto &e : mvl_A._data) triplets_A.emplace_back(e.i, e.j, e.value);
-//     //
-//     // // Create Eigen matrix
-//     // Eigen::SparseMatrix<SparseMat::value_type> A(mvl_A.rows(), mvl_A.cols());
-//     // A.setFromTriplets(triplets_A.begin(), triplets_A.end());
-//     // // docs state that 'setFromSortedTriplets()' also exists, but I can't see it
-//     //
-//     // std::vector<Eigen::Triplet<SparseMat::value_type>> triplets_B;
-//     // triplets_B.reserve(mvl_B.size());
-//     // for (const auto &e : mvl_B._data) triplets_A.emplace_back(e.i, e.j, e.value);
-//     //
-//     // Eigen::SparseMatrix<SparseMat::value_type> B(mvl_A.rows(), mvl_A.cols());
-//     // B.setFromTriplets(triplets_B.begin(), triplets_B.end());
-//     //
-//     // Eigen::SparseMatrix<SparseMat::value_type> C = A * B;
-//     //
-//     // // But how do I get triplets from Eigen matrix to convert it back?
-
-//     // Dense matrix multiplication
-//     //SparseMat C;
-//     //for (size_t i = 0; i < mvl_A.rows(); ++i)
-//     //    for (size_t j = 0; j < mvl_B.cols(); ++j)
-//     //	    for (size_t k = 0; k < mvl_A.cols(); ++k) // swapping j <-> k rows for dense matrices gives a performace
-//     boost
-//     //			C(i, j) += mvl_A(i, k) * mvl_B(k, j);
-
-//     // mvl::Matrix<double> C = mvl::Matrix<double>(A) * mvl::Matrix<double>(B);
-//     // return mvl::SparseMatrix<double>{C};
-// }
 
 double sum_regular(const std::vector<double>& vec) {
     double s = 0;
@@ -396,7 +362,7 @@ void benchmark_matmul() {
     log::println("N_i               -> ", N_i);
     log::println("N_k               -> ", N_k);
     log::println("N_j               -> ", N_j);
-    log::println("Data memory usage -> ", math::memory_size<double>(N_i * N_k + N_k * N_j + N_i * N_j), " MiB");
+    log::println("Data memory usage -> ", math::memory_size<double>(A.size() + B.size() + C.size()), " MiB");
 
     bench.minEpochIterations(1)
         .timeUnit(millisecond, "ms")
@@ -463,6 +429,59 @@ void benchmark_matmul() {
     // Notes:
     // Test indicate that there is no benefit whatsoever to manual unrolling as compiler is already
     // pretty good at seing SIMD opportunities.
+}
+
+// =================================
+// --- Stringfy float benchmarks ---
+// =================================
+
+std::string fstrinfigy_ostringstream(double value) {
+    std::ostringstream ss;
+    ss << value;
+    return ss.str();
+}
+
+std::string fstrinfigy_to_string(double value) {
+    return std::to_string(value);
+}
+
+std::string fstrinfigy_charconv(double value) {
+    return log::stringify(value);
+}
+
+void benchmark_stringify() {
+    constexpr std::size_t N = 500;
+
+    DenseMat A(N, N, [] { return random::rand_double(-0.1, 0.1); });
+
+    log::println("\n\n====== BENCHMARKING ON: float stringify ======\n");
+    log::println("N                 -> ", N);
+    log::println("Data memory usage -> ", math::memory_size<double>(A.size()), " MiB");
+
+    bench.minEpochIterations(4)
+        .timeUnit(millisecond, "ms")
+        .title("float stringify")
+        .relative(true)
+        .warmup(4);
+
+
+    benchmark("Temp. std::ostringstream", [&] {
+        std::string buffer;
+        A.for_each([&](double elem){ buffer += fstrinfigy_ostringstream(elem); });
+        DO_NOT_OPTIMIZE_AWAY(buffer);
+    });
+    
+    benchmark("std::to_string()", [&] {
+        std::string buffer;
+        A.for_each([&](double elem){ buffer += fstrinfigy_to_string(elem); });
+        DO_NOT_OPTIMIZE_AWAY(buffer);
+    });
+
+    benchmark("<charconv>", [&] {
+        std::string buffer;
+        A.for_each([&](double elem){ buffer += fstrinfigy_charconv(elem); });
+        DO_NOT_OPTIMIZE_AWAY(buffer);
+    });
 }
 
 // ===========================
@@ -552,7 +571,23 @@ void benchmark_indexation() {
 }
 
 int main() {
-    benchmark_matmul();
+    //benchmark_stringify();
+    
+    
+    DenseMat A(3, 4, [] { return random::rand_double(-0.1, 0.1); });
+    
+    // Human-readable formats
+    log::println(mvl::format::as_vector(A));
+    log::println(mvl::format::as_dictionary(A));
+    log::println(mvl::format::as_matrix(A));
+    
+    // Export formats
+    log::println(mvl::format::as_raw(A));
+    log::println(mvl::format::as_csv(A));
+    log::println(mvl::format::as_json(A));
+    log::println(mvl::format::as_latex(A));
+    
+    //benchmark_matmul();
     //benchmark_indexation();
     // benchmark_simd_unrolling();
 }

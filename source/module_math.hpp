@@ -165,7 +165,7 @@ template <typename FloatType, std::enable_if_t<std::is_floating_point<FloatType>
 
 // Workaround for 'static_assert(false)' making program ill-formed even
 // when placed inide an 'if constexpr' branch that never compiles.
-// 'static_assert(_always_false_v<T)' on the the other hand doesn't,
+// 'static_assert(_always_false_v<T>)' on the the other hand doesn't,
 // which means we can use it to mark branches that should never compile.
 template <class>
 inline constexpr bool _always_false_v = false;

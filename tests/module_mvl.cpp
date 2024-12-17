@@ -754,13 +754,6 @@ TEST_CASE("Matrix block subview case") {
                                 });
 }
 
-struct substractable {
-    int val;
-    substractable operator-(const substractable& other) const {
-        return { this->val - other.val };
-    }
-};
-
 TEST_CASE("Testing algebraic operations") {
     mvl::SparseMatrix<int> A(3, 3,
                              {
@@ -787,33 +780,37 @@ TEST_CASE("Testing algebraic operations") {
         {2, 0, 0}, //
         {3, 2, 1}  //
     };
-    
+
     // Sparse / sparse operators
     CHECK_MATRIX(A + B, {
                             {10,  0,  3}, //
                             { 0, 20,  6}, //
                             { 0,  0, 39}, //
     });
-    
+
     CHECK_MATRIX(A.clone() += B, {
-                            {10,  0,  3}, //
-                            { 0, 20,  6}, //
-                            { 0,  0, 39}, //
+                                     {10,  0,  3}, //
+                                     { 0, 20,  6}, //
+                                     { 0,  0, 39}, //
     });
-    
+
     // Dense / dense & dense / sparse operators
     CHECK_MATRIX(D + C + D + D - C + C + A, {
                                                 {13,  2,  4}, //
                                                 { 6, 26,  8}, //
                                                 { 9,  6, 33}, //
     });
-    
+
     // Dense / sparse & sparse / dense operators
     CHECK_MATRIX(A + C + A, {
-                                                {20,  2,  4}, //
-                                                { 0, 46,  8}, //
-                                                { 0,  0, 60}, //
+                                {20,  2,  4}, //
+                                { 0, 46,  8}, //
+                                { 0,  0, 60}, //
     });
- 
-    CHECK_MATRIX(C * D, {{16, 8, 4}, {36, 16, 8}, {0, 0, 0}});
+
+    CHECK_MATRIX(C * D, {
+                            {16,  8, 4},
+                            {36, 16, 8},
+                            { 0,  0, 0}
+    });
 }

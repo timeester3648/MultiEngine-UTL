@@ -15,8 +15,8 @@ macro(add_utl_test filename)
 endmacro()
 
 # Tests
-#add_utl_test(MACRO_LOG)
 add_utl_test(module_json)
+add_utl_test(module_log)
 add_utl_test(module_math)
 add_utl_test(module_mvl)
 add_utl_test(module_random)
