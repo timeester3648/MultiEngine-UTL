@@ -169,22 +169,7 @@ int main() {
     }
     
     // Benchmark on different datasets
-    //benchmark_on_data("benchmarks/data/strings.json");
+    benchmark_on_data("benchmarks/data/strings.json");
     //benchmark_on_data("benchmarks/data/numbers.json");
     //benchmark_on_data("benchmarks/data/database.json");
-    
-    const auto invalid_json = R"(
-        {
-            "key_1": "value_1",
-            "key_2":  value_2",
-            "key_3": "value_3"
-        }
-    )";
-
-    try {
-        utl::json::from_string(invalid_json);
-    }
-    catch (std::runtime_error &e) {
-        std::cerr << "ERROR: Caught exception:\n\n" << e.what();
-    }
 }

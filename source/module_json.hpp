@@ -8,6 +8,7 @@
 //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+#include <cstdint>
 #if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_JSON)
 #ifndef UTLHEADERGUARD_JSON
 #define UTLHEADERGUARD_JSON
@@ -495,6 +496,8 @@ using Null   = Node::null_type;
 // --- Lookup Tables ---
 // =====================
 
+constexpr uint8_t _u8(char value) { return static_cast<uint8_t>(value); }
+
 constexpr std::size_t _number_of_char_values = 256;
 // always true since 'sizeof(char) == 1' is guaranteed by the standard
 
@@ -506,23 +509,30 @@ constexpr std::size_t _number_of_char_values = 256;
 //    ...
 //    else if (c == '\t') { chars += 't' }
 // we get:
-//    if (const char replacement = _lookup_serialized_escaped_chars[c]) { chars += replacement; }
+//    if (const char replacement = _lookup_serialized_escaped_chars[_u8(c)]) { chars += replacement; }
 //
 // which ends up being a bit faster.
+//
+// Note:
+// It is important that we explicitly cast to 'uint8_t' when indexing, depending on the platform 'char' might
+// be either signed or unsigned, we don't want out array to be indexed at '-71'. While we can reasonably expect
+// ASCII encoding on the platfrom (which would put all char literals that we use into the 0-127 range) other chars
+// might still be negative. This shouldn't have any runtime cost as trivial int casts like this get compiled into
+// the same thing as 'reinterpret_cast<>' which means no runtime logic, the bits are just treated differently.
 //
 constexpr std::array<char, _number_of_char_values> _lookup_serialized_escaped_chars = [] {
     std::array<char, _number_of_char_values> res{};
     // default-initialized chars get initialized to '\0',
     // as far as I understand ('\0' == 0) is mandated by the standard,
     // which is why we can use it inside an 'if' condition
-    res['"']  = '"';
-    res['\\'] = '\\';
+    res[_u8('"')]  = '"';
+    res[_u8('\\')] = '\\';
     // res['/']  = '/'; escaping forward slash in JSON is allowed, but redundant
-    res['\b'] = 'b';
-    res['\f'] = 'f';
-    res['\n'] = 'n';
-    res['\r'] = 'r';
-    res['\t'] = 't';
+    res[_u8('\b')] = 'b';
+    res[_u8('\f')] = 'f';
+    res[_u8('\n')] = 'n';
+    res[_u8('\r')] = 'r';
+    res[_u8('\t')] = 't';
     return res;
 }();
 
@@ -538,10 +548,10 @@ constexpr std::array<bool, _number_of_char_values> _lookup_whitespace_chars = []
     // - Tabs            (aka '\t')
     // - Carriage return (aka '\r')
     // - Newline         (aka '\n')
-    res[' ']  = true;
-    res['\t'] = true;
-    res['\r'] = true;
-    res['\n'] = true;
+    res[_u8(' ')]  = true;
+    res[_u8('\t')] = true;
+    res[_u8('\r')] = true;
+    res[_u8('\n')] = true;
     return res;
 }();
 
@@ -549,14 +559,14 @@ constexpr std::array<bool, _number_of_char_values> _lookup_whitespace_chars = []
 // Allows us to avoid a chain of 8 if-else'es which ends up beings faster.
 constexpr std::array<char, _number_of_char_values> _lookup_parsed_escaped_chars = [] {
     std::array<char, _number_of_char_values> res{};
-    res['"']  = '"';
-    res['\\'] = '\\';
-    res['/']  = '/';
-    res['b']  = '\b';
-    res['f']  = '\f';
-    res['n']  = '\n';
-    res['r']  = '\r';
-    res['t']  = '\t';
+    res[_u8('"')]  = '"';
+    res[_u8('\\')] = '\\';
+    res[_u8('/')]  = '/';
+    res[_u8('b')]  = '\b';
+    res[_u8('f')]  = '\f';
+    res[_u8('n')]  = '\n';
+    res[_u8('r')]  = '\r';
+    res[_u8('t')]  = '\t';
     return res;
 }();
 
@@ -565,7 +575,7 @@ constexpr std::array<bool, _number_of_char_values> _lookup_rejected_control_char
     std::array<bool, _number_of_char_values> res{};
     // Codepoints U+0000 to U+001F require an escape
     // Some can be escaped with a 2-char sequence, others should be escaped as a unicode HEX
-    for (char c = 0; c <= 31; ++c) res[c] = true;
+    for (uint8_t c = 0; c <= 31; ++c) res[c] = true;
     return res;
 
     // Note:
@@ -598,7 +608,7 @@ struct _parser {
         using namespace std::string_literals;
 
         while (cursor < this->chars.size()) {
-            if (!_lookup_whitespace_chars[this->chars[cursor]]) return cursor;
+            if (!_lookup_whitespace_chars[_u8(this->chars[cursor])]) return cursor;
             ++cursor;
         }
 
@@ -848,7 +858,7 @@ struct _parser {
                 const char escaped_char = this->chars[cursor];
 
                 // 2-character escape sequences
-                if (const char replacement_char = _lookup_parsed_escaped_chars[escaped_char]) {
+                if (const char replacement_char = _lookup_parsed_escaped_chars[_u8(escaped_char)]) {
                     if (cursor >= this->chars.size())
                         throw std::runtime_error("JSON string node reached the end of buffer while"s +
                                                  "parsing a 2-character escape sequence at pos "s +
@@ -890,7 +900,7 @@ struct _parser {
                 continue;
             }
             // validation
-            else if (_lookup_rejected_control_chars[c])
+            else if (_lookup_rejected_control_chars[_u8(c)])
                 throw std::runtime_error(
                     "JSON string node encountered unescaped ASCII control character character \\"s +
                     std::to_string(static_cast<int>(c)) + " at pos "s + std::to_string(cursor) + "."s +
@@ -1124,7 +1134,7 @@ inline void _serialize_json_recursion(const Node& node, std::string& chars, unsi
         //
         std::size_t segment_start = 0;
         for (std::size_t i = 0; i < string_value.size(); ++i) {
-            if (const char escaped_char_replacement = _lookup_serialized_escaped_chars[string_value[i]]) {
+            if (const char escaped_char_replacement = _lookup_serialized_escaped_chars[_u8(string_value[i])]) {
                 chars.append(string_value.data() + segment_start, i - segment_start);
                 chars += '\\';
                 chars += escaped_char_replacement;
@@ -1195,7 +1205,7 @@ inline Node from_string(const std::string& chars) {
     // Check for invalid trailing sumbols
     using namespace std::string_literals;
     for (auto cursor = end_cursor; cursor < chars.size(); ++cursor)
-        if (!_lookup_whitespace_chars[chars[cursor]])
+        if (!_lookup_whitespace_chars[_u8(chars[cursor])])
             throw std::runtime_error("Invalid trailing symbols encountered after the root JSON node at pos "s +
                                      std::to_string(cursor) + "."s + _pretty_error(cursor, chars));
 
