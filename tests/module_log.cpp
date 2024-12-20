@@ -12,6 +12,7 @@
 // _______________________ INCLUDES _______________________
 
 #include <array>         // testing stringification
+#include <complex>       // testing stringification
 #include <filesystem>    // testing stringification
 #include <map>           // testing stringification
 #include <set>           // testing stringification
@@ -43,6 +44,10 @@ bool check_if_throws(Func f) {
 
 struct Printable {};
 
+struct NonIncrementableWithIterator {
+    int begin() const { return 1; }
+};
+
 std::ostream& operator<<(std::ostream& os, Printable value) { return os << "printable_value"; }
 
 TEST_CASE("Stringification") {
@@ -59,32 +64,34 @@ TEST_CASE("Stringification") {
     CHECK(log::stringify(17u) == "17");
     CHECK(log::stringify(8ul) == "8");
     CHECK(log::stringify(-450) == "-450");
-    CHECK(!check_if_throws([]{ log::stringify(std::numeric_limits<std::int8_t>::max()); }));
-    CHECK(!check_if_throws([]{ log::stringify(std::numeric_limits<std::int8_t>::min()); }));
-    CHECK(!check_if_throws([]{ log::stringify(std::numeric_limits<std::int16_t>::max()); }));
-    CHECK(!check_if_throws([]{ log::stringify(std::numeric_limits<std::int16_t>::min()); }));
-    CHECK(!check_if_throws([]{ log::stringify(std::numeric_limits<std::int32_t>::max()); }));
-    CHECK(!check_if_throws([]{ log::stringify(std::numeric_limits<std::int32_t>::min()); }));
-    CHECK(!check_if_throws([]{ log::stringify(std::numeric_limits<std::int64_t>::max()); }));
-    CHECK(!check_if_throws([]{ log::stringify(std::numeric_limits<std::int64_t>::min()); }));
-    CHECK(!check_if_throws([]{ log::stringify(std::numeric_limits<std::uint8_t>::max()); }));
-    CHECK(!check_if_throws([]{ log::stringify(std::numeric_limits<std::uint8_t>::min()); }));
-    CHECK(!check_if_throws([]{ log::stringify(std::numeric_limits<std::uint16_t>::max()); }));
-    CHECK(!check_if_throws([]{ log::stringify(std::numeric_limits<std::uint16_t>::min()); }));
-    CHECK(!check_if_throws([]{ log::stringify(std::numeric_limits<std::uint32_t>::max()); }));
-    CHECK(!check_if_throws([]{ log::stringify(std::numeric_limits<std::uint32_t>::min()); }));
-    CHECK(!check_if_throws([]{ log::stringify(std::numeric_limits<std::uint64_t>::max()); }));
-    CHECK(!check_if_throws([]{ log::stringify(std::numeric_limits<std::uint64_t>::min()); }));
+    CHECK(!check_if_throws([] { return log::stringify(std::numeric_limits<std::int8_t>::max()); }));
+    CHECK(!check_if_throws([] { return log::stringify(std::numeric_limits<std::int8_t>::min()); }));
+    CHECK(!check_if_throws([] { return log::stringify(std::numeric_limits<std::int16_t>::max()); }));
+    CHECK(!check_if_throws([] { return log::stringify(std::numeric_limits<std::int16_t>::min()); }));
+    CHECK(!check_if_throws([] { return log::stringify(std::numeric_limits<std::int32_t>::max()); }));
+    CHECK(!check_if_throws([] { return log::stringify(std::numeric_limits<std::int32_t>::min()); }));
+    CHECK(!check_if_throws([] { return log::stringify(std::numeric_limits<std::int64_t>::max()); }));
+    CHECK(!check_if_throws([] { return log::stringify(std::numeric_limits<std::int64_t>::min()); }));
+    CHECK(!check_if_throws([] { return log::stringify(std::numeric_limits<std::uint8_t>::max()); }));
+    CHECK(!check_if_throws([] { return log::stringify(std::numeric_limits<std::uint8_t>::min()); }));
+    CHECK(!check_if_throws([] { return log::stringify(std::numeric_limits<std::uint16_t>::max()); }));
+    CHECK(!check_if_throws([] { return log::stringify(std::numeric_limits<std::uint16_t>::min()); }));
+    CHECK(!check_if_throws([] { return log::stringify(std::numeric_limits<std::uint32_t>::max()); }));
+    CHECK(!check_if_throws([] { return log::stringify(std::numeric_limits<std::uint32_t>::min()); }));
+    CHECK(!check_if_throws([] { return log::stringify(std::numeric_limits<std::uint64_t>::max()); }));
+    CHECK(!check_if_throws([] { return log::stringify(std::numeric_limits<std::uint64_t>::min()); }));
     // Float
     CHECK(log::stringify(0.5) == "0.5");
     CHECK(log::stringify(-1.5) == "-1.5");
     CHECK(log::stringify(0.) == "0");
-    CHECK(!check_if_throws([]{ log::stringify(std::numeric_limits<float>::max()); }));
-    CHECK(!check_if_throws([]{ log::stringify(std::numeric_limits<float>::min()); }));
-    CHECK(!check_if_throws([]{ log::stringify(std::numeric_limits<double>::max()); }));
-    CHECK(!check_if_throws([]{ log::stringify(std::numeric_limits<double>::min()); }));
-    CHECK(!check_if_throws([]{ log::stringify(std::numeric_limits<long double>::max()); }));
-    CHECK(!check_if_throws([]{ log::stringify(std::numeric_limits<long double>::min()); }));
+    CHECK(!check_if_throws([] { return log::stringify(std::numeric_limits<float>::max()); }));
+    CHECK(!check_if_throws([] { return log::stringify(std::numeric_limits<float>::min()); }));
+    CHECK(!check_if_throws([] { return log::stringify(std::numeric_limits<double>::max()); }));
+    CHECK(!check_if_throws([] { return log::stringify(std::numeric_limits<double>::min()); }));
+    CHECK(!check_if_throws([] { return log::stringify(std::numeric_limits<long double>::max()); }));
+    CHECK(!check_if_throws([] { return log::stringify(std::numeric_limits<long double>::min()); }));
+    // Complex
+    CHECK(log::stringify(std::complex{1, 2}) == "1 + 2 i");
     // String view-convertible
     CHECK(log::stringify("lorem ipsum") == "lorem ipsum");
     CHECK(log::stringify("lorem ipsum"s) == "lorem ipsum");
@@ -92,7 +99,7 @@ TEST_CASE("Stringification") {
     // String-convertible
     CHECK(log::stringify(fs::path("lorem/ipsum")) == "lorem/ipsum");
     // Array-like
-    //CHECK(log::stringify(std::array{1, 2, 3}) == "{ 1, 2, 3 }");
+    CHECK(log::stringify(std::array{1, 2, 3}) == "{ 1, 2, 3 }");
     CHECK(log::stringify(std::vector{1, 2, 3}) == "{ 1, 2, 3 }");
     CHECK(log::stringify(std::set{1, 2, 3}) == "{ 1, 2, 3 }");
     // Tuple-like
@@ -100,9 +107,23 @@ TEST_CASE("Stringification") {
     CHECK(log::stringify(std::tuple{"lorem", 2, "ipsum"}) == "< lorem, 2, ipsum >");
     // Printable
     CHECK(log::stringify(Printable{}) == "printable_value");
-    
+
     // Compound types
-    CHECK(log::stringify(std::map{ std::pair{"k1", 1}, std::pair{"k2", 2} }) == "{ < k1, 1 >, < k2, 2 > }");
-    CHECK(log::stringify(std::vector{ std::vector{ 1, 2 }, std::vector{ 3 } }) == "{ { 1, 2 }, { 3 } }");
-    CHECK(log::stringify(std::vector<std::vector<std::vector<const char *>>>{{{ "lorem" }}}) == "{ { { lorem } } }");
+    CHECK(log::stringify(std::map{
+              std::pair{"k1", 1},
+              std::pair{"k2", 2}
+    }) == "{ < k1, 1 >, < k2, 2 > }");
+    CHECK(log::stringify(std::vector{
+              std::vector{1, 2},
+              std::vector{3}
+    }) == "{ { 1, 2 }, { 3 } }");
+    CHECK(log::stringify(std::vector<std::vector<std::vector<const char*>>>{{{"lorem"}}}) == "{ { { lorem } } }");
+
+    using array_t           = std::array<int, 3>;
+    using iter              = array_t::iterator;
+    constexpr bool has_it_1 = log::_has_input_iter_v<int>;
+    constexpr bool has_it_2 = log::_has_input_iter_v<NonIncrementableWithIterator>;
+    constexpr bool has_it_3 = log::_has_input_iter_v<array_t>;
+
+    std::next(std::array{1, 2, 3}.begin());
 }

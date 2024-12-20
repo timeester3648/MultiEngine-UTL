@@ -1253,6 +1253,7 @@ inline Node operator""_utl_json(const char* c_str, std::size_t c_str_size) {
 #include <cstddef>       // size_t
 #include <fstream>       // ofstream
 #include <iostream>      // cout
+#include <iterator>      // next()
 #include <limits>        // numeric_limits<>
 #include <list>          // list<>
 #include <mutex>         // lock_guard<>, mutex
@@ -1342,11 +1343,32 @@ inline const clock::time_point _program_entry_time_point = clock::now();
     constexpr bool trait_name_##_v = trait_name_<T>::value;
 
 utl_log_define_trait(_has_string_append, std::string() += std::declval<T>());
-utl_log_define_trait(_has_begin, ++std::declval<T>().begin());
-utl_log_define_trait(_has_end, ++std::declval<T>().end());
+utl_log_define_trait(_has_real, std::declval<T>().real());
+utl_log_define_trait(_has_imag, std::declval<T>().imag());
+utl_log_define_trait(_has_begin, std::declval<T>().begin());
+utl_log_define_trait(_has_end, std::declval<T>().end());
+utl_log_define_trait(_has_input_iter, std::next(std::declval<T>().begin()));
 utl_log_define_trait(_has_get, std::get<0>(std::declval<T>()));
 utl_log_define_trait(_has_tuple_size, std::tuple_size<T>::value);
 utl_log_define_trait(_has_ostream_insert, std::declval<std::ostream>() << std::declval<T>());
+
+// Note:
+// Trait '_has_input_iter' is trickier than it may seem. Just doing '++std::declval<T>().begin()' will work
+// most of the time, but there are cases where it returns 'false' for very much iterable types.
+//
+// """
+//    Although the expression '++c.begin()' often compiles, it is not guaranteed to do so: 'c.begin()' is an rvalue
+//    expression, and there is no LegacyInputIterator requirement that specifies that increment of an rvalue is
+///   guaranteed to work. In particular, when iterators are implemented as pointers or its operator++ is
+//    lvalue-ref-qualified, '++c.begin()' does not compile, while 'std::next(c.begin())' does.
+// """ (c) https://en.cppreference.com/w/cpp/iterator/next
+//
+// By checking if 'std::next(c.begin())' compiles we can properly check that iterator satisfies input iterator
+// requirements, which means we can use it with operator '++' to iterate over the container. Trying to just
+// check for operator '++' would lead to false positives, while checking '++c.begin()' would lead to false
+// negatives on containers such as 'std::array'. Note that target container doesn't even have to provide
+// 'T::iterator', the type gets deduced from 'c.begin()'.
+
 
 #undef utl_log_define_trait
 
@@ -1377,7 +1399,7 @@ constexpr int _max_int_digits = 2 + std::numeric_limits<T>::digits10;
 // --------------------
 
 template <class T>
-void append_stringified(std::string& str, const T& value);
+void _append_stringified(std::string& str, const T& value);
 
 void _append_stringified_bool(std::string& str, bool value) { str += value ? "true" : "false"; }
 
@@ -1408,6 +1430,14 @@ void _append_stringified_float(std::string& str, T value) {
 }
 
 template <class T>
+void _append_stringified_complex(std::string& str, T value) {
+    _append_stringified_float(str, value.real());
+    str += " + ";
+    _append_stringified_float(str, value.imag());
+    str += " i";
+}
+
+template <class T>
 void _append_stringified_stringlike(std::string& str, const T& value) {
     str += value;
     // 'std::string' has operator '+=' for following types:
@@ -1426,7 +1456,7 @@ void _append_stringified_array(std::string& str, const T& value) {
     str += "{ ";
     if (value.begin() != value.end())
         for (auto it = value.begin();;) {
-            append_stringified(str, *it);
+            _append_stringified(str, *it);
             if (++it == value.end()) break; // prevents trailing comma
             str += ", ";
         }
@@ -1435,7 +1465,7 @@ void _append_stringified_array(std::string& str, const T& value) {
 
 template <class Tuplelike, std::size_t... Idx>
 void _append_stringified_tuple_impl(std::string& str, Tuplelike value, std::index_sequence<Idx...>) {
-    ((Idx == 0 ? "" : str += ", ", append_stringified(str, std::get<Idx>(value))), ...);
+    ((Idx == 0 ? "" : str += ", ", _append_stringified(str, std::get<Idx>(value))), ...);
     // fold expression '( f(args), ... )' invokes 'f(args)' for all arguments in 'args...'
     // in the same fashion, we can fold over 2 functions by doing '( ( f(args), g(args) ), ... )'
 }
@@ -1452,11 +1482,11 @@ void _append_stringified_printable(std::string& str, const T& value) {
     str += (std::ostringstream() << value).str(); // rather slow but at this point there is no other option
 }
 
-// --- Public API ---
-// ------------------
+// --- Selector ---
+// ----------------
 
 template <class T>
-void append_stringified(std::string& str, const T& value) {
+void _append_stringified(std::string& str, const T& value) {
     // Bool
     if constexpr (std::is_same_v<T, bool>) _append_stringified_bool(str, value);
     // Char
@@ -1465,12 +1495,14 @@ void append_stringified(std::string& str, const T& value) {
     else if constexpr (std::is_integral_v<T>) _append_stringified_integer(str, value);
     // Floating-point
     else if constexpr (std::is_floating_point_v<T>) _append_stringified_float(str, value);
+    // Complex
+    else if constexpr (_has_real_v<T> && _has_imag_v<T>) _append_stringified_complex(str, value);
     // 'std::string_view'-convertible (most strings and string-like types)
     else if constexpr (std::is_convertible_v<T, std::string_view>) _append_stringified_stringlike(str, value);
     // 'std::string'-convertible (some "nastier" string-like types, mainly 'std::path')
     else if constexpr (std::is_convertible_v<T, std::string>) _append_stringified_string_convertible(str, value);
     // Array-like
-    else if constexpr (_has_begin_v<T> && _has_end_v<T>) _append_stringified_array(str, value);
+    else if constexpr (_has_begin_v<T> && _has_end_v<T> && _has_input_iter_v<T>) _append_stringified_array(str, value);
     // Tuple-like
     else if constexpr (_has_get_v<T> && _has_tuple_size_v<T>) _append_stringified_tuple(str, value);
     // 'std::ostream' printable
@@ -1482,12 +1514,34 @@ void append_stringified(std::string& str, const T& value) {
     // removing any possible ambiguity we could encounter doing things through SFINAE or overloads.
 }
 
+// --- Public API ---
+// ------------------
+
 template <class... Args>
-std::string stringify(Args&&... args) {
+void append_stringified(std::string& str, Args&&... args) {
+    (_append_stringified(str, std::forward<Args>(args)), ...);
+}
+
+template <class... Args>
+[[nodiscard]] std::string stringify(Args&&... args) {
     std::string buffer;
-    (append_stringified(buffer, std::forward<Args>(args)), ...);
+    append_stringified(buffer, std::forward<Args>(args)...);
     return buffer;
 }
+
+// Override "common special cases" that can be improved relative to a generic implementation
+[[nodiscard]] inline std::string stringify(int value) { return std::to_string(value); }
+[[nodiscard]] inline std::string stringify(long value) { return std::to_string(value); }
+[[nodiscard]] inline std::string stringify(long long value) { return std::to_string(value); }
+[[nodiscard]] inline std::string stringify(unsigned int value) { return std::to_string(value); }
+[[nodiscard]] inline std::string stringify(unsigned long value) { return std::to_string(value); }
+[[nodiscard]] inline std::string stringify(unsigned long long value) { return std::to_string(value); }
+// while <charconv> is slightly faster than 'std::to_string()' for formatting integers, the difference is quite small.
+// In cases where we append multiple values to a string and HAVE to make a copy it ends up faster, however when
+// stringifying a single integer 'std::to_string()' will format straight into the string and avoid copy, perhaps
+// that logic could be copied and improved based on <charconv> formatting algorithm, but that is more work than it
+// is worth for a such a specific overload. Note that we don't worry about '<charconv>' and 'std::to_string()' having
+// different formatting style, as there is no variation in how an integer can be stringified (unlike with floats).
 
 template <class... Args>
 void print(Args&&... args) {
@@ -1689,7 +1743,7 @@ public:
     template <typename... Args>
     void format_column_message(std::string& buffer, const Args&... args) {
         buffer += ' ';
-        (append_stringified(buffer, args), ...);
+        append_stringified(buffer, args...);
         //(buffer += ... += args); // parenthesis here are necessary
     }
 };
