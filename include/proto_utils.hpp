@@ -1243,6 +1243,8 @@ inline Node operator""_utl_json(const char* c_str, std::size_t c_str_size) {
 
 #include <cstddef>
 
+#include <cstdint>
+#include <limits>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -1364,10 +1366,16 @@ constexpr int _log_10_ceil(T num) {
 }
 
 template <typename T>
-constexpr std::size_t _max_float_digits =
+constexpr int _max_float_digits =
     4 + std::numeric_limits<T>::max_digits10 + std::max(2, _log_10_ceil(std::numeric_limits<T>::max_exponent10));
 // should be the smallest buffer size to account for all possible 'std::to_chars()' outputs,
 // see [https://stackoverflow.com/questions/68472720/stdto-chars-minimal-floating-point-buffer-size]
+
+template <typename T>
+constexpr int _max_int_digits = 2 + std::numeric_limits<T>::digits10;
+// +2 because 'digits10' returns last digit index rather than the number of digits
+// (aka 1 less than one would expect) and doesn't account for possible '-'.
+// Also note that ints use 'digits10' and not 'max_digits10' which is only valid for floats.
 
 // --- Stringifiers ---
 // --------------------
@@ -1380,12 +1388,7 @@ void _append_stringified_bool(std::string& str, bool value) { str += value ? "tr
 // Fast implementation for stringifying an integer and appending it to 'std::string'
 template <class T>
 void _append_stringified_integer(std::string& str, T value) {
-
-    // Note:
-    // We could count the digits of 'value', preallocate buffer for exactly however many characters
-    // we need and format directly to it, however benchmarks showed that it is actually inferior to
-    // just doing things the usual way with a stack-allocated middle-man buffer.
-    std::array<char, std::numeric_limits<T>::digits10> buffer;
+    std::array<char, _max_int_digits<T>> buffer;
     const auto [number_end_ptr, error_code] = std::to_chars(buffer.data(), buffer.data() + buffer.size(), value);
 
     if (error_code != std::errc())

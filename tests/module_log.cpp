@@ -1,5 +1,7 @@
 // _______________ TEST FRAMEWORK & MODULE  _______________
 
+#include <cstdint>
+#include <limits>
 #include <ostream>
 #include <utility>
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
@@ -57,10 +59,32 @@ TEST_CASE("Stringification") {
     CHECK(log::stringify(17u) == "17");
     CHECK(log::stringify(8ul) == "8");
     CHECK(log::stringify(-450) == "-450");
+    CHECK(!check_if_throws([]{ log::stringify(std::numeric_limits<std::int8_t>::max()); }));
+    CHECK(!check_if_throws([]{ log::stringify(std::numeric_limits<std::int8_t>::min()); }));
+    CHECK(!check_if_throws([]{ log::stringify(std::numeric_limits<std::int16_t>::max()); }));
+    CHECK(!check_if_throws([]{ log::stringify(std::numeric_limits<std::int16_t>::min()); }));
+    CHECK(!check_if_throws([]{ log::stringify(std::numeric_limits<std::int32_t>::max()); }));
+    CHECK(!check_if_throws([]{ log::stringify(std::numeric_limits<std::int32_t>::min()); }));
+    CHECK(!check_if_throws([]{ log::stringify(std::numeric_limits<std::int64_t>::max()); }));
+    CHECK(!check_if_throws([]{ log::stringify(std::numeric_limits<std::int64_t>::min()); }));
+    CHECK(!check_if_throws([]{ log::stringify(std::numeric_limits<std::uint8_t>::max()); }));
+    CHECK(!check_if_throws([]{ log::stringify(std::numeric_limits<std::uint8_t>::min()); }));
+    CHECK(!check_if_throws([]{ log::stringify(std::numeric_limits<std::uint16_t>::max()); }));
+    CHECK(!check_if_throws([]{ log::stringify(std::numeric_limits<std::uint16_t>::min()); }));
+    CHECK(!check_if_throws([]{ log::stringify(std::numeric_limits<std::uint32_t>::max()); }));
+    CHECK(!check_if_throws([]{ log::stringify(std::numeric_limits<std::uint32_t>::min()); }));
+    CHECK(!check_if_throws([]{ log::stringify(std::numeric_limits<std::uint64_t>::max()); }));
+    CHECK(!check_if_throws([]{ log::stringify(std::numeric_limits<std::uint64_t>::min()); }));
     // Float
     CHECK(log::stringify(0.5) == "0.5");
     CHECK(log::stringify(-1.5) == "-1.5");
     CHECK(log::stringify(0.) == "0");
+    CHECK(!check_if_throws([]{ log::stringify(std::numeric_limits<float>::max()); }));
+    CHECK(!check_if_throws([]{ log::stringify(std::numeric_limits<float>::min()); }));
+    CHECK(!check_if_throws([]{ log::stringify(std::numeric_limits<double>::max()); }));
+    CHECK(!check_if_throws([]{ log::stringify(std::numeric_limits<double>::min()); }));
+    CHECK(!check_if_throws([]{ log::stringify(std::numeric_limits<long double>::max()); }));
+    CHECK(!check_if_throws([]{ log::stringify(std::numeric_limits<long double>::min()); }));
     // String view-convertible
     CHECK(log::stringify("lorem ipsum") == "lorem ipsum");
     CHECK(log::stringify("lorem ipsum"s) == "lorem ipsum");
