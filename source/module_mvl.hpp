@@ -2128,8 +2128,9 @@ template <class T, Type type, Ownership ownership, Checking checking, Layout lay
 _generic_dense_format(const GenericTensor<T, Dimension::MATRIX, type, ownership, checking, layout>& tensor,      //
                       std::string_view                                                              begin,       //
                       std::string_view                                                              row_begin,   //
-                      std::string_view                                                              row_delimer, //
+                      std::string_view                                                              col_delimer, //
                       std::string_view                                                              row_end,     //
+                      std::string_view                                                              row_delimer, //
                       std::string_view                                                              end,         //
                       Func                                                                          stringifier  //
 ) {
@@ -2156,9 +2157,10 @@ _generic_dense_format(const GenericTensor<T, Dimension::MATRIX, type, ownership,
         for (std::size_t j = 0; j < strings.cols(); ++j) {
             if (strings(i, j).size() < column_widths[j]) buffer.append(column_widths[j] - strings(i, j).size(), ' ');
             buffer += strings(i, j);
-            if (j + 1 < strings.cols()) buffer += row_delimer;
+            if (j + 1 < strings.cols()) buffer += col_delimer;
         }
         buffer += row_end;
+        if (i + 1 < strings.rows()) buffer += row_delimer;
     }
     buffer += end;
 
@@ -2212,7 +2214,7 @@ template <utl_mvl_tensor_arg_defs, class Func = default_stringifier<T>>
 [[nodiscard]] std::string as_matrix(const GenericTensor<utl_mvl_tensor_arg_vals>& tensor, Func stringifier = Func()) {
     if (tensor.size() > _max_displayed_flat_size) return _as_too_large(tensor);
 
-    return _generic_dense_format(tensor, _tensor_meta_string(tensor), "  [ ", " ", " ]\n", "", stringifier);
+    return _generic_dense_format(tensor, _tensor_meta_string(tensor), "  [ ", " ", " ]\n", "", "", stringifier);
 }
 
 // --- Export formats ---
@@ -2220,22 +2222,28 @@ template <utl_mvl_tensor_arg_defs, class Func = default_stringifier<T>>
 
 template <utl_mvl_tensor_arg_defs, class Func = default_stringifier<T>>
 [[nodiscard]] std::string as_raw(const GenericTensor<utl_mvl_tensor_arg_vals>& tensor, Func stringifier = Func()) {
-    return _generic_dense_format(tensor, "", "", " ", "\n", "", stringifier);
+    return _generic_dense_format(tensor, "", "", " ", "\n", "", "", stringifier);
 }
 
 template <utl_mvl_tensor_arg_defs, class Func = default_stringifier<T>>
 [[nodiscard]] std::string as_csv(const GenericTensor<utl_mvl_tensor_arg_vals>& tensor, Func stringifier = Func()) {
-    return _generic_dense_format(tensor, "", "", ", ", "\n", "", stringifier);
+    return _generic_dense_format(tensor, "", "", ", ", "\n", "", "", stringifier);
 }
 
 template <utl_mvl_tensor_arg_defs, class Func = default_stringifier<T>>
 [[nodiscard]] std::string as_json(const GenericTensor<utl_mvl_tensor_arg_vals>& tensor, Func stringifier = Func()) {
-    return _generic_dense_format(tensor, "[\n", "    [ ", ", ", " ]\n", "]\n", stringifier);
+    return _generic_dense_format(tensor, "[\n", "    [ ", ", ", " ]", ",\n", "\n]\n", stringifier);
+}
+
+template <utl_mvl_tensor_arg_defs, class Func = default_stringifier<T>>
+[[nodiscard]] std::string as_mathematica(const GenericTensor<utl_mvl_tensor_arg_vals>& tensor,
+                                         Func                                          stringifier = Func()) {
+    return _generic_dense_format(tensor, "{\n", "    { ", ", ", " }", ",\n", "\n}\n", stringifier);
 }
 
 template <utl_mvl_tensor_arg_defs, class Func = default_stringifier<T>>
 [[nodiscard]] std::string as_latex(const GenericTensor<utl_mvl_tensor_arg_vals>& tensor, Func stringifier = Func()) {
-    return _generic_dense_format(tensor, "\\begin{pmatrix}\n", "  ", " & ", " \\\\\n", "\\end{pmatrix}\n", stringifier);
+    return _generic_dense_format(tensor, "\\begin{pmatrix}\n", "  ", " & ", " \\\\\n", "", "\\end{pmatrix}\n", stringifier);
 }
 
 

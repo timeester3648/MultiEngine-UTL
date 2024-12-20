@@ -175,11 +175,9 @@ template <class T>
 void _append_stringified_integer(std::string& str, T value) {
     std::array<char, _max_int_digits<T>> buffer;
     const auto [number_end_ptr, error_code] = std::to_chars(buffer.data(), buffer.data() + buffer.size(), value);
-
     if (error_code != std::errc())
         throw std::runtime_error(
             "Integer stringification encountered std::to_chars() formatting error while serializing a value.");
-
     str.append(buffer.data(), number_end_ptr - buffer.data());
 }
 
@@ -188,11 +186,9 @@ template <class T>
 void _append_stringified_float(std::string& str, T value) {
     std::array<char, _max_float_digits<T>> buffer;
     const auto [number_end_ptr, error_code] = std::to_chars(buffer.data(), buffer.data() + buffer.size(), value);
-
     if (error_code != std::errc())
         throw std::runtime_error(
             "Float stringification encountered std::to_chars() formatting error while serializing a value.");
-
     str.append(buffer.data(), number_end_ptr - buffer.data());
 }
 
@@ -308,7 +304,7 @@ template <class... Args>
 // stringifying a single integer 'std::to_string()' will format straight into the string and avoid copy, perhaps
 // that logic could be copied and improved based on <charconv> formatting algorithm, but that is more work than it
 // is worth for a such a specific overload. Note that we don't worry about '<charconv>' and 'std::to_string()' having
-// different formatting style, as there is no variation in how an integer can be stringified (unlike with floats).
+// different formatting styles, as there is no variation in how an integer can be stringified (unlike with floats).
 
 template <class... Args>
 void print(Args&&... args) {

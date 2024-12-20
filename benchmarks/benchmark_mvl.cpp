@@ -585,6 +585,7 @@ int main() {
     log::println(mvl::format::as_raw(A));
     log::println(mvl::format::as_csv(A));
     log::println(mvl::format::as_json(A));
+    log::println(mvl::format::as_mathematica(A));
     log::println(mvl::format::as_latex(A));
     
     //benchmark_matmul();

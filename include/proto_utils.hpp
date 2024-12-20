@@ -1408,11 +1408,9 @@ template <class T>
 void _append_stringified_integer(std::string& str, T value) {
     std::array<char, _max_int_digits<T>> buffer;
     const auto [number_end_ptr, error_code] = std::to_chars(buffer.data(), buffer.data() + buffer.size(), value);
-
     if (error_code != std::errc())
         throw std::runtime_error(
             "Integer stringification encountered std::to_chars() formatting error while serializing a value.");
-
     str.append(buffer.data(), number_end_ptr - buffer.data());
 }
 
@@ -1421,11 +1419,9 @@ template <class T>
 void _append_stringified_float(std::string& str, T value) {
     std::array<char, _max_float_digits<T>> buffer;
     const auto [number_end_ptr, error_code] = std::to_chars(buffer.data(), buffer.data() + buffer.size(), value);
-
     if (error_code != std::errc())
         throw std::runtime_error(
             "Float stringification encountered std::to_chars() formatting error while serializing a value.");
-
     str.append(buffer.data(), number_end_ptr - buffer.data());
 }
 
@@ -1541,7 +1537,7 @@ template <class... Args>
 // stringifying a single integer 'std::to_string()' will format straight into the string and avoid copy, perhaps
 // that logic could be copied and improved based on <charconv> formatting algorithm, but that is more work than it
 // is worth for a such a specific overload. Note that we don't worry about '<charconv>' and 'std::to_string()' having
-// different formatting style, as there is no variation in how an integer can be stringified (unlike with floats).
+// different formatting styles, as there is no variation in how an integer can be stringified (unlike with floats).
 
 template <class... Args>
 void print(Args&&... args) {
@@ -4258,8 +4254,9 @@ template <class T, Type type, Ownership ownership, Checking checking, Layout lay
 _generic_dense_format(const GenericTensor<T, Dimension::MATRIX, type, ownership, checking, layout>& tensor,      //
                       std::string_view                                                              begin,       //
                       std::string_view                                                              row_begin,   //
-                      std::string_view                                                              row_delimer, //
+                      std::string_view                                                              col_delimer, //
                       std::string_view                                                              row_end,     //
+                      std::string_view                                                              row_delimer, //
                       std::string_view                                                              end,         //
                       Func                                                                          stringifier  //
 ) {
@@ -4286,9 +4283,10 @@ _generic_dense_format(const GenericTensor<T, Dimension::MATRIX, type, ownership,
         for (std::size_t j = 0; j < strings.cols(); ++j) {
             if (strings(i, j).size() < column_widths[j]) buffer.append(column_widths[j] - strings(i, j).size(), ' ');
             buffer += strings(i, j);
-            if (j + 1 < strings.cols()) buffer += row_delimer;
+            if (j + 1 < strings.cols()) buffer += col_delimer;
         }
         buffer += row_end;
+        if (i + 1 < strings.rows()) buffer += row_delimer;
     }
     buffer += end;
 
@@ -4342,7 +4340,7 @@ template <utl_mvl_tensor_arg_defs, class Func = default_stringifier<T>>
 [[nodiscard]] std::string as_matrix(const GenericTensor<utl_mvl_tensor_arg_vals>& tensor, Func stringifier = Func()) {
     if (tensor.size() > _max_displayed_flat_size) return _as_too_large(tensor);
 
-    return _generic_dense_format(tensor, _tensor_meta_string(tensor), "  [ ", " ", " ]\n", "", stringifier);
+    return _generic_dense_format(tensor, _tensor_meta_string(tensor), "  [ ", " ", " ]\n", "", "", stringifier);
 }
 
 // --- Export formats ---
@@ -4350,22 +4348,28 @@ template <utl_mvl_tensor_arg_defs, class Func = default_stringifier<T>>
 
 template <utl_mvl_tensor_arg_defs, class Func = default_stringifier<T>>
 [[nodiscard]] std::string as_raw(const GenericTensor<utl_mvl_tensor_arg_vals>& tensor, Func stringifier = Func()) {
-    return _generic_dense_format(tensor, "", "", " ", "\n", "", stringifier);
+    return _generic_dense_format(tensor, "", "", " ", "\n", "", "", stringifier);
 }
 
 template <utl_mvl_tensor_arg_defs, class Func = default_stringifier<T>>
 [[nodiscard]] std::string as_csv(const GenericTensor<utl_mvl_tensor_arg_vals>& tensor, Func stringifier = Func()) {
-    return _generic_dense_format(tensor, "", "", ", ", "\n", "", stringifier);
+    return _generic_dense_format(tensor, "", "", ", ", "\n", "", "", stringifier);
 }
 
 template <utl_mvl_tensor_arg_defs, class Func = default_stringifier<T>>
 [[nodiscard]] std::string as_json(const GenericTensor<utl_mvl_tensor_arg_vals>& tensor, Func stringifier = Func()) {
-    return _generic_dense_format(tensor, "[\n", "    [ ", ", ", " ]\n", "]\n", stringifier);
+    return _generic_dense_format(tensor, "[\n", "    [ ", ", ", " ]", ",\n", "\n]\n", stringifier);
+}
+
+template <utl_mvl_tensor_arg_defs, class Func = default_stringifier<T>>
+[[nodiscard]] std::string as_mathematica(const GenericTensor<utl_mvl_tensor_arg_vals>& tensor,
+                                         Func                                          stringifier = Func()) {
+    return _generic_dense_format(tensor, "{\n", "    { ", ", ", " }", ",\n", "\n}\n", stringifier);
 }
 
 template <utl_mvl_tensor_arg_defs, class Func = default_stringifier<T>>
 [[nodiscard]] std::string as_latex(const GenericTensor<utl_mvl_tensor_arg_vals>& tensor, Func stringifier = Func()) {
-    return _generic_dense_format(tensor, "\\begin{pmatrix}\n", "  ", " & ", " \\\\\n", "\\end{pmatrix}\n", stringifier);
+    return _generic_dense_format(tensor, "\\begin{pmatrix}\n", "  ", " & ", " \\\\\n", "", "\\end{pmatrix}\n", stringifier);
 }
 
 
