@@ -94,7 +94,7 @@ namespace utl::stre {
 
 template <class T>
 [[nodiscard]] std::string trim_left(T&& str, char trimmed_char = ' ') {
-    std::string res = std::forward<T>(str);  // when 'str' is an r-value, we can avoid the copy
+    std::string res = std::forward<T>(str);            // when 'str' is an r-value, we can avoid the copy
     res.erase(0, res.find_first_not_of(trimmed_char)); // seems to be the fastest way of doing it
     return res;
 }
@@ -115,7 +115,7 @@ template <class T>
 // --- Padding ---
 // ===============
 
-[[nodiscard]] std::string pad_left(std::string_view str, std::size_t length, char padding_char = ' ') {
+[[nodiscard]] inline std::string pad_left(std::string_view str, std::size_t length, char padding_char = ' ') {
     if (length > str.size()) {
         std::string res;
         res.reserve(length);
@@ -125,7 +125,7 @@ template <class T>
     } else return std::string(str);
 }
 
-[[nodiscard]] std::string pad_right(std::string_view str, std::size_t length, char padding_char = ' ') {
+[[nodiscard]] inline std::string pad_right(std::string_view str, std::size_t length, char padding_char = ' ') {
     if (length > str.size()) {
         std::string res;
         res.reserve(length);
@@ -135,7 +135,7 @@ template <class T>
     } else return std::string(str);
 }
 
-[[nodiscard]] std::string pad(std::string_view str, std::size_t length, char padding_char = ' ') {
+[[nodiscard]] inline std::string pad(std::string_view str, std::size_t length, char padding_char = ' ') {
     if (length > str.size()) {
         std::string res;
         res.reserve(length);
@@ -150,7 +150,7 @@ template <class T>
     } else return std::string(str);
 }
 
-[[nodiscard]] std::string pad_with_leading_zeroes(unsigned int number, std::size_t length = 12) {
+[[nodiscard]] inline std::string pad_with_leading_zeroes(unsigned int number, std::size_t length = 12) {
     const std::string number_str = std::to_string(number);
 
     if (length > number_str.size()) {
@@ -192,15 +192,15 @@ template <class T>
 // C++20 adds 'std::basic_string<T>::starts_with()', 'std::basic_string<T>::ends_with()',
 // 'std::basic_string<T>::contains()', making these functions pointless in a new standard.
 
-[[nodiscard]] bool starts_with(std::string_view str, std::string_view substr) {
+[[nodiscard]] inline bool starts_with(std::string_view str, std::string_view substr) {
     return str.size() >= substr.size() && str.compare(0, substr.size(), substr) == 0;
 }
 
-[[nodiscard]] bool ends_with(std::string_view str, std::string_view substr) {
+[[nodiscard]] inline bool ends_with(std::string_view str, std::string_view substr) {
     return str.size() >= substr.size() && str.compare(str.size() - substr.size(), substr.size(), substr) == 0;
 }
 
-[[nodiscard]] bool contains(std::string_view str, std::string_view substr) {
+[[nodiscard]] inline bool contains(std::string_view str, std::string_view substr) {
     return str.find(substr) != std::string_view::npos;
 }
 
@@ -230,7 +230,8 @@ template <class T>
 // We can just scan through the string view once, while keeping track of the last segment between
 // two delimiters, no unnecessary work, the only place where we do a copy is during emplacement into
 // the vector where it's unavoidable
-[[nodiscard]] std::vector<std::string> split_by_delimiter(std::string_view str, std::string_view delimiter, bool keep_empty_tokens = false) {
+[[nodiscard]] inline std::vector<std::string> split_by_delimiter(std::string_view str, std::string_view delimiter,
+                                                                 bool keep_empty_tokens = false) {
     if (delimiter.empty()) return {std::string(str)};
     // handle empty delimiter explicitly so we can't fall into an infinite loop
 
@@ -239,7 +240,8 @@ template <class T>
     std::size_t              segment_start = cursor;
 
     while ((cursor = str.find(delimiter, cursor)) != std::string_view::npos) {
-        if (keep_empty_tokens || segment_start != cursor) tokens.emplace_back(str.substr(segment_start, cursor - segment_start));
+        if (keep_empty_tokens || segment_start != cursor)
+            tokens.emplace_back(str.substr(segment_start, cursor - segment_start));
         // don't emplace empty tokens in case of leading/trailing/repeated delimiter
         cursor += delimiter.size();
         segment_start = cursor;
@@ -247,7 +249,7 @@ template <class T>
 
     if (keep_empty_tokens || segment_start != str.size()) tokens.emplace_back(str.substr(segment_start));
     // 'cursor' is now at 'npos', so we compare to the size instead
-    
+
     return tokens;
 }
 
@@ -265,7 +267,7 @@ template <class T>
 }
 
 // Mostly useful to print strings with special chars in console and look at their contents.
-[[nodiscard]] std::string escape_control_chars(std::string_view str) {
+[[nodiscard]] inline std::string escape_control_chars(std::string_view str) {
     std::string res;
     res.reserve(str.size()); // no necesseraly correct, but it's a godd first guess
 
@@ -293,7 +295,7 @@ template <class T>
     return res;
 }
 
-[[nodiscard]] std::size_t index_of_difference(std::string_view str_1, std::string_view str_2) {
+[[nodiscard]] inline std::size_t index_of_difference(std::string_view str_1, std::string_view str_2) {
     using namespace std::string_literals;
     if (str_1.size() != str_2.size())
         throw std::logic_error("String {"s + std::string(str_1) + "} of size "s + std::to_string(str_1.size()) +

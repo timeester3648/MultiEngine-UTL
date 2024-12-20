@@ -41,7 +41,7 @@ namespace utl::parallel {
 // --- Utils ---
 // =============
 
-std::size_t max_thread_count() {
+inline std::size_t max_thread_count() {
     const std::size_t detected_threads = std::thread::hardware_concurrency();
     return detected_threads ? detected_threads : 1;
     // 'hardware_concurrency()' returns '0' if it can't determine the number of threads,
@@ -290,14 +290,14 @@ public:
 // --- Static thread pool operations ---
 // =====================================
 
-ThreadPool& static_thread_pool() {
+inline ThreadPool& static_thread_pool() {
     static ThreadPool pool(max_thread_count());
     return pool;
 }
 
-std::size_t get_thread_count() { return static_thread_pool().get_thread_count(); }
+inline std::size_t get_thread_count() { return static_thread_pool().get_thread_count(); }
 
-void set_thread_count(std::size_t thread_count) { static_thread_pool().set_thread_count(thread_count); }
+inline void set_thread_count(std::size_t thread_count) { static_thread_pool().set_thread_count(thread_count); }
 
 // ================
 // --- Task API ---
@@ -314,7 +314,7 @@ auto task_with_future(Func&& func, Args&&... args)
     return static_thread_pool().add_task_with_future(std::forward<Func>(func), std::forward<Args>(args)...);
 }
 
-void wait_for_tasks() { static_thread_pool().wait_for_tasks(); }
+inline void wait_for_tasks() { static_thread_pool().wait_for_tasks(); }
 
 // =======================
 // --- Parallel ranges ---
@@ -435,8 +435,7 @@ auto reduce(Range<Iter> range, BinaryOp&& op) -> T {
                     _unroll<std::size_t, unroll>(
                         [&, it](std::size_t j) { partial_results[j] = op(partial_results[j], *(it + j)); });
                 // Reduce remaining elements
-                for (; it < high; ++it)
-                    partial_results[0] = op(partial_results[0], *it);
+                for (; it < high; ++it) partial_results[0] = op(partial_results[0], *it);
                 // Collect the result
                 for (std::size_t i = 1; i < partial_results.size(); ++i)
                     partial_results[0] = op(partial_results[0], partial_results[i]);
