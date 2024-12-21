@@ -1919,82 +1919,82 @@ constexpr double GOLDEN_RATIO = 1.6180339887498948482;
 // --- Type Traits ---
 // ===================
 
-template <typename Type, typename = void>
+template <class Type, class = void>
 struct is_addable_with_itself : std::false_type {};
 
-template <typename Type>
+template <class Type>
 struct is_addable_with_itself<Type, std::void_t<decltype(std::declval<Type>() + std::declval<Type>())>
                               // perhaps check that resulting type is same as 'Type', but that can cause issues
                               // with classes like Eigen::MatrixXd that return "foldables" that convert back to
                               // objects in the end
                               > : std::true_type {};
 
-template <typename Type, typename = void>
+template <class Type, class = void>
 struct is_multipliable_by_scalar : std::false_type {};
 
-template <typename Type>
+template <class Type>
 struct is_multipliable_by_scalar<Type, std::void_t<decltype(std::declval<Type>() * std::declval<double>())>>
     : std::true_type {};
 
-template <typename Type, typename = void>
+template <class Type, class = void>
 struct is_sized : std::false_type {};
 
-template <typename Type>
+template <class Type>
 struct is_sized<Type, std::void_t<decltype(std::declval<Type>().size())>> : std::true_type {};
 
-template <typename FuncType, typename Signature>
+template <class FuncType, class Signature>
 using is_function_with_signature = std::is_convertible<FuncType, std::function<Signature>>;
 
 // ======================
 // --- Math functions ---
 // ======================
 
-template <typename Type, std::enable_if_t<std::is_scalar<Type>::value, bool> = true>
+template <class Type, std::enable_if_t<std::is_scalar<Type>::value, bool> = true>
 [[nodiscard]] constexpr Type abs(Type x) {
     return (x > Type(0)) ? x : -x;
 }
 
-template <typename Type, std::enable_if_t<std::is_scalar<Type>::value, bool> = true>
+template <class Type, std::enable_if_t<std::is_scalar<Type>::value, bool> = true>
 [[nodiscard]] constexpr Type sign(Type x) {
     return (x > Type(0)) ? Type(1) : Type(-1);
 }
 
-template <typename Type, std::enable_if_t<std::is_arithmetic<Type>::value, bool> = true>
+template <class Type, std::enable_if_t<std::is_arithmetic<Type>::value, bool> = true>
 [[nodiscard]] constexpr Type sqr(Type x) {
     return x * x;
 }
 
-template <typename Type, std::enable_if_t<std::is_arithmetic<Type>::value, bool> = true>
+template <class Type, std::enable_if_t<std::is_arithmetic<Type>::value, bool> = true>
 [[nodiscard]] constexpr Type cube(Type x) {
     return x * x * x;
 }
 
-template <typename Type, std::enable_if_t<utl::math::is_addable_with_itself<Type>::value, bool> = true,
+template <class Type, std::enable_if_t<utl::math::is_addable_with_itself<Type>::value, bool> = true,
           std::enable_if_t<utl::math::is_multipliable_by_scalar<Type>::value, bool> = true>
 [[nodiscard]] constexpr Type midpoint(Type a, Type b) {
     return (a + b) * 0.5;
 }
 
-template <typename IntegerType, std::enable_if_t<std::is_integral<IntegerType>::value, bool> = true>
+template <class IntegerType, std::enable_if_t<std::is_integral<IntegerType>::value, bool> = true>
 [[nodiscard]] constexpr int kronecker_delta(IntegerType i, IntegerType j) {
     // 'IntegerType' here is necessary to prevent enforcing static_cast<int>(...) on the callsite
     return (i == j) ? 1 : 0;
 }
 
-template <typename IntegerType, std::enable_if_t<std::is_integral<IntegerType>::value, bool> = true>
+template <class IntegerType, std::enable_if_t<std::is_integral<IntegerType>::value, bool> = true>
 [[nodiscard]] constexpr int power_of_minus_one(IntegerType power) {
     return (power % IntegerType(2)) ? -1 : 1; // is there a faster way of doing it?
 }
 
 
 // --- deg/rad conversion ---
-template <typename FloatType, std::enable_if_t<std::is_floating_point<FloatType>::value, bool> = true>
+template <class FloatType, std::enable_if_t<std::is_floating_point<FloatType>::value, bool> = true>
 [[nodiscard]] constexpr FloatType deg_to_rad(FloatType degrees) {
     constexpr FloatType FACTOR = FloatType(PI / 180.);
     return degrees * FACTOR;
 }
 
-template <typename FloatType, std::enable_if_t<std::is_floating_point<FloatType>::value, bool> = true>
+template <class FloatType, std::enable_if_t<std::is_floating_point<FloatType>::value, bool> = true>
 [[nodiscard]] constexpr FloatType rad_to_deg(FloatType radians) {
     constexpr FloatType FACTOR = FloatType(180. / PI);
     return radians * FACTOR;
@@ -2013,7 +2013,7 @@ inline constexpr bool _always_false_v = false;
 
 enum class MemoryUnit { BYTE, KiB, MiB, GiB, TiB, KB, MB, GB, TB };
 
-template <typename T, MemoryUnit units = MemoryUnit::MiB>
+template <class T, MemoryUnit units = MemoryUnit::MiB>
 [[nodiscard]] constexpr double memory_size(std::size_t count) {
     const double size_in_bytes = count * sizeof(T); // cast to double is critical here
     if constexpr (units == MemoryUnit::BYTE) return size_in_bytes;
@@ -2049,7 +2049,7 @@ struct Intervals {
     Intervals(Points points) : count(points.count - 1) {}
 };
 
-template <typename FloatType, std::enable_if_t<std::is_floating_point<FloatType>::value, bool> = true>
+template <class FloatType, std::enable_if_t<std::is_floating_point<FloatType>::value, bool> = true>
 [[nodiscard]] std::vector<FloatType> linspace(FloatType L1, FloatType L2, Intervals N) {
     assert(L1 < L2);
     assert(N.count >= 1);
@@ -2064,7 +2064,7 @@ template <typename FloatType, std::enable_if_t<std::is_floating_point<FloatType>
     return res;
 }
 
-template <typename FloatType, typename FuncType,
+template <class FloatType, class FuncType,
           std::enable_if_t<std::is_floating_point<FloatType>::value, bool>                          = true,
           std::enable_if_t<is_function_with_signature<FuncType, FloatType(FloatType)>::value, bool> = true>
 [[nodiscard]] FloatType integrate_trapezoidal(FuncType f, FloatType L1, FloatType L2, Intervals N) {
@@ -2085,7 +2085,7 @@ template <typename FloatType, typename FuncType,
 // --- Misc helpers ---
 // ====================
 
-template <typename UintType, std::enable_if_t<std::is_integral<UintType>::value, bool> = true>
+template <class UintType, std::enable_if_t<std::is_integral<UintType>::value, bool> = true>
 [[nodiscard]] constexpr UintType uint_difference(UintType a, UintType b) {
     // Cast to widest type if there is a change values don't fit into a regular 'int'
     using WiderIntType = std::conditional_t<(sizeof(UintType) >= sizeof(int)), int64_t, int>;
@@ -2093,23 +2093,23 @@ template <typename UintType, std::enable_if_t<std::is_integral<UintType>::value,
     return static_cast<UintType>(utl::math::abs(static_cast<WiderIntType>(a) - static_cast<WiderIntType>(b)));
 }
 
-template <typename SizedContainer, std::enable_if_t<utl::math::is_sized<SizedContainer>::value, bool> = true>
+template <class SizedContainer, std::enable_if_t<utl::math::is_sized<SizedContainer>::value, bool> = true>
 [[nodiscard]] int ssize(const SizedContainer& container) {
     return static_cast<int>(container.size());
 }
 
-template <typename ArithmeticType, std::enable_if_t<std::is_arithmetic<ArithmeticType>::value, bool> = true>
+template <class ArithmeticType, std::enable_if_t<std::is_arithmetic<ArithmeticType>::value, bool> = true>
 [[nodiscard]] constexpr ArithmeticType ternary_branchless(bool condition, ArithmeticType return_if_true,
                                                           ArithmeticType return_if_false) {
     return (condition * return_if_true) + (!condition * return_if_false);
 }
 
-template <typename IntType, std::enable_if_t<std::is_integral<IntType>::value, bool> = true>
+template <class IntType, std::enable_if_t<std::is_integral<IntType>::value, bool> = true>
 [[nodiscard]] constexpr IntType ternary_bitselect(bool condition, IntType return_if_true, IntType return_if_false) {
     return (return_if_true & -IntType(condition)) | (return_if_false & ~(-IntType(condition)));
 }
 
-template <typename IntType, std::enable_if_t<std::is_integral<IntType>::value, bool> = true>
+template <class IntType, std::enable_if_t<std::is_integral<IntType>::value, bool> = true>
 [[nodiscard]] constexpr IntType ternary_bitselect(bool condition, IntType return_if_true) {
     return return_if_true & -IntType(condition);
 }
