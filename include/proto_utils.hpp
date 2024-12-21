@@ -2327,8 +2327,12 @@ utl_mvl_define_trait_has_member(_is_sparse_entry_2d, is_sparse_entry_2d);
 // --- Internal type traits ---
 // ----------------------------
 
-utl_mvl_define_trait(_has_begin, ++std::declval<T>().begin());
-utl_mvl_define_trait(_has_end, ++std::declval<T>().end());
+utl_mvl_define_trait(_has_string_append, std::string() += std::declval<T>());
+utl_mvl_define_trait(_has_real, std::declval<T>().real());
+utl_mvl_define_trait(_has_imag, std::declval<T>().imag());
+utl_mvl_define_trait(_has_begin, std::declval<T>().begin());
+utl_mvl_define_trait(_has_end, std::declval<T>().end());
+utl_mvl_define_trait(_has_input_iter, std::next(std::declval<T>().begin()));
 utl_mvl_define_trait(_has_get, std::get<0>(std::declval<T>()));
 utl_mvl_define_trait(_has_tuple_size, std::tuple_size<T>::value);
 utl_mvl_define_trait(_has_ostream_insert, std::declval<std::ostream>() << std::declval<T>());
@@ -2345,43 +2349,46 @@ constexpr int _log_10_ceil(T num) {
 }
 
 template <typename T>
-constexpr std::size_t _max_float_digits =
+constexpr int _max_float_digits =
     4 + std::numeric_limits<T>::max_digits10 + std::max(2, _log_10_ceil(std::numeric_limits<T>::max_exponent10));
+
+template <typename T>
+constexpr int _max_int_digits = 2 + std::numeric_limits<T>::digits10;
 
 // --- Stringifiers ---
 // --------------------
 
 template <class T>
-void append_stringified(std::string& str, const T& value);
+void _append_stringified(std::string& str, const T& value);
 
 void _append_stringified_bool(std::string& str, bool value) { str += value ? "true" : "false"; }
 
 template <class T>
 void _append_stringified_integer(std::string& str, T value) {
-    std::array<char, std::numeric_limits<T>::digits10> buffer;
+    std::array<char, _max_int_digits<T>> buffer;
     const auto [number_end_ptr, error_code] = std::to_chars(buffer.data(), buffer.data() + buffer.size(), value);
-
     if (error_code != std::errc())
         throw std::runtime_error(
             "Integer stringification encountered std::to_chars() formatting error while serializing a value.");
-
     str.append(buffer.data(), number_end_ptr - buffer.data());
 }
 
 template <class T>
 void _append_stringified_float(std::string& str, T value) {
     std::array<char, _max_float_digits<T>> buffer;
-    constexpr int                          precision = 5;
-    // in 'mvl' specifically we reduce default precision to make matrices format nices,
-    // if user wants full precision they can always pass another stringifier, for example, `std::to_string()`
-    const auto [number_end_ptr, error_code] =
-        std::to_chars(buffer.data(), buffer.data() + buffer.size(), value, std::chars_format::general, precision);
-
+    const auto [number_end_ptr, error_code] = std::to_chars(buffer.data(), buffer.data() + buffer.size(), value);
     if (error_code != std::errc())
         throw std::runtime_error(
             "Float stringification encountered std::to_chars() formatting error while serializing a value.");
-
     str.append(buffer.data(), number_end_ptr - buffer.data());
+}
+
+template <class T>
+void _append_stringified_complex(std::string& str, T value) {
+    _append_stringified_float(str, value.real());
+    str += " + ";
+    _append_stringified_float(str, value.imag());
+    str += " i";
 }
 
 template <class T>
@@ -2399,7 +2406,7 @@ void _append_stringified_array(std::string& str, const T& value) {
     str += "{ ";
     if (value.begin() != value.end())
         for (auto it = value.begin();;) {
-            append_stringified(str, *it);
+            _append_stringified(str, *it);
             if (++it == value.end()) break;
             str += ", ";
         }
@@ -2408,7 +2415,7 @@ void _append_stringified_array(std::string& str, const T& value) {
 
 template <class Tuplelike, std::size_t... Idx>
 void _append_stringified_tuple_impl(std::string& str, Tuplelike value, std::index_sequence<Idx...>) {
-    ((Idx == 0 ? "" : str += ", ", append_stringified(str, std::get<Idx>(value))), ...);
+    ((Idx == 0 ? "" : str += ", ", _append_stringified(str, std::get<Idx>(value))), ...);
 }
 
 template <template <class...> class Tuplelike, class... Args>
@@ -2423,29 +2430,46 @@ void _append_stringified_printable(std::string& str, const T& value) {
     str += (std::ostringstream() << value).str();
 }
 
-// --- Public API ---
-// ------------------
+// --- Selector ---
+// ----------------
 
 template <class T>
-void append_stringified(std::string& str, const T& value) {
+void _append_stringified(std::string& str, const T& value) {
     if constexpr (std::is_same_v<T, bool>) _append_stringified_bool(str, value);
     else if constexpr (std::is_same_v<T, char>) _append_stringified_stringlike(str, value);
     else if constexpr (std::is_integral_v<T>) _append_stringified_integer(str, value);
     else if constexpr (std::is_floating_point_v<T>) _append_stringified_float(str, value);
+    else if constexpr (_has_real_v<T> && _has_imag_v<T>) _append_stringified_complex(str, value);
     else if constexpr (std::is_convertible_v<T, std::string_view>) _append_stringified_stringlike(str, value);
     else if constexpr (std::is_convertible_v<T, std::string>) _append_stringified_string_convertible(str, value);
-    else if constexpr (_has_begin_v<T> && _has_end_v<T>) _append_stringified_array(str, value);
+    else if constexpr (_has_begin_v<T> && _has_end_v<T> && _has_input_iter_v<T>) _append_stringified_array(str, value);
     else if constexpr (_has_get_v<T> && _has_tuple_size_v<T>) _append_stringified_tuple(str, value);
     else if constexpr (_has_ostream_insert_v<T>) _append_stringified_printable(str, value);
     else static_assert(_always_false_v<T>, "No valid stringification exists for the type.");
 }
 
+// --- Public API ---
+// ------------------
+
 template <class... Args>
-std::string stringify(Args&&... args) {
+void append_stringified(std::string& str, Args&&... args) {
+    (_append_stringified(str, std::forward<Args>(args)), ...);
+}
+
+template <class... Args>
+[[nodiscard]] std::string stringify(Args&&... args) {
     std::string buffer;
-    (append_stringified(buffer, std::forward<Args>(args)), ...);
+    append_stringified(buffer, std::forward<Args>(args)...);
     return buffer;
 }
+
+// Override "common special cases" that can be improved relative to a generic implementation
+[[nodiscard]] inline std::string stringify(int value) { return std::to_string(value); }
+[[nodiscard]] inline std::string stringify(long value) { return std::to_string(value); }
+[[nodiscard]] inline std::string stringify(long long value) { return std::to_string(value); }
+[[nodiscard]] inline std::string stringify(unsigned int value) { return std::to_string(value); }
+[[nodiscard]] inline std::string stringify(unsigned long value) { return std::to_string(value); }
+[[nodiscard]] inline std::string stringify(unsigned long long value) { return std::to_string(value); }
 
 // We wrap stringifying function in functor-class so we can use it a default template callable argument.
 // Templates can't infer template parameters from default arguments:
@@ -4369,7 +4393,8 @@ template <utl_mvl_tensor_arg_defs, class Func = default_stringifier<T>>
 
 template <utl_mvl_tensor_arg_defs, class Func = default_stringifier<T>>
 [[nodiscard]] std::string as_latex(const GenericTensor<utl_mvl_tensor_arg_vals>& tensor, Func stringifier = Func()) {
-    return _generic_dense_format(tensor, "\\begin{pmatrix}\n", "  ", " & ", " \\\\\n", "", "\\end{pmatrix}\n", stringifier);
+    return _generic_dense_format(tensor, "\\begin{pmatrix}\n", "  ", " & ", " \\\\\n", "", "\\end{pmatrix}\n",
+                                 stringifier);
 }
 
 
