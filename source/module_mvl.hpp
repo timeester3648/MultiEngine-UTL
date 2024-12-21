@@ -217,16 +217,16 @@ utl_mvl_define_trait(_has_ostream_insert, std::declval<std::ostream>() << std::d
 template <class>
 inline constexpr bool _always_false_v = false;
 
-template <typename T>
+template <class T>
 constexpr int _log_10_ceil(T num) {
     return num < 10 ? 1 : 1 + _log_10_ceil(num / 10);
 }
 
-template <typename T>
+template <class T>
 constexpr int _max_float_digits =
     4 + std::numeric_limits<T>::max_digits10 + std::max(2, _log_10_ceil(std::numeric_limits<T>::max_exponent10));
 
-template <typename T>
+template <class T>
 constexpr int _max_int_digits = 2 + std::numeric_limits<T>::digits10;
 
 // --- Stringifiers ---
@@ -570,7 +570,7 @@ private:
 // Note:
 // All sparse entries and multi-dimensional indeces can be sorted lexicographically
 
-template <typename T>
+template <class T>
 struct SparseEntry1D {
     size_t i;
     T      value;
@@ -581,7 +581,7 @@ struct SparseEntry1D {
     [[nodiscard]] bool operator>(const SparseEntry1D& other) const noexcept { return this->i > other.i; }
 };
 
-template <typename T>
+template <class T>
 struct SparseEntry2D {
     size_t i;
     size_t j;
@@ -714,7 +714,7 @@ using _are_tensors_with_same_value_type_enable_if =
 // boilerplate even more.
 //
 #define utl_mvl_require(condition_)                                                                                    \
-    typename value_type = T, Dimension dimension = _dimension, Type type = _type, Ownership ownership = _ownership,    \
+    class value_type = T, Dimension dimension = _dimension, Type type = _type, Ownership ownership = _ownership,    \
              Checking checking = _checking, Layout layout = _layout, std::enable_if_t<condition_, bool> = true
 
 #define utl_mvl_reqs(condition_) template <utl_mvl_require(condition_)>
@@ -942,7 +942,7 @@ public:
         return std::is_sorted(this->cbegin(), this->cend());
     }
 
-    template <typename Compare>
+    template <class Compare>
     [[nodiscard]] bool is_sorted(Compare cmp) const {
         return std::is_sorted(this->cbegin(), this->cend(), cmp);
     }
@@ -1354,12 +1354,12 @@ public:
         return this->for_each(func_wrapper);
     }
 
-    template <typename Compare, utl_mvl_require(ownership != Ownership::CONST_VIEW)>
+    template <class Compare, utl_mvl_require(ownership != Ownership::CONST_VIEW)>
     self& sort(Compare cmp) {
         std::sort(this->begin(), this->end(), cmp);
         return *this;
     }
-    template <typename Compare, utl_mvl_require(ownership != Ownership::CONST_VIEW)>
+    template <class Compare, utl_mvl_require(ownership != Ownership::CONST_VIEW)>
     self& stable_sort(Compare cmp) {
         std::stable_sort(this->begin(), this->end(), cmp);
         return *this;
@@ -1386,7 +1386,7 @@ public:
     using sparse_const_view_type = GenericTensor<value_type, self::params::dimension, Type::SPARSE,
                                                  Ownership::CONST_VIEW, self::params::checking, Layout::SPARSE>;
 
-    template <typename UnaryPredicate, _has_signature_enable_if<UnaryPredicate, bool(const_reference)> = true>
+    template <class UnaryPredicate, _has_signature_enable_if<UnaryPredicate, bool(const_reference)> = true>
     [[nodiscard]] sparse_const_view_type filter(UnaryPredicate predicate) const {
         const auto forwarded_predicate = [&](const_reference elem, size_type, size_type) -> bool {
             return predicate(elem);
@@ -1395,7 +1395,7 @@ public:
         // NOTE: This would need its own implementation for a proper 1D support
     }
 
-    template <typename UnaryPredicate,
+    template <class UnaryPredicate,
               _has_signature_enable_if<UnaryPredicate, bool(const_reference, size_type)> = true>
     [[nodiscard]] sparse_const_view_type filter(UnaryPredicate predicate) const {
         const auto forwarded_predicate = [&](const_reference elem, size_type i, size_type j) -> bool {
@@ -1406,7 +1406,7 @@ public:
         // NOTE: This would need its own implementation for a proper 1D support
     }
 
-    template <typename UnaryPredicate,
+    template <class UnaryPredicate,
               _has_signature_enable_if<UnaryPredicate, bool(const_reference, size_type, size_type)> = true,
               utl_mvl_require(dimension == Dimension::MATRIX)>
     [[nodiscard]] sparse_const_view_type filter(UnaryPredicate predicate) const {
@@ -1447,7 +1447,7 @@ public:
     using sparse_view_type = GenericTensor<value_type, self::params::dimension, Type::SPARSE, Ownership::VIEW,
                                            self::params::checking, Layout::SPARSE>;
 
-    template <typename UnaryPredicate, utl_mvl_require(ownership != Ownership::CONST_VIEW),
+    template <class UnaryPredicate, utl_mvl_require(ownership != Ownership::CONST_VIEW),
               _has_signature_enable_if<UnaryPredicate, bool(const_reference)> = true>
     [[nodiscard]] sparse_view_type filter(UnaryPredicate predicate) {
         const auto forwarded_predicate = [&](const_reference elem, size_type, size_type) -> bool {
@@ -1457,7 +1457,7 @@ public:
         // NOTE: This would need its own implementation for a proper 1D support
     }
 
-    template <typename UnaryPredicate, utl_mvl_require(ownership != Ownership::CONST_VIEW),
+    template <class UnaryPredicate, utl_mvl_require(ownership != Ownership::CONST_VIEW),
               _has_signature_enable_if<UnaryPredicate, bool(const_reference, size_type)> = true>
     [[nodiscard]] sparse_view_type filter(UnaryPredicate predicate) {
         const auto forwarded_predicate = [&](const_reference elem, size_type i, size_type j) -> bool {
@@ -1468,7 +1468,7 @@ public:
         // NOTE: This would need its own implementation for a proper 1D support
     }
 
-    template <typename UnaryPredicate,
+    template <class UnaryPredicate,
               _has_signature_enable_if<UnaryPredicate, bool(const_reference, size_type, size_type)> = true,
               utl_mvl_require(dimension == Dimension::MATRIX && ownership != Ownership::CONST_VIEW)>
     [[nodiscard]] sparse_view_type filter(UnaryPredicate predicate) {
@@ -1854,7 +1854,7 @@ public:
     }
 
     // Init-with-lambda
-    template <typename FuncType, utl_mvl_require(dimension == Dimension::MATRIX && type == Type::DENSE &&
+    template <class FuncType, utl_mvl_require(dimension == Dimension::MATRIX && type == Type::DENSE &&
                                                  ownership == Ownership::CONTAINER)>
     explicit GenericTensor(size_type rows, size_type cols, FuncType init_func) {
         // .fill() already takes care of preventing improper values of 'FuncType', no need to do the check here
@@ -1951,7 +1951,7 @@ public:
     }
 
     // Init-with-lambda
-    template <typename FuncType, utl_mvl_require(dimension == Dimension::MATRIX && type == Type::STRIDED &&
+    template <class FuncType, utl_mvl_require(dimension == Dimension::MATRIX && type == Type::STRIDED &&
                                                  ownership == Ownership::CONTAINER)>
     explicit GenericTensor(size_type rows, size_type cols, size_type row_stride, size_type col_stride,
                            FuncType init_func) {
@@ -2080,34 +2080,34 @@ constexpr auto _default_checking        = Checking::NONE;
 constexpr auto _default_layout_dense_2d = Layout::RC;
 
 // - Dense 2D -
-template <typename T, Checking checking = _default_checking, Layout layout = _default_layout_dense_2d>
+template <class T, Checking checking = _default_checking, Layout layout = _default_layout_dense_2d>
 using Matrix = GenericTensor<T, Dimension::MATRIX, Type::DENSE, Ownership::CONTAINER, checking, layout>;
 
-template <typename T, Checking checking = _default_checking, Layout layout = _default_layout_dense_2d>
+template <class T, Checking checking = _default_checking, Layout layout = _default_layout_dense_2d>
 using MatrixView = GenericTensor<T, Dimension::MATRIX, Type::DENSE, Ownership::VIEW, checking, layout>;
 
-template <typename T, Checking checking = _default_checking, Layout layout = _default_layout_dense_2d>
+template <class T, Checking checking = _default_checking, Layout layout = _default_layout_dense_2d>
 using ConstMatrixView = GenericTensor<T, Dimension::MATRIX, Type::DENSE, Ownership::CONST_VIEW, checking, layout>;
 
 // - Strided 2D -
-template <typename T, Checking checking = _default_checking, Layout layout = _default_layout_dense_2d>
+template <class T, Checking checking = _default_checking, Layout layout = _default_layout_dense_2d>
 using StridedMatrix = GenericTensor<T, Dimension::MATRIX, Type::STRIDED, Ownership::CONTAINER, checking, layout>;
 
-template <typename T, Checking checking = _default_checking, Layout layout = _default_layout_dense_2d>
+template <class T, Checking checking = _default_checking, Layout layout = _default_layout_dense_2d>
 using StridedMatrixView = GenericTensor<T, Dimension::MATRIX, Type::STRIDED, Ownership::VIEW, checking, layout>;
 
-template <typename T, Checking checking = _default_checking, Layout layout = _default_layout_dense_2d>
+template <class T, Checking checking = _default_checking, Layout layout = _default_layout_dense_2d>
 using ConstStridedMatrixView =
     GenericTensor<T, Dimension::MATRIX, Type::STRIDED, Ownership::CONST_VIEW, checking, layout>;
 
 // - Sparse 2D -
-template <typename T, Checking checking = _default_checking>
+template <class T, Checking checking = _default_checking>
 using SparseMatrix = GenericTensor<T, Dimension::MATRIX, Type::SPARSE, Ownership::CONTAINER, checking, Layout::SPARSE>;
 
-template <typename T, Checking checking = _default_checking>
+template <class T, Checking checking = _default_checking>
 using SparseMatrixView = GenericTensor<T, Dimension::MATRIX, Type::SPARSE, Ownership::VIEW, checking, Layout::SPARSE>;
 
-template <typename T, Checking checking = _default_checking>
+template <class T, Checking checking = _default_checking>
 using ConstSparseMatrixView =
     GenericTensor<T, Dimension::MATRIX, Type::SPARSE, Ownership::CONST_VIEW, checking, Layout::SPARSE>;
 
