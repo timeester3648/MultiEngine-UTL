@@ -389,15 +389,15 @@ inline void _split_enum_args(const char* va_args, std::string* strings, int coun
     // while (string -> enum) conversion requires searching through '_strings' to find enum index
 
 #define UTL_PREDEF_IS_FUNCTION_DEFINED(function_name_, return_type_, ...)                                              \
-    template <typename ReturnType, typename... ArgTypes>                                                               \
+    template <class ReturnType, class... ArgTypes>                                                                     \
     class _utl_is_function_defined_impl_##function_name_ {                                                             \
     private:                                                                                                           \
         typedef char no[sizeof(ReturnType) + 1];                                                                       \
                                                                                                                        \
-        template <typename... C>                                                                                       \
+        template <class... C>                                                                                          \
         static auto test(C... arg) -> decltype(function_name_(arg...));                                                \
                                                                                                                        \
-        template <typename... C>                                                                                       \
+        template <class... C>                                                                                          \
         static no& test(...);                                                                                          \
                                                                                                                        \
     public:                                                                                                            \

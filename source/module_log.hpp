@@ -49,16 +49,16 @@ namespace utl::log {
 // ======================
 
 // - SFINAE to select localtime_s() or localtime_r() -
-template <typename Arg_tm, typename Arg_time_t>
-auto _available_localtime_impl(Arg_tm time_moment, Arg_time_t timer)
-    -> decltype(localtime_s(std::forward<Arg_tm>(time_moment), std::forward<Arg_time_t>(timer))) {
-    return localtime_s(std::forward<Arg_tm>(time_moment), std::forward<Arg_time_t>(timer));
+template <class TimeMoment, class TimeType>
+auto _available_localtime_impl(TimeMoment time_moment, TimeType timer)
+    -> decltype(localtime_s(std::forward<TimeMoment>(time_moment), std::forward<TimeType>(timer))) {
+    return localtime_s(std::forward<TimeMoment>(time_moment), std::forward<TimeType>(timer));
 }
 
-template <typename Arg_tm, typename Arg_time_t>
-auto _available_localtime_impl(Arg_tm time_moment, Arg_time_t timer)
-    -> decltype(localtime_r(std::forward<Arg_time_t>(timer), std::forward<Arg_tm>(time_moment))) {
-    return localtime_r(std::forward<Arg_time_t>(timer), std::forward<Arg_tm>(time_moment));
+template <class TimeMoment, class TimeType>
+auto _available_localtime_impl(TimeMoment time_moment, TimeType timer)
+    -> decltype(localtime_r(std::forward<TimeType>(timer), std::forward<TimeMoment>(time_moment))) {
+    return localtime_r(std::forward<TimeType>(timer), std::forward<TimeMoment>(time_moment));
 }
 
 std::size_t _get_thread_index(const std::thread::id id) {
@@ -145,18 +145,18 @@ utl_log_define_trait(_has_ostream_insert, std::declval<std::ostream>() << std::d
 template <class>
 inline constexpr bool _always_false_v = false;
 
-template <typename T>
+template <class T>
 constexpr int _log_10_ceil(T num) {
     return num < 10 ? 1 : 1 + _log_10_ceil(num / 10);
 }
 
-template <typename T>
+template <class T>
 constexpr int _max_float_digits =
     4 + std::numeric_limits<T>::max_digits10 + std::max(2, _log_10_ceil(std::numeric_limits<T>::max_exponent10));
 // should be the smallest buffer size to account for all possible 'std::to_chars()' outputs,
 // see [https://stackoverflow.com/questions/68472720/stdto-chars-minimal-floating-point-buffer-size]
 
-template <typename T>
+template <class T>
 constexpr int _max_int_digits = 2 + std::numeric_limits<T>::digits10;
 // +2 because 'digits10' returns last digit index rather than the number of digits
 // (aka 1 less than one would expect) and doesn't account for possible '-'.
@@ -370,7 +370,7 @@ public:
     Sink(std::ostream& os, Verbosity verbosity, Colors colors, clock::duration flush_interval, const Columns& columns)
         : os(os), verbosity(verbosity), colors(colors), flush_interval(flush_interval), columns(columns) {}
 
-    template <typename... Args>
+    template <class... Args>
     void format(const Callsite& callsite, const MessageMetadata& meta, const Args&... args) {
         if (meta.verbosity > this->verbosity) return;
 
@@ -503,7 +503,7 @@ public:
         }
     }
 
-    template <typename... Args>
+    template <class... Args>
     void format_column_message(std::string& buffer, const Args&... args) {
         buffer += ' ';
         append_stringified(buffer, args...);
@@ -529,7 +529,7 @@ public:
         return logger;
     }
 
-    template <typename... Args>
+    template <class... Args>
     void push_message(const Callsite& callsite, const MessageMetadata& meta, const Args&... args) {
         // When no sinks were manually created, default sink-to-terminal takes over
         if (this->sinks.empty()) {

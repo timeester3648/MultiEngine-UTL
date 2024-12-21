@@ -129,16 +129,16 @@ inline void start() { _start_timepoint = _clock::now(); }
 // ============================
 
 // - SFINAE to select localtime_s() or localtime_r() -
-template <typename Arg_tm, typename Arg_time_t>
-auto _available_localtime_impl(Arg_tm time_moment, Arg_time_t timer)
-    -> decltype(localtime_s(std::forward<Arg_tm>(time_moment), std::forward<Arg_time_t>(timer))) {
-    return localtime_s(std::forward<Arg_tm>(time_moment), std::forward<Arg_time_t>(timer));
+template <class TimeMoment, class TimeType>
+auto _available_localtime_impl(TimeMoment time_moment, TimeType timer)
+    -> decltype(localtime_s(std::forward<TimeMoment>(time_moment), std::forward<TimeType>(timer))) {
+    return localtime_s(std::forward<TimeMoment>(time_moment), std::forward<TimeType>(timer));
 }
 
-template <typename Arg_tm, typename Arg_time_t>
-auto _available_localtime_impl(Arg_tm time_moment, Arg_time_t timer)
-    -> decltype(localtime_r(std::forward<Arg_time_t>(timer), std::forward<Arg_tm>(time_moment))) {
-    return localtime_r(std::forward<Arg_time_t>(timer), std::forward<Arg_tm>(time_moment));
+template <class TimeMoment, class TimeType>
+auto _available_localtime_impl(TimeMoment time_moment, TimeType timer)
+    -> decltype(localtime_r(std::forward<TimeType>(timer), std::forward<TimeMoment>(time_moment))) {
+    return localtime_r(std::forward<TimeType>(timer), std::forward<TimeMoment>(time_moment));
 }
 
 // - Implementation -

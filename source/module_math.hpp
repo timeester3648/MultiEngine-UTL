@@ -223,8 +223,7 @@ template <class FloatType, std::enable_if_t<std::is_floating_point<FloatType>::v
     return res;
 }
 
-template <class FloatType, class FuncType,
-          std::enable_if_t<std::is_floating_point<FloatType>::value, bool>                          = true,
+template <class FloatType, class FuncType, std::enable_if_t<std::is_floating_point<FloatType>::value, bool> = true,
           std::enable_if_t<is_function_with_signature<FuncType, FloatType(FloatType)>::value, bool> = true>
 [[nodiscard]] FloatType integrate_trapezoidal(FuncType f, FloatType L1, FloatType L2, Intervals N) {
     assert(L1 < L2);

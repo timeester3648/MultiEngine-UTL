@@ -83,7 +83,7 @@ inline std::string _read_file_to_string(const std::string& path) {
     return chars;
 }
 
-template <typename T>
+template <class T>
 constexpr int _log_10_ceil(T num) {
     return num < 10 ? 1 : 1 + _log_10_ceil(num / 10);
 }
@@ -142,18 +142,18 @@ template <class>
 inline constexpr bool _always_false_v = false;
 
 // Type trait that checks existence of '.begin()', 'end()' members
-template <typename Type, typename = void, typename = void>
+template <class Type, class = void, class = void>
 struct _is_const_iterable_through : std::false_type {};
 
-template <typename Type>
+template <class Type>
 struct _is_const_iterable_through<Type, std::void_t<decltype(++std::declval<Type>().begin())>,
                                   std::void_t<decltype(std::declval<Type>().end())>> : std::true_type {};
 
 // Type trait that checks existence of '::key_type', '::mapped_type' members
-template <typename Type, typename = void, typename = void>
+template <class Type, class = void, class = void>
 struct _is_assotiative : std::false_type {};
 
-template <typename Type>
+template <class Type>
 struct _is_assotiative<Type, std::void_t<typename Type::key_type>, std::void_t<typename Type::mapped_type>>
     : std::true_type {};
 

@@ -714,8 +714,8 @@ using _are_tensors_with_same_value_type_enable_if =
 // boilerplate even more.
 //
 #define utl_mvl_require(condition_)                                                                                    \
-    class value_type = T, Dimension dimension = _dimension, Type type = _type, Ownership ownership = _ownership,    \
-             Checking checking = _checking, Layout layout = _layout, std::enable_if_t<condition_, bool> = true
+    class value_type = T, Dimension dimension = _dimension, Type type = _type, Ownership ownership = _ownership,       \
+          Checking checking = _checking, Layout layout = _layout, std::enable_if_t<condition_, bool> = true
 
 #define utl_mvl_reqs(condition_) template <utl_mvl_require(condition_)>
 
@@ -1395,8 +1395,7 @@ public:
         // NOTE: This would need its own implementation for a proper 1D support
     }
 
-    template <class UnaryPredicate,
-              _has_signature_enable_if<UnaryPredicate, bool(const_reference, size_type)> = true>
+    template <class UnaryPredicate, _has_signature_enable_if<UnaryPredicate, bool(const_reference, size_type)> = true>
     [[nodiscard]] sparse_const_view_type filter(UnaryPredicate predicate) const {
         const auto forwarded_predicate = [&](const_reference elem, size_type i, size_type j) -> bool {
             const size_type idx = this->get_idx_of_ij(i, j);
@@ -1855,7 +1854,7 @@ public:
 
     // Init-with-lambda
     template <class FuncType, utl_mvl_require(dimension == Dimension::MATRIX && type == Type::DENSE &&
-                                                 ownership == Ownership::CONTAINER)>
+                                              ownership == Ownership::CONTAINER)>
     explicit GenericTensor(size_type rows, size_type cols, FuncType init_func) {
         // .fill() already takes care of preventing improper values of 'FuncType', no need to do the check here
         this->_rows = rows;
@@ -1952,7 +1951,7 @@ public:
 
     // Init-with-lambda
     template <class FuncType, utl_mvl_require(dimension == Dimension::MATRIX && type == Type::STRIDED &&
-                                                 ownership == Ownership::CONTAINER)>
+                                              ownership == Ownership::CONTAINER)>
     explicit GenericTensor(size_type rows, size_type cols, size_type row_stride, size_type col_stride,
                            FuncType init_func) {
         // .fill() already takes care of preventing improper values of 'FuncType', no need to do the check here
