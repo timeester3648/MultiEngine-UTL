@@ -2,15 +2,29 @@
 
 [<- back to README.md](https://github.com/DmitriBogdanov/prototyping_utils/tree/master)
 
-**random** adds most of the sensible random functions one would need.
+**random** module adds most of the sensible random functions one would need.
 
-Implements **XorShift64&ast;** random generator compatible with [&lt;random&gt;](https://en.cppreference.com/w/cpp/header/random), which is used internally to generate high quality random with performance slightly better than [std::rand()](https://en.cppreference.com/w/cpp/numeric/random/rand) and considerably better than classic [std::mt19937](https://en.cppreference.com/w/cpp/numeric/random/mersenne_twister_engine).
+Implements several random bit generators seamlessly compatible with [&lt;random&gt;](https://en.cppreference.com/w/cpp/header/random):
+
+- [32-bit Romu Trio PRNG](https://www.romu-random.org/)
+
+- [32-bit Bob Jenkins Small Fast PRNG](https://burtleburtle.net/bob/rand/smallprng.html)
+
+- [64-bit Romu Dio Jr. PRNG](https://www.romu-random.org/)
+
+- [64-bit Bob Jenkins Small Fast PRNG](https://burtleburtle.net/bob/rand/smallprng.html)
+
+- [64-bit Xoshiro256++ PRNG](https://prng.di.unimi.it/)
+
+- [64-bit XorShift64&ast; PRNG](https://www.jstatsoft.org/article/view/v008i14)
+
+These pseudorandom number generators (aka [PRNGs](https://en.wikipedia.org/wiki/Pseudorandom_number_generator)) cover most of the common uses cases better than somewhat outdated standard library implementations, see [notes on random number generation](#notes-on-random-number-generation).
 
 **Why use `utl::random` over built-in functions?**
 
 - Easier API for most "daily" use cases
-- Likely to be faster than built-in methods
-- Provides [better quality random](#Notes-on-prngs) than built-in methods
+- Likely to be [faster](#overview-of-available-prngs) than built-in methods
+- Provides [better quality random](#notes-on-random-number-generation) than built-in methods
 - Reproducible results, built-in engines may differ compiler to compiler
 - Random generators work even in `constexpr` context
 
@@ -30,17 +44,21 @@ namespace generators {
         constexpr result_type operator()() noexcept;
     };
     
-    class RomuDuoJr          { /* Generator API */ };
+    // 32-bit
+    class RomuTrio32         { /* Generator API */ };
     class JSF32              { /* Generator API */ };
+    // 64-bit
+    class RomuDuoJr          { /* Generator API */ };
     class JSF64              { /* Generator API */ };
     class Xoshiro256PlusPlus { /* Generator API */ };
     class Xorshift64Star     { /* Generator API */ };
 }
 
 // Default global PRNG
-generators::Xoshiro256PlusPlus default_generator;
+using default_generator_type = generators::Xoshiro256PlusPlus;
+using default_result_type    = std::uint64_t;
 
-using default_result_type = std::uint64_t;
+inline default_generator_type default_generator;
 
 void seed(std::uint64_t seed);
 void seed_with_random_device();
@@ -49,11 +67,13 @@ void seed_with_random_device();
 int rand_int(int min, int max);
 int rand_uint(unsigned int min, unsigned int max);
 
-float rand_float();   // [0,1] range
-float rand_float(float min, float max);
+float rand_float();                     // U[0, 1]     uniform distribution
+float rand_float(float min, float max); // U[min, max] uniform distribution
+float rand_normal_float();              // N(0, 1)      normal distribution
 
-double rand_double(); // [0,1] range
-double rand_double(double min, double max);
+double rand_double();                       // U[0, 1]     uniform distribution
+double rand_double(double min, double max); // U[min, max] uniform distribution
+double rand_normal_float();                 // N(0, 1)      normal distribution
 
 bool rand_bool();
 
@@ -100,18 +120,25 @@ Seeds random with a value.
 Returns random integer in a given range.
 
 > ```cpp
-> float random::rand_float(float min, float max);
-> double random::rand_double(double min, double max);
-> ```
-
-Returns random float/double in a given range.
-
-> ```cpp
 > float random::rand_float();
 > double random::rand_double();
 > ```
 
-Returns random float/double in a [0, 1] range.
+Returns random float/double in a $[0, 1]$ range.
+
+> ```cpp
+> float random::rand_float(float min, float max);
+> double random::rand_double(double min, double max);
+> ```
+
+Returns random float/double in a $[min, max]$ range.
+
+> ```cpp
+> float random::rand_normal_float();
+> double random::rand_normal_double();
+> ```
+
+Returns random normally distributed float/double with a mean $0$ and variance $1$.
 
 > ```cpp
 > bool random::rand_bool();
@@ -159,83 +186,28 @@ rand_choise({1, 2, 3}) = 1
 rand_linear_combination(2., 3.) = 2.12557
 ```
 
-### Using XorShift64&ast; with &lt;random&gt;
+### Using custon PRNGs with &lt;random&gt;
 
-[ [Run this code](https://godbolt.org/#g:!((g:!((g:!((h:codeEditor,i:(filename:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,selection:(endColumn:68,endLineNumber:10,positionColumn:68,positionLineNumber:10,selectionStartColumn:68,selectionStartLineNumber:10,startColumn:68,startLineNumber:10),source:'%23include+%3Chttps://raw.githubusercontent.com/DmitriBogdanov/prototyping_utils/master/include/proto_utils.hpp%3E%0A%0Aint+main(int+argc,+char+**argv)+%7B%0A++++using+namespace+utl%3B%0A%0A++++std::random_device+rd%7B%7D%3B%0A%09random::XorShift64StarGenerator+gen%7Brd()%7D%3B%0A%09std::normal_distribution%3Cdouble%3E+distr%3B%0A%09%0A%09std::cout+%3C%3C+%22Random+value+from+N(0,+1)+%3D+%22+%3C%3C+distr(gen)+%3C%3C+%22%5Cn%22%3B%0A%0A++++return+0%3B%0A%7D%0A'),l:'5',n:'0',o:'C%2B%2B+source+%231',t:'0')),k:71.71783148269105,l:'4',n:'0',o:'',s:0,t:'0'),(g:!((g:!((h:compiler,i:(compiler:clang1600,filters:(b:'0',binary:'1',binaryObject:'1',commentOnly:'0',debugCalls:'1',demangle:'0',directives:'0',execute:'0',intel:'0',libraryCode:'0',trim:'1',verboseDemangling:'0'),flagsViewOpen:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,libs:!(),options:'-std%3Dc%2B%2B17+-O2',overrides:!(),selection:(endColumn:1,endLineNumber:1,positionColumn:1,positionLineNumber:1,selectionStartColumn:1,selectionStartLineNumber:1,startColumn:1,startLineNumber:1),source:1),l:'5',n:'0',o:'+x86-64+clang+16.0.0+(Editor+%231)',t:'0')),header:(),l:'4',m:50,n:'0',o:'',s:0,t:'0'),(g:!((h:output,i:(compilerName:'x86-64+clang+16.0.0',editorid:1,fontScale:14,fontUsePx:'0',j:1,wrap:'1'),l:'5',n:'0',o:'Output+of+x86-64+clang+16.0.0+(Compiler+%231)',t:'0')),k:46.69421860597116,l:'4',m:50,n:'0',o:'',s:0,t:'0')),k:28.282168517308946,l:'3',n:'0',o:'',t:'0')),l:'2',n:'0',o:'',t:'0')),version:4) ]
+[ [Run this code](https://godbolt.org/#g:!((g:!((g:!((h:codeEditor,i:(filename:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,selection:(endColumn:77,endLineNumber:10,positionColumn:1,positionLineNumber:4,selectionStartColumn:77,selectionStartLineNumber:10,startColumn:1,startLineNumber:4),source:'%23include+%3Chttps://raw.githubusercontent.com/DmitriBogdanov/prototyping_utils/master/include/proto_utils.hpp%3E%0A%0Aint+main()+%7B%0A++++using+namespace+utl%3B%0A%0A++++std::random_device+rd%7B%7D%3B%0A++++random::generators::JSF32+gen%7Brd()%7D%3B%0A++++std::chi_squared_distribution+distr%7B2.%7D%3B+//+Chi-squared+distribution+with+a+n+%3D+2%0A%0A++++std::cout+%3C%3C+%22Random+value+from+distribution+-%3E+%22+%3C%3C+distr(gen)+%3C%3C+%22%5Cn%22%3B%0A%7D%0A'),l:'5',n:'0',o:'C%2B%2B+source+%231',t:'0')),k:71.71783148269105,l:'4',n:'0',o:'',s:0,t:'0'),(g:!((g:!((h:compiler,i:(compiler:clang1600,filters:(b:'0',binary:'1',binaryObject:'1',commentOnly:'0',debugCalls:'1',demangle:'0',directives:'0',execute:'0',intel:'0',libraryCode:'0',trim:'1',verboseDemangling:'0'),flagsViewOpen:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,libs:!(),options:'-std%3Dc%2B%2B17+-O2',overrides:!(),selection:(endColumn:1,endLineNumber:1,positionColumn:1,positionLineNumber:1,selectionStartColumn:1,selectionStartLineNumber:1,startColumn:1,startLineNumber:1),source:1),l:'5',n:'0',o:'+x86-64+clang+16.0.0+(Editor+%231)',t:'0')),header:(),l:'4',m:50,n:'0',o:'',s:0,t:'0'),(g:!((h:output,i:(compilerName:'x86-64+clang+16.0.0',editorid:1,fontScale:14,fontUsePx:'0',j:1,wrap:'1'),l:'5',n:'0',o:'Output+of+x86-64+clang+16.0.0+(Compiler+%231)',t:'0')),k:46.69421860597116,l:'4',m:50,n:'0',o:'',s:0,t:'0')),k:28.282168517308946,l:'3',n:'0',o:'',t:'0')),l:'2',n:'0',o:'',t:'0')),version:4) ]
+
 ```cpp
-std::random_device rd{};
-random::XorShift64StarGenerator gen{rd()};
-std::normal_distribution<double> distr;
+using namespace utl;
 
-std::cout << "Random value from N(0, 1) = " << distr(gen) << "\n";
+std::random_device rd{};
+random::generators::JSF32 gen{rd()};
+std::chi_squared_distribution distr{2.}; // Chi-squared distribution with a n = 2
+
+std::cout << "Random value from distribution -> " << distr(gen) << "\n";
 ```
 
 Output:
 ```
-Random value from N(0, 1) = 0.641989
-```
-
-### Benchmarking XorShift64&ast; with `UTL_PROFILER`
-
-[ [Run this code](https://godbolt.org/#z:OYLghAFBqd5QCxAYwPYBMCmBRdBLAF1QCcAaPECAMzwBtMA7AQwFtMQByARg9KtQYEAysib0QXACx8BBAKoBnTAAUAHpwAMvAFYTStJg1DIApACYAQuYukl9ZATwDKjdAGFUtAK4sGIM6SuADJ4DJgAcj4ARpjEIADMAKykAA6oCoRODB7evv6p6ZkCIWGRLDFxSbaY9o4CQgRMxAQ5Pn4BdpgOWQ1NBCUR0bEJyQqNza15HeP9oYPlw0kAlLaoXsTI7Bzm8aHI3lgA1CbxbggEBCkKIAD0N8RMAO4AdMCECF5RXkobsowEzzQLBuABEWIRiHgLKhgOhDKgAG43FLEVBEAgATxSoWAAH0vI5aAobiwmGNYjc9gdMMjUUR8YSFM8ECkUidsCYNABBTlc0IEQ6k0IQfmHJrAZCkQ7IBBNQ4AKnl4oRS2OAHYrNzDtrDt8cYdmGwFCkmJtdQRaCdNTytTq7jdDhZGDLScQANaHfBUKixf6HB4MdCoFiHYCMWJMIjEBS8zkATjQDHJqhRh1F4WO8RBhy4Gg0YA4eY0VtjGgTAmTqbG6BAIC8/IAbJJcQKlJh0Jns1xEiXufHS3Gg596IcFD5O4cNM9eza4wO7odlKiaCOw2EHo4jIcM0OovQFIdHu9dQw8PxiCGTIkLBopVwr9n8GNIV86gwB3IACpBXHKABKADyABiACSQTYH%2BEDmGY1a1gG6AQEs0GqiYGq8jqGGjvBEBtugSHxNa/ZluehwioIaYTsWBEUScbjblaxyWNYeCqmOl5MVmo4EDWIDYaqDo4Y0jjILiohjLRu70OyEB/ly4QgriACyXIABooZYObPPh1oYahIIDh%2B36/oBoHgZB0GwSA4JJtxuLwch6o6Zh2qWdZ1Z2YYHZrqhFi4XpM7OS53G1l4p7niwdmYGIuJPgQL4Elknp4OJGpTne05qvpBHoYFJFkQKeCUQxhW0fR1HWMxrHjhVnGxdAjDaTl2r%2BbazWtYcX4/v%2BwFgRBUFmDBwVWQQXBxnG8Rqg5PlNZhrkjWNE2howPl%2BZlAWBZZoVniQEXEFFtAxclcV4K%2BiWxT5aWaf52XtRheWiiVnFURYNGnGVL0VZYLGjtVHGPkd9UMI17UtVyuntZ1xk9WZ/VmPBwa1ipJBCAgZ4EE2vTEAA4uGG4kFNaG3TqBK0HBnkIyASPECjaMY%2BMOPrpGJBLe%2BGqrVlTnOZtYU7ZF0WxfFb5JSlN7POl12c5h93kY92bPa9dHhAxn0WN9bGMVYtUA2uwNgzqoNEbOkPdaZfXQfDLBk4GMVrHumCIQTksYRbtaqCQCio1Q6OSGMTTPLhOGYO2uuBYc0sFUV1GPYrytMV9VXsZr2Yu7xnk28O9sh/ra19mW84OkumAIn6QLYvQxBh6iIaoCkjjggAXvqTxMBijFmKF3zttBnqRkwA6WWgBKZm4pXq7RpXQVebjvgN63antBDrAwk4zqDHArKTHCJLwfiFrwqCcCPccvQoawbJgjHxDwpAEJo68rG6IBqlwzzP2qAAcV%2BSO/ZgNnGubJE3pIHed9SAHw4Lwa4t5b57xWHAWAMBEAoGDGXWI5BKClzoMMfYhhgBcAbHmPgdACCxGuBAKIoCoihCaBiTg18qHMGIBiACURtBdBgdfIEbBBAAQYLQWhe9SBYC%2BMANwYgiR0N4FgUkRhxCCPwHtboxdriCMwKoLoBIthaHIIIGooDaAnQeEwjwWBQHHUttwXgxdiBRHSJgEEmAZHAAMUYO%2BKwqAGGAAoAAangTAjwAIpEYJImQggRBiHYFIUJ8glBqFAboLg%2BhcEoBVvoE61xIArBrm%2BFRABaasJwQSmGPlwNUhxckATMPvaxkIsAZMQtUWoWQXCBkmH4RJwQ5hlAqHoNIGQ3xtN6YUN8AxunDESZ0bo9QZiDImTUdhPQZijKGHECZMzPBtD0L7ZoyyFirJWKfdYmwJAb04NvUgu9tHgMOKod%2BDZclNmlAYLc%2BDnhTg0KRXAhBmY7C4EsXgMCtBLBWAgKKWA4gNKAbwS2iRbyXP3pwSBIBoFuNIPApBaxLgEnQRATB5dwisC2Lc%2B5jycEvIbG8t5vB2zfNqXofgYTRDiCiQymJKh1CCISaQR4DwUiSNOVvEBgjwEAQJCkIeqAqA3LuQ8yQTzcE5gpe80iHgWCoIrr8/5N83EPxAJIClf9JBmC4HcjQiQ4zP3wfoTgwDSAwrhaA8BSKUWwN1WYd%2Bzx3XGobO/RIpT4gaHfnGfV1qODxCFVcxF2rXWhqqRcx1UbAX31INYjIzhJBAA%3D%3D%3D) ] (N limited by Godbolt time restrictions)
-```cpp
-// Benchmark different random generators
-constexpr int N = 900'000'000;
-constexpr std::uint64_t seed = 15;
-
-double sum = 0.;
-
-// Profile generating N doubles with uniform [0, 1] distribution
-UTL_PROFILER("std::rand()") {
-    srand(seed);
-    for (int i = 0; i < N; ++i) sum += std::rand() / (static_cast<double>(RAND_MAX) + 1.);
-}
-
-UTL_PROFILER("std::minstd_rand") {
-    std::minstd_rand gen{seed};
-    std::uniform_real_distribution dist{0., 1.};
-    for (int i = 0; i < N; ++i) sum += dist(gen);
-}
-
-UTL_PROFILER("std::mt19937") {
-    std::mt19937 gen{seed};
-    std::uniform_real_distribution dist{0., 1.};
-    for (int i = 0; i < N; ++i) sum += dist(gen);
-}
-
-UTL_PROFILER("random::XorShift64StarGenerator") {
-    utl::random::XorShift64StarGenerator gen{seed};
-    std::uniform_real_distribution dist{0., 1.};
-    for (int i = 0; i < N; ++i) sum += dist(gen);
-}
-
-UTL_PROFILER("random::rand_double()") {
-    random::xorshift64star.seed(seed);
-    for (int i = 0; i < N; ++i) sum += random::rand_double();
-}
-
-// Prevent compiler from optimizing away "unused" sum
-std::cout << sum << "\n";
-```
-
-Output (compiled with `-O2` using **g++ v.11.4.0**):
-```
------------------------------- UTL PROFILING RESULTS ------------------------------
-
- Total runtime -> 32.02 sec
-
- |                Call Site |                           Label |    Time | Time % |
- |--------------------------|---------------------------------|---------|--------|
- | examples.cpp:160, main() |           random::rand_double() |  4.70 s |  14.7% |
- | examples.cpp:154, main() | random::XorShift64StarGenerator |  4.74 s |  14.8% |
- | examples.cpp:148, main() |                    std::mt19937 | 10.58 s |  33.1% |
- | examples.cpp:142, main() |                std::minstd_rand |  5.96 s |  18.6% |
- | examples.cpp:137, main() |                     std::rand() |  5.28 s |  16.5% |
+Random value from distribution -> 0.158468
 ```
 
 ## Notes on random number generation
 
-As of 2024, the selection of pseudorandom number generators (aka [PRNGs](https://en.wikipedia.org/wiki/Pseudorandom_number_generator)) in the standard library [`<random>`](https://en.cppreference.com/w/cpp/header/random) is highly outdated, with most generators being developed before year 2000 and providing subpar characteristics.
+As of 2024, the selection of pseudorandom number generators (aka [PRNGs](https://en.wikipedia.org/wiki/Pseudorandom_number_generator)) in the standard library [&lt;random&gt;](https://en.cppreference.com/w/cpp/header/random) is highly outdated, with most generators being developed before year 2000 and providing sub-par characteristics.
 
 While suitable for most uses cases, better performance & quality can be achieved virtually "for free" by switching to a newer PRNG implementations.
 
@@ -243,24 +215,27 @@ Thankfully, `<random>` design is quite flexible and fully abstracts the concept 
 
 `utl::random` provides `<random>`-compatible implementations of several modern PRNGs. By default, rand functions from this header use **Xoshiro256++** as it well tested, used by several modern languages ([Rust](https://docs.rs/rand/latest/rand/), [Julia](https://docs.julialang.org/en/v1/stdlib/Random/), slightly different version is used by [.NET](https://devblogs.microsoft.com/dotnet/performance-improvements-in-net-6/), [GNU FORTRAN](https://gcc.gnu.org/fortran/) and [Lua](https://www.lua.org/manual/5.4/manual.html#pdf-math.random)) as their default and provides an excellent balance of speed and statistical quality.
 
-### Overview of available PRGNs
+### Overview of available PRNGs
 
-| Generator            | Performance | Memory     | Quality | Period            |
-| -------------------- | ----------- | ---------- | ------- | ----------------- |
-| `RomuDuoJr`          | ~195%       | 16 bytes   | ★★★☆☆   | $\approx 2^{51}$  |
-| `JSF32`              | ~195%       | 16 bytes   | ★★★☆☆   | $\approx 2^{126}$ |
-| `JSF64`              | ~180%       | 32 bytes   | ★★★★☆   | $\approx 2^{126}$ |
-| `Xoshiro256PlusPlus` | ~175%       | 32 bytes   | ★★★★☆   | $2^{256} − 1$     |
-| `Xorshift64Star`     | ~125%       | 8 bytes    | ★★★☆☆   | $2^{64} − 1$      |
-| `std::minstd_rand`   | 100%        | 8 bytes    | ★☆☆☆☆   | $2^{31} − 1$      |
-| `std::mt19937`       | ~70%        | 5000 bytes | ★★★☆☆   | $2^{19937} − 1$   |
-| `std::ranlux48`      | ~4%         | 120 bytes  | ★★★★☆   | $\approx 2^{576}$ |
+| Generator            | Performance           | Memory     | Quality | Period            | Motivation                          |
+| -------------------- | --------------------- | ---------- | ------- | ----------------- | ----------------------------------- |
+| `RomuTrio32`         | ~200% (450%)**&ast;** | 12 bytes   | ★★★☆☆   | $\geq 2^{53}$     | Fastest 32-bit PRNG                 |
+| `JSF32`              | ~200% (360%)**&ast;** | 16 bytes   | ★★★☆☆   | $\approx 2^{126}$ | Fast yet decent quality 32-bit PRNG |
+| `RomuDuoJr`          | ~195%                 | 16 bytes   | ★★☆☆☆   | $\geq 2^{51}$     | Fastest 64-bit PRNG                 |
+| `JSF64`              | ~180%                 | 32 bytes   | ★★★★☆   | $\approx 2^{126}$ | Fast yet decent quality 64-bit PRNG |
+| `Xoshiro256PlusPlus` | ~175%                 | 32 bytes   | ★★★★☆   | $2^{256} − 1$     | Best all purpose 64-bit PRNG        |
+| `Xorshift64Star`     | ~125%                 | 8 bytes    | ★★★☆☆   | $2^{64} − 1$      | Smallest state 64-bit PRNG          |
+| `std::minstd_rand`   | 100%                  | 8 bytes    | ★☆☆☆☆   | $2^{31} − 1$      |                                     |
+| `std::mt19937`       | ~70%                  | 5000 bytes | ★★★☆☆   | $2^{19937} − 1$   |                                     |
+| `std::ranlux48`      | ~4%                   | 120 bytes  | ★★★★☆   | $\approx 2^{576}$ |                                     |
+
+**[&ast;]** A lot of CPUs lacks modern 64-bit instructions, which can make 32-bit versions offer up to **300–500% speedup**. 
 
 > [!Note]
 > `C` function [rand()](https://en.cppreference.com/w/c/numeric/random/rand) is implementation-defined, but in virtually all existing implementation it uses an old [LCG](https://en.wikipedia.org/wiki/Linear_congruential_generator) engine similar to `std::minstd_rand`. It is generally an extremely low-quality way of generating random and faces a host of additional issues on platforms with low `RAND_MAX`, which includes Windows where `RAND_MAX` is equal `32767` (less than **2 bytes** of information, an almost ridiculous value, really).
 
 > [!Important]
-> Performance ratings are **relative to the commonly used  `std::minstd_rand` / `rand()`**. Particular number may differ depending on the hardware and compilation settings, however general trends tend to stay the same. Benchmarks can be fount [here](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/benchmarks/benchmark_random.cpp).
+> Performance ratings are **relative to the commonly used  `std::minstd_rand` / `rand()`**. Particular number may differ depending on the hardware and compilation settings, however general trends tend to stay the same. Benchmarks can be found [here](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/benchmarks/benchmark_random.cpp).
 
 Random quality ratings are as follows:
 
@@ -274,4 +249,75 @@ Random quality ratings are as follows:
 
 ### Why RNG quality matters
 
-### Common pitfalls
+Using low-quality random may introduce artificial biases and unexpected effects into what should be a stochastic simulation. Below are some examples of such effects:
+
+- Inaccurate statical estimates in [Monte—Carlo simulations](https://en.wikipedia.org/wiki/Monte_Carlo_method) and stochastic modeling
+- Biased optimizations in [genetic algorithms](https://en.wikipedia.org/wiki/Genetic_algorithm)
+- Noticeable biases in mob pathfinding in games (for example, [mobs tending to always go north-west](https://bugs.mojang.com/browse/MCPE-41092) as time goes on)
+- Issues in procedural generation
+
+These issues become particularly dangerous and difficult to diagnose in multidimensional simulations, as a lot of older PRNGs have significant statistical issues in higher dimensions that simply aren't apparent in a 1D case. 
+
+In general, most statistical issues fall into following groups:
+
+- Shorter-than-expected periods for some seed states
+- Non-uniform distribution of values over the output range
+- Correlation of successive values
+- Correlation of successive bits in a value
+- Correlation of successive seeds
+- Poor dimensional distribution of the output sequence
+
+### Visual examples
+
+#### RANDU
+
+The most famous example of low-quality random is [RANDU](https://en.wikipedia.org/wiki/RANDU) (a variation of the same [LCG](https://en.wikipedia.org/wiki/Linear_congruential_generator) used by most `C` programmers to this day) which was widely used in 1960s and 1970s for the lack of a better knowledge.
+
+Let's generate `10000` random points in a $[0, 1]^3$ cube, each points will generate with coordinates `{ randu(), randu(), randu() }`. After plotting the resulting picture and looking at it from a correct angle, we can clearly see that all points fall into just **12** distinct planes:
+
+<img src ="images/random_3d_points_angle.svg">
+
+<img src ="images/random_3d_points_above.svg">
+
+What we just observed is called "failing the [spectral test](https://en.wikipedia.org/wiki/Spectral_test) at an extremely low dimension", and for RANDU that dimension is **3**. Such quality is clearly not something one would want in their Monte—Carlo simulation with "random" realizations.
+
+In fact, this quality is generic to all LCGs — any LCG with modulus $m$ used to generate points in $N$-dimensional space will result in no more that $(N! \times m)^{1/N}$ hyperplanes, with other LCG implementations it's just not as noticeable that once could see the planes visually.
+
+#### minstd_rand
+
+While RANDU algorithm is no longer in use today, its family of algorithms (LCG) is still frequently used through `rand()` and `std::minstd_rand`, with `rand()` being the worst offender as it is the default way of generating random numbers in `C` (`C++` guides and documentation tend to prefer `std::mt19937` which despite not being ideal avoid most horrible of the issues).
+
+**Note:** Since nothing in the standard specifies how `rand()` should be implemented it is generally not something one could rely upon, in most cases it's LCG, sometimes it's [linear-feedback shift register](https://en.wikipedia.org/wiki/Linear-feedback_shift_register) which is a little better.
+
+We can easily demonstrate a significant correlation of successive seeds in the default implementation by creating a $200 \times 160$ matrix of random `1`s and `0`s, while re-seeding the generator with `i` at the beginning of each row `i`. This will lead to a following image:
+
+<img src ="images/random_grayscale_minstd_rand.svg">
+
+Using `std::mt19937` (or any other even slightly sensible engine) will not lead to such an horrific correlation, we get a visually uniform image:
+
+<img src ="images/random_grayscale_mt19937.svg">
+
+In practice, something like this would be encountered during any stochastic simulation where each run is simulated with a new seed.
+
+### Why not just use Mersenne Twister
+
+One could argue that a widely used [Mersenne Twister](https://en.wikipedia.org/wiki/Mersenne_Twister), which is case of `C++` is called `std::mt19937` is good enough for most purposes and that is true. For quite a while Mersenne Twister used to be the default choise for new RNG facilities — it's acceptably performant and has a decent statistical quality with a huge period.
+
+However Mersenne Twister still fails some of the less obvious statistical tests on [TestU01 BigCrush](https://en.wikipedia.org/wiki/TestU01), combined with rather subpar performance relative to newer methods and a huge state (**5000** bytes against **32** used by Xoshiro256++) there is little reason to use it in a modern environment.
+
+This trend can be observed rather clearly by looking at the lineup of default PRNGs used in different programming languages:
+
+| Language       | Fist release | Default PRNG                                          | Quality       |
+| -------------- | ------------ | ----------------------------------------------------- | ------------- |
+| `C`            | 1972         | LCG                                                   | Bad           |
+| `Matlab`       | 1979         | Mersenne Twister                                      | Decent        |
+| `C++`          | 1985         | Mersenne Twister / LCG                                | Decent / Bad  |
+| `Python`       | 1991         | Mersenne Twister                                      | Decent        |
+| `GNU Octave`   | 1993         | Mersenne Twister                                      | Decent        |
+| `Python NumPy` | 2006         | Mersenne Twister (below v.1.17), PCG64 (above v.1.17) | Decent / Good |
+| `Julia`        | 2012         | Xoshiro256++                                          | Good          |
+| `Rust`         | 2015         | ChaCha12 / Xoshiro256++                               | Good          |
+
+While older languages usually stick to their already existing implementations, newer project tend to choose modern PRNGs for the purpose. This establishes a strong case for switching to using `Xoshiro` / `PCG` family of PRNGs as a default choice in new projects. Engines such of `ChaCha` and `ISAAC` families also provide cryptographic security to the random sequence, which in essence means that the state of the engine cannot be easily discovered from a piece of its random sequence. This usually has a noticeable performance cost, however even they fair rather well compared to the old monsters such as `std::ranlux48` which runs almost **60 times slower** than Xoshiro256++.
+
+There was a certain consideration for including `ChaCha12` / `ChaCha20` into this module, however due to their less than trivial implementation and stronger security requirements it has be ruled that providing such facilities without the rigorous large-scale testing would be disingenuous. As of now such engines should be sourced from well-tested cryptography libraries.
