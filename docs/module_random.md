@@ -267,7 +267,7 @@ Thankfully, `<random>` design is quite flexible and fully abstracts the concept 
 | `std::mt19937`       | ~70%                  | 5000 bytes | ★★★☆☆   | $2^{19937} − 1$   |                                     |
 | `std::ranlux48`      | ~4%                   | 120 bytes  | ★★★★☆   | $\approx 2^{576}$ |                                     |
 
-**[&ast;]** A lot of CPUs lacks modern 64-bit instructions, which can make 32-bit versions offer up to **300–500% speedup**. 
+**[&ast;]** A lot of CPUs lacks 64-bit `rotl` instructions, which can make 32-bit versions offer up to **300–500% speedup**. 
 
 > [!Note]
 > `C` function [rand()](https://en.cppreference.com/w/c/numeric/random/rand) is implementation-defined, but in virtually all existing implementation it uses an old [LCG](https://en.wikipedia.org/wiki/Linear_congruential_generator) engine similar to `std::minstd_rand`. It is generally an extremely low-quality way of generating random and faces a host of additional issues on platforms with low `RAND_MAX`, which includes Windows where `RAND_MAX` is equal `32767` (less than **2 bytes** of information, an almost ridiculous value, really).
