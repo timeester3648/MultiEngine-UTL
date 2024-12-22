@@ -311,7 +311,7 @@ In general, most statistical issues fall into following groups:
 
 The most famous example of low-quality random is IBM's [RANDU](https://en.wikipedia.org/wiki/RANDU) (a variation of the same [LCG](https://en.wikipedia.org/wiki/Linear_congruential_generator) used by most `C` programmers to this day) which was widely used in 1960s and 1970s for the lack of a better knowledge.
 
-As a simples showcase of its flaws, let's generate `10000` random points in a $[0, 1]^3$ cube, each points will generate with coordinates `{ randu(), randu(), randu() }`. After plotting the resulting picture and looking at it from a correct angle, we can clearly see that all points fall into just **12** distinct planes:
+As a simplest showcase of its flaws, let's generate `10000` random points in a $[0, 1]^3$ cube, each points will generate with coordinates `{ randu(), randu(), randu() }`. After plotting the resulting picture and looking at it from a correct angle, we can clearly see that all points fall into just **12** distinct planes:
 
 <img src ="images/random_3d_points_angle.svg">
 
@@ -321,7 +321,7 @@ What we just observed is called "failing the [spectral test](https://en.wikipedi
 
 In fact, this quality is generic to all LCGs — any LCG with modulus $m$ used to generate points in $N$-dimensional space will result in no more that $(N! \times m)^{1/N}$ hyperplanes, with other LCG implementations it's just not as noticeable that once could see the planes visually.
 
-#### minstd_rand
+#### minstd_rand & rand()
 
 While RANDU algorithm is no longer in use today, its family of algorithms (LCG) is still frequently used through `rand()` and `std::minstd_rand`, with `rand()` being the worst offender as it is the default way of generating random numbers in `C` (`C++` guides and documentation tend to prefer `std::mt19937` which despite not being ideal avoid most horrible of the issues).
 
@@ -339,9 +339,9 @@ In practice, something like this would be encountered during any stochastic simu
 
 ### Why not just use Mersenne Twister
 
-One could argue that a widely used [Mersenne Twister](https://en.wikipedia.org/wiki/Mersenne_Twister), which is case of `C++` is called `std::mt19937` is good enough for most purposes and that is true. For quite a while Mersenne Twister used to be the default choise for new RNG facilities — it's acceptably performant and has a decent statistical quality with a huge period.
+One could argue that a widely used [Mersenne Twister](https://en.wikipedia.org/wiki/Mersenne_Twister), which, in case of `C++` is called `std::mt19937` should be good enough for most purposes and that is true. For quite a while Mersenne Twister used to be the default choise for new RNG facilities — it is acceptably performant and has a decent statistical quality with a huge period.
 
-However Mersenne Twister still fails some of the less obvious statistical tests on [TestU01 BigCrush](https://en.wikipedia.org/wiki/TestU01), combined with rather subpar performance relative to newer methods and a huge state (**5000** bytes against **32** used by Xoshiro256++) there is little reason to use it in a modern environment.
+However Mersenne Twister still fails some of the less obvious statistical tests on [TestU01 BigCrush](https://en.wikipedia.org/wiki/TestU01), combined with rather subpar performance relative to the newer methods and a huge state (**5000** bytes against **32** used by Xoshiro256++) there is little reason to use it in a modern environment.
 
 This trend can be observed rather clearly by looking at the lineup of default PRNGs used in different programming languages:
 
@@ -356,6 +356,6 @@ This trend can be observed rather clearly by looking at the lineup of default PR
 | `Julia`        | 2012         | Xoshiro256++                                          | Good          |
 | `Rust`         | 2015         | ChaCha12 / Xoshiro256++                               | Good          |
 
-While older languages usually stick to their already existing implementations, newer project tend to choose modern PRNGs for the purpose. This establishes a strong case for switching to using `Xoshiro` / `PCG` family of PRNGs as a default choice in new projects. Engines such of `ChaCha` and `ISAAC` families also provide cryptographic security to the random sequence, which in essence means that the state of the engine cannot be easily discovered from a piece of its random sequence. This usually has a noticeable performance cost, however even they fair rather well compared to the old monsters such as `std::ranlux48` which runs almost **60 times slower** than Xoshiro256++.
+While older languages usually stick to their already existing implementations, newer project tend to choose modern PRNGs for the purpose. This establishes a strong case for switching to using `Xoshiro` / `PCG` family of PRNGs as a default choice in new projects. Engines of families such as `ChaCha` and `ISAAC` also provide cryptographic security to the random sequence, which in essence means that the state of the engine cannot be easily discovered from a piece of its random sequence. This usually has a noticeable performance cost, however even they fair rather well compared to the old monsters such as `std::ranlux48` which runs almost **60 times slower** than Xoshiro256++.
 
-There was a certain consideration for including `ChaCha12` / `ChaCha20` into this module, however due to their less than trivial implementation and stronger security requirements it has be ruled that providing such facilities without the rigorous large-scale testing would be disingenuous. As of now such engines should be sourced from well-tested cryptography libraries.
+There was a certain consideration for including `ChaCha12` / `ChaCha20` into this module, however due to their less than trivial implementation and stronger security requirements it was decided that providing such facilities without the rigorous large-scale testing would be disingenuous. As of now such engines should be sourced from well-tested cryptography libraries.
