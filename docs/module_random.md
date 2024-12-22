@@ -86,29 +86,66 @@ T rand_linear_combination(const T& A, const T& B);
 
 ## Methods
 
-### XorShift64&ast; generator
+### Random bit generators
 
 > ```cpp
-> random::XorShift64StarGenerator
+> class GeneratorAPIExample {
+>     using result_type;
+> 
+>     static constexpr result_type min() noexcept;
+>     static constexpr result_type max() noexcept;
+> 
+>     GeneratorAPI(result_type seed);
+>     constexpr void seed(result_type seed) noexcept;
+>     constexpr result_type operator()() noexcept;
+> };
+> 
+> // 32-bit
+> class RomuTrio32         { /* Generator API */ };
+> class JSF32              { /* Generator API */ };
+> // 64-bit
+> class RomuDuoJr          { /* Generator API */ };
+> class JSF64              { /* Generator API */ };
+> class Xoshiro256PlusPlus { /* Generator API */ };
+> class Xorshift64Star     { /* Generator API */ };
 > ```
 
-Standard-compliant uniform random bit generator (see [random generator requirements](https://en.cppreference.com/w/cpp/named_req/UniformRandomBitGenerator)). Implements **XorShift64&ast;** suggested by Marsaglia G. in 2003 "Journal of Statistical Software" (see [original publication](https://www.jstatsoft.org/article/view/v008i14) and [other XorShift variantions](https://en.wikipedia.org/wiki/Xorshift)).
+All of these generators satisfy [uniform random bit generator generator requirements](https://en.cppreference.com/w/cpp/named_req/UniformRandomBitGenerator) and [std::uniform_random_bit_generator](https://en.cppreference.com/w/cpp/numeric/random/uniform_random_bit_generator) concept, which makes them drop-in replacements for standard generators such as `std::mt19937`.
 
-The engine has a small state (**8 bytes**, same as [std::minstd_rand](https://en.cppreference.com/w/cpp/numeric/random/linear_congruential_engine), in comparison [std::mt19937](https://en.cppreference.com/w/cpp/numeric/random/mersenne_twister_engine) has a state of **5000 bytes**) and tends perform similar to [std::rand](https://en.cppreference.com/w/cpp/numeric/random/rand) while providing good statistical quality (see [PCG engine summary](https://www.pcg-random.org/)). Used internally by all random functions in this module.
+Unlike standard generators these can also be used in `constexpr` functions.
+
+**Note:** Unfortunately, distributions such as `std::uniform_int_distribution` aren't marked `constexpr`, which makes non-trivial number generation a bit annoying. Their output will have to be used directly, similar to `rand()`.
 
 > ```cpp
-> random::xorshift64star
+> using default_generator_type = generators::Xoshiro256PlusPlus;
+> using default_result_type    = std::uint64_t;
 > ```
 
-Global instance of `XorShift64StarGenerator`.
+Typedefs for default PRNG of this module and its return type.
+
+> ```cpp
+> inline default_generator_type default_generator;
+> ```
+
+A global instance of **Xoshiro256++** generator used by convenience functions of this module.
+
+**Note:** All random engines are inherently non-thread-safe, a proper way of generating numbers in parallel is to create local generators on each thread and seed them with different values.
 
 > ```cpp
 > random::seed(uint64_t random_seed);
-> random::seed_with_time();
+> ```
+
+Seeds global random engine with `random_seed`.
+
+> ```cpp
 > random::seed_with_random_device();
 > ```
 
-Seeds random with a value.
+Seeds global random engine using [std::random_device](https://en.cppreference.com/w/cpp/numeric/random/random_device) which uses hardware source of non-deterministic randomness.
+
+**Note 1:** Resist the temptation to seed engines with `std::time(NULL)`, using random device is how it should be done.
+
+**Note 2:** If no hardware randomness is available, random device falls back onto an internal PRNG. This case is a rarity on modern hardware.
 
 ### Convenient random functions
 
@@ -144,7 +181,7 @@ Returns random normally distributed float/double with a mean $0$ and variance $1
 > bool random::rand_bool();
 > ```
 
-Returns true/false randomly. Effectively same as `rand_int(0, 1)`.
+Returns `true`/`false` randomly. Effectively same as `rand_uint(0, 1)`.
 
 > ```cpp
 > const T& rand_choise(std::initializer_list<T> objects);
@@ -162,28 +199,29 @@ Returns $\alpha A + (1 - \alpha) B$, with random $0 < \alpha < 1$. Useful for ve
 
 ### Getting random values
 
-[ [Run this code](https://godbolt.org/#z:OYLghAFBqd5QCxAYwPYBMCmBRdBLAF1QCcAaPECAMzwBtMA7AQwFtMQByARg9KtQYEAysib0QXACx8BBAKoBnTAAUAHpwAMvAFYTStJg1DIApACYAQuYukl9ZATwDKjdAGFUtAK4sGIAMzSrgAyeAyYAHI%2BAEaYxAGkAA6oCoRODB7evgHSyamOAqHhUSyx8f62mPYFDEIETMQEmT5%2BgZXV6XUNBEWRMXEJCvWNzdltQ929JWUBAJS2qF7EyOwc5v5hyN5YANQm/m4IBASJCiAA9OfETADuAHTAhAhe0V5Ky7KMBHdoLOcAIixCMQ8BZUMB0IZUAA3c6JYioIgEACeiTCwAA%2Bl5HLQFOcWEwhnFzpttpg4QiiFicQo7ghEol9tgTBoAIIs1lhAg7AlhCBcnYNYDIUg7ZAIBo7ABUUqF0NmewA7FY2Ts1Ts3uidsw2ApEkwVhqCLR9ir2ar1dcGOhUCwQCAlJh0Bibk8MVabSwMVhoXgVhBZqaOeqdkN0Pa0NjgyH1fs3HG9mYzB6MVyIBpRVwNBoFft/omzDGizG4wmPbb7Sm0xmdlmc8WG3sDgnzGYTABWNwMVvRoulg4FlM2l70ANN/OtxtT/tuHblu0gIeLaKjhVThszgsdrs9i195sD1tLkeYCAAWnbovbuf8E6T69jB9n88rhmdw5Xp4vV7XD83Pc7bsk17Esn0HN8MWiVBPDHPMCwfRtNxfRcIKgmDfwQ0D40PYDAN3VkNzAo8IPFVA8CUCATGVLhRTMUV/Co/4bzvQtELA5CU1I8jTyoiwaJ2OidgYxUmOnIjcJ3YC9ywlskxTWgwkwBoMV%2BaIwiYGoIDMO56LuZj4KQt8KxQ60MQU8JlNU9TNO03Sb2w2cAMktt/DNEDiEwAglgYHYNCDNlGI5Dh5loTh214PwOC0UhUE4eNLGsUNFmWTBE38HhSAITRgvmABrEBFS4O5CsVAAOdLJFKswADYAE4s0vUKOEkCLspizheDODMsqi4LSDgWAYEQFBbTRegyAoCBfjGgYtkMYAuGq7M%2BDoAg4jOCBojatTmGIZFOAynaGmRAB5aJtEwBwDt4X42EEE6GFofbetILBXmANwxFxa7XswAkjHEF78A8hw8GhTAzhezBVEu7FVmirkqjahTomuPaPCwNqCBBO1uF4cHiCgpR/j%2B%2BbzNAXr5ioAxgAUAA1PBMBuE7EkYH7%2BEEEQxHYKQZEERQVHUF7dBogwjBQaxrH0PBojOSB5lQRIakhs8wzzUwEssLhFR2M8TrMXgYTiEEsDlgN2kumoXGtUY/BokJFOmAYaLyNIBFtvRXZqKZ%2BniGi7EtzphiaTwWj0APQYELpGh90pndsYOPf94PY5mLh5gUZKVgkEKwtal7Yo4HZVFK6qz2qyQxTF4Ba2qu4NHrnYIFwQgSDS9PeB6rRZnmBAlKweJzaalrSDtdsM0i6LC86kBuuy%2BYBuGxYTmxchKGmug4giVhVhLsuK6r%2Bba/r%2BveCdVuTb0DnhFEcReevgW1DakXSBua5Emu3OOHC0hJ8NzgTrYkSNiHYqAqDF1LuXSuc0jDHwbhoJuHgWAzWIO3WYnd555RAJIOudVJBmC4KXDQ7ZaqFUWvoTgI8x4TzatPWws9MqYNIPlMwpU7isIIdVUq7Ztb%2BA0KVWqOCKEcH8PnKeHVGGUy/gbX%2BtCJFdxyqQAmqRnCSCAA%3D%3D%3D) ]
+[ [Run this code](https://godbolt.org/#z:OYLghAFBqd5QCxAYwPYBMCmBRdBLAF1QCcAaPECAMzwBtMA7AQwFtMQByARg9KtQYEAysib0QXACx8BBAKoBnTAAUAHpwAMvAFYTStJg1DIApACYAQuYukl9ZATwDKjdAGFUtAK4sGe1wAyeAyYAHI%2BAEaYxCBmpAAOqAqETgwe3r56icmOAkEh4SxRMXF2mA6pQgRMxATpPn5ctpj2uQxVNQT5YZHRsbbVtfWZTQqDXcE9RX1mAJS2qF7EyOwc5gDMwcjeWADUJutuCAQE8QogAPQXxEwA7gB0wIQIXhFeSsuyjAT3aCwXABEWIRiHgLKhgOhDKgAG4XeLEVBEAgAT3iwWAAH0vI5aAoLiwmGNohctjtMPDEURsbiFPcEPF4gdsCYNABBVls4IEXaE4IQWb7ADsVnZu3Fu3eGN2zDYCniTBWkoItAOoo5YolNwY6FQLBAICUmHQmNuz0x2t1LExWBheBWArVnIluzG6ANaBxzpdEoObj9%2BzMZktmO5EA0pF2XA0GkFPvjLoOAMDZn2hwDlr1BpDYYjUZjcYTCb9AfMZhMAFY3Awy974yXDimQ7rXvQBUWO%2BKkym0/7G5n9SBm4sIm3C536%2BnG7WqzWg3WfQ23E3DCaW6PMBAALQVyMV8ed7tl3sZ1dZoerm0jts7vcHjtLlOV6u1zWTvvLsshiKoTzticPusybHo%2BA7ZpeP5/veAG%2BlOn7zrOr5skWj5fpeyAIKgeBKBAJgik0uxxLs6x4QC0GwcBQYnv2Z6DiGGFYTheEWARREkUKZGHnBT6IfOb6LtxaE6pitCTDUmJ/BEwRMG0EBmPckbrPcgpHlRoG0eBwmiSE4mSdJsnyYpynUfB5a8eW6zqqRnIcPMtCcBWvB%2BBwWikKgnD%2BpY1iuosyyYIG6w8KQBCaLZ8wANYgEKXD3NFQoAByBZI8VmAAbAAnNGu72RwkhOaFbmcLw5wRiFLm2aQcCwDAiAoHq6L0GQFAQH8DV9NshjAFwqUxnwdAENE5wQBEBVScwxAopwQVjTUKIAPIRNo5RlUFfxsIIc0MLQk3laQWBvMAbhiHiU28FghJGOIu34MQy14DCmDnLtmCqOUOKrK53ItAVokRDcE0eFgBUEKC%2BrcLwD3ED%2BSgApgF3ANpoDlfMVAGMACgAGp4JgtxzfEjCnTIggiGI7BSET8hKGoBW6E0BhGCg1jWPoeAROckDzKg8RtE9W5ukmpheZYXBCrsW5zWYvCwtEoJYOzArNK0qQuDqwyNKQgSTIUxRZEkKQCGrus5Kk3Ta30owtHdAgdEMngNHoZQVNb4ym70MSjOMhse50rvTO78wKL5KwSHZDn5bt7kcLsqjxalW6pZIuwdUYUapfcGjp7sEC4IQJABVwsy8GVWizPMCCYEwWAxArOV5aQ%2BoVhGzmuZHxUgKVoXzFVtWLKcOLkJQrV0NEoSsKsMdxwnSf08Aqfp%2BnvDGrnst6PwxOiOI5Nr5TKjqLttOkLcNzxKdoccI5pDN1LnBzTi8Q4rsqBUNHsfx4nyez9188aFnHgsG1xB86F2Cp3CKIBJBpwypIMwXBY4aArOlaK3V9CcDrg3JuBVW62HbiA5GYCzDxXuAQmBqV4oVhFusDQ8V0oQJQRwdY4cW5FVwSXM%2BktL6YOYcXMKpBIbJGcJIIAA%3D) ]
+
 ```cpp
 using namespace utl;
 
 random::seed_with_random_device();
 std::cout
-    << "rand_int(0, 100) = "                << random::rand_int(0, 100)                << "\n"
-    << "rand_double() = "                   << random::rand_double()                   << "\n"
-    << "rand_double(-5, 5) = "              << random::rand_double(-5, 5)              << "\n"
-    << "rand_bool() = "                     << random::rand_bool()                     << "\n"
-    << "rand_choise({1, 2, 3}) = "          << random::rand_choise({1, 2, 3})          << "\n"
+    << "rand_int(0, 100)                = " << random::rand_int(0, 100)                << "\n"
+    << "rand_double()                   = " << random::rand_double()                   << "\n"
+    << "rand_double(-5, 5)              = " << random::rand_double(-5, 5)              << "\n"
+    << "rand_bool()                     = " << random::rand_bool()                     << "\n"
+    << "rand_choise({1, 2, 3})          = " << random::rand_choise({1, 2, 3})          << "\n"
     << "rand_linear_combination(2., 3.) = " << random::rand_linear_combination(2., 3.) << "\n";
 ```
 
 Output:
 ```
-rand_int(0, 100) = 82
-rand_double() = 0.419907
-rand_double(-5, 5) = -4.32745
-rand_bool() = 0
-rand_choise({1, 2, 3}) = 1
-rand_linear_combination(2., 3.) = 2.12557
+rand_int(0, 100)                = 14
+rand_double()                   = 0.333702
+rand_double(-5, 5)              = -1.9462
+rand_bool()                     = 0
+rand_choise({1, 2, 3})          = 2
+rand_linear_combination(2., 3.) = 2.13217
 ```
 
 ### Using custon PRNGs with &lt;random&gt;
