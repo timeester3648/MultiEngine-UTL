@@ -6,26 +6,44 @@
 
 Implements **XorShift64&ast;** random generator compatible with [&lt;random&gt;](https://en.cppreference.com/w/cpp/header/random), which is used internally to generate high quality random with performance slightly better than [std::rand()](https://en.cppreference.com/w/cpp/numeric/random/rand) and considerably better than classic [std::mt19937](https://en.cppreference.com/w/cpp/numeric/random/mersenne_twister_engine).
 
+**Why use `utl::random` over built-in functions?**
+
+- Easier API for most "daily" use cases
+- Likely to be faster than built-in methods
+- Provides [better quality random](#Notes-on-prngs) than built-in methods
+- Reproducible results, built-in engines may differ compiler to compiler
+- Random generators work even in `constexpr` context
+
 ## Definitions
 
 ```cpp
-// XorShift64* generator
-class XorShift64StarGenerator {
-public:
-    using result_type = uint64_t;
+// PRNG implementations
+namespace generators {
+    class GeneratorAPIExample {
+        using result_type;
+        
+        static constexpr result_type min() noexcept;
+        static constexpr result_type max() noexcept;
+        
+        GeneratorAPI(result_type seed);
+        constexpr void seed(result_type seed) noexcept;
+        constexpr result_type operator()() noexcept;
+    };
     
-    static constexpr result_type min();
-    static constexpr result_type max();
-    
-    void seed(uint64_t seed);
-    uint64_t operator()();
+    class RomuDuoJr          { /* Generator API */ };
+    class JSF32              { /* Generator API */ };
+    class JSF64              { /* Generator API */ };
+    class Xoshiro256PlusPlus { /* Generator API */ };
+    class Xorshift64Star     { /* Generator API */ };
 }
 
-XorShift64StarGenerator xorshift64star;
+// Default global PRNG
+generators::Xoshiro256PlusPlus default_generator;
 
-void seed(uint64_t random_seed);
-void seed_with_time();          // seed with time(NULL)
-void seed_with_random_device(); // seed with std::random_device
+using default_result_type = std::uint64_t;
+
+void seed(std::uint64_t seed);
+void seed_with_random_device();
 
 // Convenient random functions
 int rand_int(int min, int max);
@@ -214,3 +232,46 @@ Output (compiled with `-O2` using **g++ v.11.4.0**):
  | examples.cpp:142, main() |                std::minstd_rand |  5.96 s |  18.6% |
  | examples.cpp:137, main() |                     std::rand() |  5.28 s |  16.5% |
 ```
+
+## Notes on random number generation
+
+As of 2024, the selection of pseudorandom number generators (aka [PRNGs](https://en.wikipedia.org/wiki/Pseudorandom_number_generator)) in the standard library [`<random>`](https://en.cppreference.com/w/cpp/header/random) is highly outdated, with most generators being developed before year 2000 and providing subpar characteristics.
+
+While suitable for most uses cases, better performance & quality can be achieved virtually "for free" by switching to a newer PRNG implementations.
+
+Thankfully, `<random>` design is quite flexible and fully abstracts the concept of a random bit generator which makes it seamlessly usable with any custom PRNG that provides minimal necessary interface.
+
+`utl::random` provides `<random>`-compatible implementations of several modern PRNGs. By default, rand functions from this header use **Xoshiro256++** as it well tested, used by several modern languages ([Rust](https://docs.rs/rand/latest/rand/), [Julia](https://docs.julialang.org/en/v1/stdlib/Random/), slightly different version is used by [.NET](https://devblogs.microsoft.com/dotnet/performance-improvements-in-net-6/), [GNU FORTRAN](https://gcc.gnu.org/fortran/) and [Lua](https://www.lua.org/manual/5.4/manual.html#pdf-math.random)) as their default and provides an excellent balance of speed and statistical quality.
+
+### Overview of available PRGNs
+
+| Generator            | Performance | Memory     | Quality | Period            |
+| -------------------- | ----------- | ---------- | ------- | ----------------- |
+| `RomuDuoJr`          | ~195%       | 16 bytes   | ★★★☆☆   | $\approx 2^{51}$  |
+| `JSF32`              | ~195%       | 16 bytes   | ★★★☆☆   | $\approx 2^{126}$ |
+| `JSF64`              | ~180%       | 32 bytes   | ★★★★☆   | $\approx 2^{126}$ |
+| `Xoshiro256PlusPlus` | ~175%       | 32 bytes   | ★★★★☆   | $2^{256} − 1$     |
+| `Xorshift64Star`     | ~125%       | 8 bytes    | ★★★☆☆   | $2^{64} − 1$      |
+| `std::minstd_rand`   | 100%        | 8 bytes    | ★☆☆☆☆   | $2^{31} − 1$      |
+| `std::mt19937`       | ~70%        | 5000 bytes | ★★★☆☆   | $2^{19937} − 1$   |
+| `std::ranlux48`      | ~4%         | 120 bytes  | ★★★★☆   | $\approx 2^{576}$ |
+
+> [!Note]
+> `C` function [rand()](https://en.cppreference.com/w/c/numeric/random/rand) is implementation-defined, but in virtually all existing implementation it uses an old [LCG](https://en.wikipedia.org/wiki/Linear_congruential_generator) engine similar to `std::minstd_rand`. It is generally an extremely low-quality way of generating random and faces a host of additional issues on platforms with low `RAND_MAX`, which includes Windows where `RAND_MAX` is equal `32767` (less than **2 bytes** of information, an almost ridiculous value, really).
+
+> [!Important]
+> Performance ratings are **relative to the commonly used  `std::minstd_rand` / `rand()`**. Particular number may differ depending on the hardware and compilation settings, however general trends tend to stay the same. Benchmarks can be fount [here](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/benchmarks/benchmark_random.cpp).
+
+Random quality ratings are as follows:
+
+| Quality rating | Usage                            | Quality description                                          |
+| -------------- | -------------------------------- | ------------------------------------------------------------ |
+| ★★★★★          | Suitable for cryptography        | Cryptographically secure, satisfies [CSPRNG](https://en.wikipedia.org/wiki/Cryptographically_secure_pseudorandom_number_generator) requirements, this usually comes at the price of performance |
+| ★★★★☆          | Suitable for most use cases      | No significant issues in qualitative testing, passes [TestU01 Big Crush](https://simul.iro.umontreal.ca/testu01/tu01.html) |
+| ★★★☆☆          | Suitable for most use cases      | No significant issues in qualitative testing, might fail a few tests on Big Crush |
+| ★★☆☆☆          | Suitable for simple applications | Significant flaws in statistical quality in certain aspects  |
+| ★☆☆☆☆          | Suitable for simple applications | Significant flaws in statistical quality all-around          |
+
+### Why RNG quality matters
+
+### Common pitfalls

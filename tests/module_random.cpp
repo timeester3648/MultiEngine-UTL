@@ -31,8 +31,6 @@ TEST_CASE("Uniform distribution mean/min/max are sensible") {
     constexpr double eps = 2e-2; // epsilon used for double comparison, 1e-2 ~ 1% allowed error
     std::vector<double> vec(N);
     
-    utl::random::seed(5);
-    
     // Check for all utl::random:: uniform distribution functions
     // that mean/min/max are ~= their expected values
     for (auto &e : vec) e = utl::random::rand_double();
@@ -74,4 +72,13 @@ TEST_CASE("Uniform distribution mean/min/max are sensible") {
     CHECK(vec_mean(vec) == doctest::Approx( 0.0).epsilon(eps));
     CHECK(vec_min(vec)  == doctest::Approx(-2.0).epsilon(eps));
     CHECK(vec_max(vec)  == doctest::Approx( 2.0).epsilon(eps));
+    
+    // This is in no way a proper PRNG test, proper testing of PRNGs is usually done through
+    // Diehard testing suite:
+    // https://en.wikipedia.org/wiki/Diehard_tests
+    // and "TestU01" ANSI C library:
+    // https://en.wikipedia.org/wiki/TestU01
+    // a "good" PRNG would be expected to pass (or at least mostly pass) TestU01 Big Crush,
+    // however it is a task for PRNG designers, here we merely implement well known algorithms
+    // and check that their implementation wasn't accidentaly broken.
 }

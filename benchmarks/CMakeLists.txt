@@ -11,6 +11,7 @@ add_utl_bencmark(benchmark_log)
 add_utl_bencmark(benchmark_mvl)
 add_utl_bencmark(benchmark_parallel)
 add_utl_bencmark(benchmark_profiler)
+add_utl_bencmark(benchmark_random)
 
 # Link OpenMP if doing benchmarks with it.
 # Don't forget to add '-fopenmp' to 'target_compile_options' 
