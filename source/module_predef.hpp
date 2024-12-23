@@ -275,7 +275,7 @@ __builtin_assume(__VA_ARGS__)
 #else // no equivalent GCC built-in
 #endif
 
-[[noreturn]] void unreachable() {
+[[noreturn]] inline void unreachable() {
 #if defined(UTL_PREDEF_STANDARD_IS_23_PLUS)
     std::unreachable();
 #elif defined(UTL_PREDEF_COMPILER_IS_MSVC)
@@ -289,7 +289,7 @@ __builtin_assume(__VA_ARGS__)
 // --- Other Utils ---
 // ===================
 
-[[nodiscard]] std::string compilation_summary() {
+[[nodiscard]] inline std::string compilation_summary() {
     std::string buffer;
 
     buffer += "Compiler:          ";

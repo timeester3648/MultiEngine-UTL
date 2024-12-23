@@ -61,7 +61,7 @@ auto _available_localtime_impl(TimeMoment time_moment, TimeType timer)
     return localtime_r(std::forward<TimeType>(timer), std::forward<TimeMoment>(time_moment));
 }
 
-std::size_t _get_thread_index(const std::thread::id id) {
+inline std::size_t _get_thread_index(const std::thread::id id) {
     static std::size_t next_index = 0;
 
     static std::mutex                                       mutex;
@@ -168,7 +168,7 @@ constexpr int _max_int_digits = 2 + std::numeric_limits<T>::digits10;
 template <class T>
 void _append_stringified(std::string& str, const T& value);
 
-void _append_stringified_bool(std::string& str, bool value) { str += value ? "true" : "false"; }
+inline void _append_stringified_bool(std::string& str, bool value) { str += value ? "true" : "false"; }
 
 // Fast implementation for stringifying an integer and appending it to 'std::string'
 template <class T>
@@ -555,12 +555,12 @@ public:
 // --- Sink public API ---
 // =======================
 
-Sink& add_terminal_sink(std::ostream& os, Verbosity verbosity = Verbosity::INFO, Colors colors = Colors::ENABLE,
+inline Sink& add_terminal_sink(std::ostream& os, Verbosity verbosity = Verbosity::INFO, Colors colors = Colors::ENABLE,
                         clock::duration flush_interval = ms{}, const Columns& columns = Columns{}) {
     return Logger::instance().emplace_sink(os, verbosity, colors, flush_interval, columns);
 }
 
-Sink& add_file_sink(const std::string& filename, OpenMode open_mode = OpenMode::REWRITE,
+inline Sink& add_file_sink(const std::string& filename, OpenMode open_mode = OpenMode::REWRITE,
                     Verbosity verbosity = Verbosity::TRACE, Colors colors = Colors::DISABLE,
                     clock::duration flush_interval = ms{15}, const Columns& columns = Columns{}) {
     auto& os = Logger::instance().emplace_managed_file(filename, open_mode);

@@ -235,7 +235,7 @@ constexpr int _max_int_digits = 2 + std::numeric_limits<T>::digits10;
 template <class T>
 void _append_stringified(std::string& str, const T& value);
 
-void _append_stringified_bool(std::string& str, bool value) { str += value ? "true" : "false"; }
+inline void _append_stringified_bool(std::string& str, bool value) { str += value ? "true" : "false"; }
 
 template <class T>
 void _append_stringified_integer(std::string& str, T value) {
