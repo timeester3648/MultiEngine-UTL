@@ -104,24 +104,30 @@ T rand_linear_combination(const T& A, const T& B);
 
 > ```cpp
 > class GeneratorAPIExample {
->     using result_type;
+>    using result_type;
 > 
->     static constexpr result_type min() noexcept;
->     static constexpr result_type max() noexcept;
+>    static constexpr result_type min() noexcept;
+>    static constexpr result_type max() noexcept;
 > 
->     GeneratorAPI(result_type seed);
->     constexpr void seed(result_type seed) noexcept;
->     constexpr result_type operator()() noexcept;
+>    constexpr GeneratorAPI(result_type seed);
+>    constexpr void    seed(result_type seed) noexcept;
+> 
+>    template<class SeedSeq> GeneratorAPI(SeedSeq& seq);
+>    template<class SeedSeq> void    seed(SeedSeq& seq);
+> 
+>    constexpr result_type operator()() noexcept;
 > };
 > 
-> // 32-bit
+> // 32-bit PRNGs
 > class RomuTrio32         { /* Generator API */ };
 > class JSF32              { /* Generator API */ };
-> // 64-bit
+> // 64-bit PRNGs
 > class RomuDuoJr          { /* Generator API */ };
 > class JSF64              { /* Generator API */ };
 > class Xoshiro256PlusPlus { /* Generator API */ };
 > class Xorshift64Star     { /* Generator API */ };
+> // CSPRNGs
+> class ChaCha20           { /* Generator API */ };
 > ```
 
 All of these generators satisfy [uniform random bit generator generator requirements](https://en.cppreference.com/w/cpp/named_req/UniformRandomBitGenerator) and [std::uniform_random_bit_generator](https://en.cppreference.com/w/cpp/numeric/random/uniform_random_bit_generator) concept, which makes them drop-in replacements for standard generators such as `std::mt19937`.
