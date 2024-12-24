@@ -2,8 +2,10 @@
 
 #include "benchmark.hpp"
 #include <cstdint>
+#include <cstdlib>
 #include <fstream>
 #include <random>
+#include <unordered_map>
 #include <vector>
 
 // _____________ BENCHMARK IMPLEMENTATION _____________
@@ -59,11 +61,11 @@ void benchmark_prngs() {
     benchmark_prng<random::generators::JSF64>("JSF64");
     benchmark_prng<random::generators::Xoshiro256PlusPlus>("Xoshiro256++");
     benchmark_prng<random::generators::Xorshift64Star>("Xorshift64*");
+    benchmark_prng<random::generators::ChaCha20>("ChaCha20");
 }
 
 int main() {
-
-
+    
     benchmark_prngs();
 
     return 0;

@@ -18,6 +18,8 @@ Implements several random bit generators seamlessly compatible with [&lt;random&
 
 - [64-bit XorShift64&ast; PRNG](https://www.jstatsoft.org/article/view/v008i14)
 
+- [ChaCha20 CSPRNG](https://en.wikipedia.org/wiki/Salsa20#ChaCha_variant)
+
 These pseudorandom number generators (aka [PRNGs](https://en.wikipedia.org/wiki/Pseudorandom_number_generator)) cover most of the common uses cases better than somewhat outdated standard library implementations, see [notes on random number generation](#notes-on-random-number-generation).
 
 **Why use `utl::random` over built-in functions?**
@@ -27,6 +29,8 @@ These pseudorandom number generators (aka [PRNGs](https://en.wikipedia.org/wiki/
 - Provides [better quality random](#notes-on-random-number-generation) than built-in methods
 - Reproducible results, built-in engines may differ compiler to compiler
 - Random generators work even in `constexpr` context
+- An option to use [cryptographically secure PRNG](https://en.wikipedia.org/wiki/Cryptographically_secure_pseudorandom_number_generator)
+- More reliable sources of entropy than [std::random_device](https://en.cppreference.com/w/cpp/numeric/random/random_device)
 
 ## Definitions
 
@@ -39,19 +43,25 @@ namespace generators {
         static constexpr result_type min() noexcept;
         static constexpr result_type max() noexcept;
         
-        GeneratorAPI(result_type seed);
-        constexpr void seed(result_type seed) noexcept;
+        constexpr GeneratorAPI(result_type seed);
+        constexpr void    seed(result_type seed) noexcept;
+        
+        template<class SeedSeq> GeneratorAPI(SeedSeq& seq);
+        template<class SeedSeq> void    seed(SeedSeq& seq);
+        
         constexpr result_type operator()() noexcept;
     };
     
-    // 32-bit
+    // 32-bit PRNGs
     class RomuTrio32         { /* Generator API */ };
     class JSF32              { /* Generator API */ };
-    // 64-bit
+    // 64-bit PRNGs
     class RomuDuoJr          { /* Generator API */ };
     class JSF64              { /* Generator API */ };
     class Xoshiro256PlusPlus { /* Generator API */ };
     class Xorshift64Star     { /* Generator API */ };
+    // CSPRNGs
+    class ChaCha20           { /* Generator API */ };
 }
 
 // Default global PRNG
@@ -61,7 +71,11 @@ using default_result_type    = std::uint64_t;
 inline default_generator_type default_generator;
 
 void seed(std::uint64_t seed);
-void seed_with_random_device();
+void seed_with_entropy();
+
+// Entropy
+std::seed_seq entropy_seq();
+std::uint32_t entropy();
 
 // Convenient random functions
 int rand_int(int min, int max);
@@ -116,6 +130,8 @@ Unlike standard generators these can also be used in `constexpr` functions.
 
 **Note:** Unfortunately, distributions such as `std::uniform_int_distribution` aren't marked `constexpr`, which makes non-trivial number generation a bit annoying. Their output will have to be used directly, similar to `rand()`.
 
+### Default global PRNG
+
 > ```cpp
 > using default_generator_type = generators::Xoshiro256PlusPlus;
 > using default_result_type    = std::uint64_t;
@@ -138,14 +154,33 @@ A global instance of **Xoshiro256++** generator used by convenience functions of
 Seeds global random engine with `random_seed`.
 
 > ```cpp
-> random::seed_with_random_device();
+> random::seed_with_entropy();
 > ```
 
-Seeds global random engine using [std::random_device](https://en.cppreference.com/w/cpp/numeric/random/random_device) which uses hardware source of non-deterministic randomness.
+Seeds global random engine using combined entropy from several sources, the main one being [std::random_device](https://en.cppreference.com/w/cpp/numeric/random/random_device) which uses hardware source of non-deterministic randomness.
 
-**Note 1:** Resist the temptation to seed engines with `std::time(NULL)`, using random device is how it should be done.
+It is effectively the same as seeding global engine with `random::entropy_seq()`.
 
-**Note 2:** If no hardware randomness is available, random device falls back onto an internal PRNG. This case is a rarity on modern hardware.
+**Note 1:** Resist the temptation to seed engines with `std::time(NULL)`, using proper entropy is how it should be done.
+
+**Note 2:** If no hardware randomness is available, `std::random_device` falls back onto an internal PRNG, it is generally not an issue due to multiple sources of entropy, however it makes cryptographic usage quite tricky.
+
+### Entropy
+
+```cpp
+std::seed_seq entropy_seq();
+std::uint32_t entropy();
+```
+
+These functions serve a role of a "slightly better and more convenient [std::random_device](https://en.cppreference.com/w/cpp/numeric/random/random_device)".
+
+`std::random_device` has a critical deficiency in it's design — in case its implementation doesn't provide a proper source of entropy, it is free to fallback onto a regular PRNGs that don't change from run to run. The method [std::random_device::entropy()](https://en.cppreference.com/w/cpp/numeric/random/random_device/entropy) which should be able to detect that information is notoriously unreliable and returns different things on every platform.
+
+`entropy()` samples several sources of entropy (including the `std::random_device` itself) and is guaranteed to change from run to run even if it can't provide a proper hardware-sourced entropy that would be suitable for cryptography. It can be used as a drop-in replacement to `std::random_device{}()` calls.
+
+`entropy_seq()` generates a full [std::seed_seq](https://en.cppreference.com/w/cpp/numeric/random/seed_seq) instead of a single number, it is mainly useful for seeding generators with a large state.
+
+**Note:** These functions are thread-safe.
 
 ### Convenient random functions
 
@@ -226,13 +261,12 @@ rand_linear_combination(2., 3.) = 2.13217
 
 ### Using custon PRNGs with &lt;random&gt;
 
-[ [Run this code](https://godbolt.org/#g:!((g:!((g:!((h:codeEditor,i:(filename:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,selection:(endColumn:77,endLineNumber:10,positionColumn:1,positionLineNumber:4,selectionStartColumn:77,selectionStartLineNumber:10,startColumn:1,startLineNumber:4),source:'%23include+%3Chttps://raw.githubusercontent.com/DmitriBogdanov/prototyping_utils/master/include/proto_utils.hpp%3E%0A%0Aint+main()+%7B%0A++++using+namespace+utl%3B%0A%0A++++std::random_device+rd%7B%7D%3B%0A++++random::generators::JSF32+gen%7Brd()%7D%3B%0A++++std::chi_squared_distribution+distr%7B2.%7D%3B+//+Chi-squared+distribution+with+a+n+%3D+2%0A%0A++++std::cout+%3C%3C+%22Random+value+from+distribution+-%3E+%22+%3C%3C+distr(gen)+%3C%3C+%22%5Cn%22%3B%0A%7D%0A'),l:'5',n:'0',o:'C%2B%2B+source+%231',t:'0')),k:71.71783148269105,l:'4',n:'0',o:'',s:0,t:'0'),(g:!((g:!((h:compiler,i:(compiler:clang1600,filters:(b:'0',binary:'1',binaryObject:'1',commentOnly:'0',debugCalls:'1',demangle:'0',directives:'0',execute:'0',intel:'0',libraryCode:'0',trim:'1',verboseDemangling:'0'),flagsViewOpen:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,libs:!(),options:'-std%3Dc%2B%2B17+-O2',overrides:!(),selection:(endColumn:1,endLineNumber:1,positionColumn:1,positionLineNumber:1,selectionStartColumn:1,selectionStartLineNumber:1,startColumn:1,startLineNumber:1),source:1),l:'5',n:'0',o:'+x86-64+clang+16.0.0+(Editor+%231)',t:'0')),header:(),l:'4',m:50,n:'0',o:'',s:0,t:'0'),(g:!((h:output,i:(compilerName:'x86-64+clang+16.0.0',editorid:1,fontScale:14,fontUsePx:'0',j:1,wrap:'1'),l:'5',n:'0',o:'Output+of+x86-64+clang+16.0.0+(Compiler+%231)',t:'0')),k:46.69421860597116,l:'4',m:50,n:'0',o:'',s:0,t:'0')),k:28.282168517308946,l:'3',n:'0',o:'',t:'0')),l:'2',n:'0',o:'',t:'0')),version:4) ]
+[ [Run this code](https://godbolt.org/#g:!((g:!((g:!((h:codeEditor,i:(filename:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,selection:(endColumn:1,endLineNumber:5,positionColumn:1,positionLineNumber:5,selectionStartColumn:1,selectionStartLineNumber:5,startColumn:1,startLineNumber:5),source:'%23include+%3Chttps://raw.githubusercontent.com/DmitriBogdanov/prototyping_utils/master/include/proto_utils.hpp%3E%0A%0Aint+main()+%7B%0A++++using+namespace+utl%3B%0A%0A++++random::generators::JSF32+gen%7Brandom::entropy()%7D%3B%0A++++std::chi_squared_distribution+distr%7B2.%7D%3B+//+Chi-squared+distribution+with+a+n+%3D+2%0A%0A++++std::cout+%3C%3C+%22Random+value+from+distribution+-%3E+%22+%3C%3C+distr(gen)+%3C%3C+%22%5Cn%22%3B%0A%7D%0A'),l:'5',n:'0',o:'C%2B%2B+source+%231',t:'0')),k:71.71783148269105,l:'4',n:'0',o:'',s:0,t:'0'),(g:!((g:!((h:compiler,i:(compiler:clang1600,filters:(b:'0',binary:'1',binaryObject:'1',commentOnly:'0',debugCalls:'1',demangle:'0',directives:'0',execute:'0',intel:'0',libraryCode:'0',trim:'1',verboseDemangling:'0'),flagsViewOpen:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,libs:!(),options:'-std%3Dc%2B%2B17+-O2',overrides:!(),selection:(endColumn:1,endLineNumber:1,positionColumn:1,positionLineNumber:1,selectionStartColumn:1,selectionStartLineNumber:1,startColumn:1,startLineNumber:1),source:1),l:'5',n:'0',o:'+x86-64+clang+16.0.0+(Editor+%231)',t:'0')),header:(),l:'4',m:50,n:'0',o:'',s:0,t:'0'),(g:!((h:output,i:(compilerName:'x86-64+clang+16.0.0',editorid:1,fontScale:14,fontUsePx:'0',j:1,wrap:'1'),l:'5',n:'0',o:'Output+of+x86-64+clang+16.0.0+(Compiler+%231)',t:'0')),k:46.69421860597116,l:'4',m:50,n:'0',o:'',s:0,t:'0')),k:28.282168517308946,l:'3',n:'0',o:'',t:'0')),l:'2',n:'0',o:'',t:'0')),version:4) ]
 
 ```cpp
 using namespace utl;
 
-std::random_device rd{};
-random::generators::JSF32 gen{rd()};
+random::generators::JSF32 gen{random::entropy()};
 std::chi_squared_distribution distr{2.}; // Chi-squared distribution with a n = 2
 
 std::cout << "Random value from distribution -> " << distr(gen) << "\n";
@@ -258,11 +292,12 @@ Thankfully, `<random>` design is quite flexible and fully abstracts the concept 
 | Generator            | Performance           | Memory     | Quality | Period            | Motivation                          |
 | -------------------- | --------------------- | ---------- | ------- | ----------------- | ----------------------------------- |
 | `RomuTrio32`         | ~200% (450%)**&ast;** | 12 bytes   | ★★★☆☆   | $\geq 2^{53}$     | Fastest 32-bit PRNG                 |
-| `JSF32`              | ~200% (360%)**&ast;** | 16 bytes   | ★★★☆☆   | $\approx 2^{126}$ | Fast yet decent quality 32-bit PRNG |
+| `JSF32`              | ~200% (360%)**&ast;** | 16 bytes   | ★★★★☆   | $\approx 2^{126}$ | Fast yet decent quality 32-bit PRNG |
 | `RomuDuoJr`          | ~195%                 | 16 bytes   | ★★☆☆☆   | $\geq 2^{51}$     | Fastest 64-bit PRNG                 |
 | `JSF64`              | ~180%                 | 32 bytes   | ★★★★☆   | $\approx 2^{126}$ | Fast yet decent quality 64-bit PRNG |
 | `Xoshiro256PlusPlus` | ~175%                 | 32 bytes   | ★★★★☆   | $2^{256} − 1$     | Best all purpose 64-bit PRNG        |
 | `Xorshift64Star`     | ~125%                 | 8 bytes    | ★★★☆☆   | $2^{64} − 1$      | Smallest state 64-bit PRNG          |
+| `ChaCha20`           | ~40%                  | 120 bytes  | ★★★★★   | $2^{128}$         | Cryptographically secure PRNG       |
 | `std::minstd_rand`   | 100%                  | 8 bytes    | ★☆☆☆☆   | $2^{31} − 1$      |                                     |
 | `std::mt19937`       | ~70%                  | 5000 bytes | ★★★☆☆   | $2^{19937} − 1$   |                                     |
 | `std::ranlux48`      | ~4%                   | 120 bytes  | ★★★★☆   | $\approx 2^{576}$ |                                     |
@@ -357,5 +392,3 @@ This trend can be observed rather clearly by looking at the lineup of default PR
 | `Rust`         | 2015         | ChaCha12 / Xoshiro256++                               | Good          |
 
 While older languages usually stick to their already existing implementations, newer project tend to choose modern PRNGs for the purpose. This establishes a strong case for switching to using `Xoshiro` / `PCG` family of PRNGs as a default choice in new projects. Engines of families such as `ChaCha` and `ISAAC` also provide cryptographic security to the random sequence, which in essence means that the state of the engine cannot be easily discovered from a piece of its random sequence. This usually has a noticeable performance cost, however even they fair rather well compared to the old monsters such as `std::ranlux48` which runs almost **60 times slower** than Xoshiro256++.
-
-There was a certain consideration for including `ChaCha12` / `ChaCha20` into this module, however due to their less than trivial implementation and stronger security requirements it was decided that providing such facilities without the rigorous large-scale testing would be disingenuous. As of now such engines should be sourced from well-tested cryptography libraries.
