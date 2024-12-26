@@ -8,8 +8,6 @@
 //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-
-
 #if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_RANDOM)
 #ifndef UTLHEADERGUARD_RANDOM
 #define UTLHEADERGUARD_RANDOM
@@ -229,6 +227,9 @@ public:
     template <class SeedSeq, _is_seed_seq_enable_if<SeedSeq> = true>
     void seed(SeedSeq&& seq) {
         seq.generate(this->s.begin(), this->s.end());
+        this->s[0] = _ensure_nonzero(this->s[0]); // std::seed_seq can generate zeroes
+        this->s[1] = _ensure_nonzero(this->s[1]); // and we don't want a zero-state here
+        this->s[2] = _ensure_nonzero(this->s[2]);
     }
 
     constexpr result_type operator()() noexcept {
@@ -333,8 +334,8 @@ public:
 
     template <class SeedSeq, _is_seed_seq_enable_if<SeedSeq> = true>
     void seed(SeedSeq&& seq) {
-        this->s[0] = _seed_seq_to_uint64(seq);
-        this->s[1] = _seed_seq_to_uint64(seq);
+        this->s[0] = _ensure_nonzero(_seed_seq_to_uint64(seq)); // std::seed_seq can generate zeroes
+        this->s[1] = _ensure_nonzero(_seed_seq_to_uint64(seq)); // and we don't want a zero-state here
         // we have to generate multiple std::uint32_t's and then join them into std::uint64_t't to properly initialize
     }
 
@@ -441,10 +442,10 @@ public:
 
     template <class SeedSeq, _is_seed_seq_enable_if<SeedSeq> = true>
     void seed(SeedSeq&& seq) {
-        this->s[0] = _seed_seq_to_uint64(seq);
-        this->s[1] = _seed_seq_to_uint64(seq);
-        this->s[2] = _seed_seq_to_uint64(seq);
-        this->s[3] = _seed_seq_to_uint64(seq);
+        this->s[0] = _ensure_nonzero(_seed_seq_to_uint64(seq)); // std::seed_seq can generate zeroes
+        this->s[1] = _ensure_nonzero(_seed_seq_to_uint64(seq)); // and we don't want a zero-state here
+        this->s[2] = _ensure_nonzero(_seed_seq_to_uint64(seq));
+        this->s[3] = _ensure_nonzero(_seed_seq_to_uint64(seq));
         // we have to generate multiple std::uint32_t's and then join them into std::uint64_t't to properly initialize
     }
 
@@ -496,7 +497,8 @@ public:
 
     template <class SeedSeq, _is_seed_seq_enable_if<SeedSeq> = true>
     void seed(SeedSeq&& seq) {
-        this->s = _seed_seq_to_uint32(seq);
+        this->s = _ensure_nonzero(_seed_seq_to_uint64(seq));
+        // std::seed_seq can generate zeroes and we don't want a zero-state here
     }
 
     constexpr result_type operator()() noexcept {
