@@ -88,7 +88,7 @@ constexpr int _log_10_ceil(T num) {
     return num < 10 ? 1 : 1 + _log_10_ceil(num / 10);
 }
 
-std::string _pretty_error(std::size_t cursor, const std::string& chars) {
+[[nodiscard]] inline std::string _pretty_error(std::size_t cursor, const std::string& chars) {
     // Special case for empty buffers
     if (chars.empty()) return "";
 
@@ -6500,7 +6500,7 @@ constexpr std::uint64_t _splitmix64(std::uint64_t& state) noexcept {
 }
 
 // Merging integers into the bits of a larger one
-std::uint64_t _merge_uint32_into_uint64(std::uint32_t a, std::uint32_t b) {
+[[nodiscard]] constexpr std::uint64_t _merge_uint32_into_uint64(std::uint32_t a, std::uint32_t b) {
     return static_cast<std::uint64_t>(a) | (static_cast<std::uint64_t>(b) << 32);
 }
 
@@ -6600,11 +6600,11 @@ public:
         this->seed(seq);
     }
 
-    [[nodiscard]] static constexpr result_type min() noexcept { return std::numeric_limits<result_type>::min(); }
+    [[nodiscard]] static constexpr result_type min() noexcept { return 1; }
     [[nodiscard]] static constexpr result_type max() noexcept { return std::numeric_limits<result_type>::max(); }
 
     constexpr void seed(result_type seed) noexcept {
-        result_type splitmix32_state = _ensure_nonzero(seed); // RomuDuoJr shouln't be zero-initialized
+        result_type splitmix32_state = _ensure_nonzero(seed); // RomuTrio shouln't be zero-initialized
         this->s[0]                   = _splitmix32(splitmix32_state);
         this->s[1]                   = _splitmix32(splitmix32_state);
         // Like Xoshiro, Romu recommends using SplitMix32 to initialize its state
@@ -6705,7 +6705,7 @@ public:
         this->seed(seq);
     }
 
-    [[nodiscard]] static constexpr result_type min() noexcept { return std::numeric_limits<result_type>::min(); }
+    [[nodiscard]] static constexpr result_type min() noexcept { return 1; }
     [[nodiscard]] static constexpr result_type max() noexcept { return std::numeric_limits<result_type>::max(); }
 
     constexpr void seed(result_type seed) noexcept {
@@ -6812,7 +6812,7 @@ public:
         this->seed(seq);
     }
 
-    [[nodiscard]] static constexpr result_type min() noexcept { return std::numeric_limits<result_type>::min(); }
+    [[nodiscard]] static constexpr result_type min() noexcept { return 1; }
     [[nodiscard]] static constexpr result_type max() noexcept { return std::numeric_limits<result_type>::max(); }
 
     constexpr void seed(result_type seed) noexcept {
@@ -6871,7 +6871,7 @@ public:
         this->seed(seq);
     }
 
-    [[nodiscard]] static constexpr result_type min() noexcept { return std::numeric_limits<result_type>::min(); }
+    [[nodiscard]] static constexpr result_type min() noexcept { return 1; }
     [[nodiscard]] static constexpr result_type max() noexcept { return std::numeric_limits<result_type>::max(); }
 
     constexpr void seed(result_type seed) {
@@ -7886,7 +7886,7 @@ template <class T>
 constexpr bool _is_arithmetic_number_v =
     std::is_arithmetic_v<T> && !std::is_same_v<T, bool> && !std::is_same_v<T, char>;
 
-[[nodiscard]] std::string _trim_left(const std::string& str, char trimmed_char) {
+[[nodiscard]] inline std::string _trim_left(const std::string& str, char trimmed_char) {
     std::string res = str;
     res.erase(0, res.find_first_not_of(trimmed_char));
     return res;

@@ -211,11 +211,11 @@ public:
         this->seed(seq);
     }
 
-    [[nodiscard]] static constexpr result_type min() noexcept { return std::numeric_limits<result_type>::min(); }
+    [[nodiscard]] static constexpr result_type min() noexcept { return 1; }
     [[nodiscard]] static constexpr result_type max() noexcept { return std::numeric_limits<result_type>::max(); }
 
     constexpr void seed(result_type seed) noexcept {
-        result_type splitmix32_state = _ensure_nonzero(seed); // RomuDuoJr shouln't be zero-initialized
+        result_type splitmix32_state = _ensure_nonzero(seed); // RomuTrio shouln't be zero-initialized
         this->s[0]                   = _splitmix32(splitmix32_state);
         this->s[1]                   = _splitmix32(splitmix32_state);
         // Like Xoshiro, Romu recommends using SplitMix32 to initialize its state
@@ -316,7 +316,7 @@ public:
         this->seed(seq);
     }
 
-    [[nodiscard]] static constexpr result_type min() noexcept { return std::numeric_limits<result_type>::min(); }
+    [[nodiscard]] static constexpr result_type min() noexcept { return 1; }
     [[nodiscard]] static constexpr result_type max() noexcept { return std::numeric_limits<result_type>::max(); }
 
     constexpr void seed(result_type seed) noexcept {
@@ -423,7 +423,7 @@ public:
         this->seed(seq);
     }
 
-    [[nodiscard]] static constexpr result_type min() noexcept { return std::numeric_limits<result_type>::min(); }
+    [[nodiscard]] static constexpr result_type min() noexcept { return 1; }
     [[nodiscard]] static constexpr result_type max() noexcept { return std::numeric_limits<result_type>::max(); }
 
     constexpr void seed(result_type seed) noexcept {
@@ -482,7 +482,7 @@ public:
         this->seed(seq);
     }
 
-    [[nodiscard]] static constexpr result_type min() noexcept { return std::numeric_limits<result_type>::min(); }
+    [[nodiscard]] static constexpr result_type min() noexcept { return 1; }
     [[nodiscard]] static constexpr result_type max() noexcept { return std::numeric_limits<result_type>::max(); }
 
     constexpr void seed(result_type seed) {
