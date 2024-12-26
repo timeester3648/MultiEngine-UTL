@@ -108,7 +108,7 @@ template <class T>
 constexpr bool _is_arithmetic_number_v =
     std::is_arithmetic_v<T> && !std::is_same_v<T, bool> && !std::is_same_v<T, char>;
 
-[[nodiscard]] std::string _trim_left(const std::string& str, char trimmed_char) {
+[[nodiscard]] inline std::string _trim_left(const std::string& str, char trimmed_char) {
     std::string res = str;
     res.erase(0, res.find_first_not_of(trimmed_char));
     return res;

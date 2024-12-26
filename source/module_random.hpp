@@ -111,7 +111,7 @@ constexpr std::uint64_t _splitmix64(std::uint64_t& state) noexcept {
 }
 
 // Merging integers into the bits of a larger one
-std::uint64_t _merge_uint32_into_uint64(std::uint32_t a, std::uint32_t b) {
+[[nodiscard]] constexpr std::uint64_t _merge_uint32_into_uint64(std::uint32_t a, std::uint32_t b) {
     return static_cast<std::uint64_t>(a) | (static_cast<std::uint64_t>(b) << 32);
 }
 

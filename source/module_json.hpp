@@ -88,7 +88,7 @@ constexpr int _log_10_ceil(T num) {
     return num < 10 ? 1 : 1 + _log_10_ceil(num / 10);
 }
 
-std::string _pretty_error(std::size_t cursor, const std::string& chars) {
+[[nodiscard]] inline std::string _pretty_error(std::size_t cursor, const std::string& chars) {
     // Special case for empty buffers
     if (chars.empty()) return "";
 
