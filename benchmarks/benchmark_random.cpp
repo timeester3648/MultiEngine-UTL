@@ -66,6 +66,8 @@ void benchmark_prngs() {
 
 int main() {
     
+    random::generators::ChaCha20 gen(random::entropy_seq());
+    
     benchmark_prngs();
 
     return 0;

@@ -6478,7 +6478,7 @@ namespace utl::random {
 
 utl_random_define_trait(_is_seed_seq,
                         std::declval<T>().generate(std::declval<std::uint32_t*>(), std::declval<std::uint32_t*>()));
-// this type trait is necessary to restrict template constructors & seed function that take 'SeedSeq& seq', otherwise
+// this type trait is necessary to restrict template constructors & seed function that take 'SeedSeq&& seq', otherwise
 // they will get pick instead of regular seeding methods for even for integer conversions. This is how standard library
 // seems to do it (based on GCC implementation) so we follow their API.
 
@@ -6519,14 +6519,14 @@ template <class T, std::enable_if_t<std::is_integral_v<T> && sizeof(T) <= 8, boo
 
 // Seed sequence helpers
 template <class SeedSeq, _is_seed_seq_enable_if<SeedSeq> = true>
-std::uint32_t _seed_seq_to_uint32(SeedSeq& seq) {
+std::uint32_t _seed_seq_to_uint32(SeedSeq&& seq) {
     std::array<std::uint32_t, 1> temp;
     seq.generate(temp.begin(), temp.end());
     return temp[0];
 }
 
 template <class SeedSeq, _is_seed_seq_enable_if<SeedSeq> = true>
-std::uint64_t _seed_seq_to_uint64(SeedSeq& seq) {
+std::uint64_t _seed_seq_to_uint64(SeedSeq&& seq) {
     std::array<std::uint32_t, 2> temp;
     seq.generate(temp.begin(), temp.end());
     return _merge_uint32_into_uint64(temp[0], temp[1]);
@@ -6562,12 +6562,17 @@ template <class T>
 // (C++17 and below, see https://en.cppreference.com/w/cpp/named_req/UniformRandomBitGenerator)
 // (C++20 and above, see https://en.cppreference.com/w/cpp/numeric/random/uniform_random_bit_generator)
 
-// Note:
+// Note 1:
 // As of C++17 there is little point in declaring generator constructors and methods as 'constexpr',
 // however in newer standards it would allow PRNGs to be used in constexpr context.
 //
 // Unfortunately, we can't do the same for "convenient random functions"
 // since  they use std distributions which have no constexpr.
+
+// Note 2:
+// Here PRNGs take 'SeedSeq' as a forwaring reference 'SeedSeq&&', while standard PRNGS take 'SeedSeq&',
+// this is how it should've been done in the standard too, but for some reason they only standardized
+// l-value references. One of the many faults of <random>.
 
 namespace generators {
 
@@ -6596,7 +6601,7 @@ public:
     constexpr explicit RomuTrio32(result_type seed = _default_seed<result_type>) noexcept { this->seed(seed); }
 
     template <class SeedSeq, _is_seed_seq_enable_if<SeedSeq> = true>
-    explicit RomuTrio32(SeedSeq& seq) {
+    explicit RomuTrio32(SeedSeq&& seq) {
         this->seed(seq);
     }
 
@@ -6611,7 +6616,7 @@ public:
     }
 
     template <class SeedSeq, _is_seed_seq_enable_if<SeedSeq> = true>
-    void seed(SeedSeq& seq) {
+    void seed(SeedSeq&& seq) {
         seq.generate(this->s.begin(), this->s.end());
     }
 
@@ -6648,7 +6653,7 @@ public:
     constexpr explicit JSF32(result_type seed = _default_seed<result_type>) noexcept { this->seed(seed); }
 
     template <class SeedSeq, _is_seed_seq_enable_if<SeedSeq> = true>
-    explicit JSF32(SeedSeq& seq) {
+    explicit JSF32(SeedSeq&& seq) {
         this->seed(seq);
     }
 
@@ -6663,7 +6668,7 @@ public:
     }
 
     template <class SeedSeq, _is_seed_seq_enable_if<SeedSeq> = true>
-    void seed(SeedSeq& seq) {
+    void seed(SeedSeq&& seq) {
         seq.generate(this->s.begin(), this->s.end());
     }
 
@@ -6701,7 +6706,7 @@ public:
     constexpr explicit RomuDuoJr(result_type seed = _default_seed<result_type>) noexcept { this->seed(seed); }
 
     template <class SeedSeq, _is_seed_seq_enable_if<SeedSeq> = true>
-    explicit RomuDuoJr(SeedSeq& seq) {
+    explicit RomuDuoJr(SeedSeq&& seq) {
         this->seed(seq);
     }
 
@@ -6716,7 +6721,7 @@ public:
     }
 
     template <class SeedSeq, _is_seed_seq_enable_if<SeedSeq> = true>
-    void seed(SeedSeq& seq) {
+    void seed(SeedSeq&& seq) {
         this->s[0] = _seed_seq_to_uint64(seq);
         this->s[1] = _seed_seq_to_uint64(seq);
         // we have to generate multiple std::uint32_t's and then join them into std::uint64_t't to properly initialize
@@ -6753,7 +6758,7 @@ public:
     constexpr explicit JSF64(result_type seed = _default_seed<result_type>) noexcept { this->seed(seed); }
 
     template <class SeedSeq, _is_seed_seq_enable_if<SeedSeq> = true>
-    explicit JSF64(SeedSeq& seq) {
+    explicit JSF64(SeedSeq&& seq) {
         this->seed(seq);
     }
 
@@ -6768,7 +6773,7 @@ public:
     }
 
     template <class SeedSeq, _is_seed_seq_enable_if<SeedSeq> = true>
-    void seed(SeedSeq& seq) {
+    void seed(SeedSeq&& seq) {
         this->s[0] = _seed_seq_to_uint64(seq);
         this->s[1] = _seed_seq_to_uint64(seq);
         this->s[2] = _seed_seq_to_uint64(seq);
@@ -6808,7 +6813,7 @@ public:
     constexpr explicit Xoshiro256PlusPlus(result_type seed = _default_seed<result_type>) noexcept { this->seed(seed); }
 
     template <class SeedSeq, _is_seed_seq_enable_if<SeedSeq> = true>
-    explicit Xoshiro256PlusPlus(SeedSeq& seq) {
+    explicit Xoshiro256PlusPlus(SeedSeq&& seq) {
         this->seed(seq);
     }
 
@@ -6824,7 +6829,7 @@ public:
     }
 
     template <class SeedSeq, _is_seed_seq_enable_if<SeedSeq> = true>
-    void seed(SeedSeq& seq) {
+    void seed(SeedSeq&& seq) {
         this->s[0] = _seed_seq_to_uint64(seq);
         this->s[1] = _seed_seq_to_uint64(seq);
         this->s[2] = _seed_seq_to_uint64(seq);
@@ -6867,7 +6872,7 @@ public:
     constexpr explicit Xorshift64Star(result_type seed = _default_seed<result_type>) noexcept { this->seed(seed); }
 
     template <class SeedSeq, _is_seed_seq_enable_if<SeedSeq> = true>
-    explicit Xorshift64Star(SeedSeq& seq) {
+    explicit Xorshift64Star(SeedSeq&& seq) {
         this->seed(seq);
     }
 
@@ -6879,7 +6884,7 @@ public:
     }
 
     template <class SeedSeq, _is_seed_seq_enable_if<SeedSeq> = true>
-    void seed(SeedSeq& seq) {
+    void seed(SeedSeq&& seq) {
         this->s = _seed_seq_to_uint32(seq);
     }
 
@@ -6975,7 +6980,7 @@ public:
     constexpr explicit ChaCha20(result_type seed = _default_seed<result_type>) noexcept { this->seed(seed); }
 
     template <class SeedSeq, _is_seed_seq_enable_if<SeedSeq> = true>
-    explicit ChaCha20(SeedSeq& seq) {
+    explicit ChaCha20(SeedSeq&& seq) {
         this->seed(seq);
     }
 
@@ -6984,7 +6989,7 @@ public:
 
     constexpr void seed(result_type seed) {
         // Use some other PRNG to setup initial state
-        result_type splitmix32_state = _ensure_nonzero(seed); // just in case
+        result_type splitmix32_state = seed; // just in case
 
         for (auto& e : this->key) e = _splitmix32(splitmix32_state);
         for (auto& e : this->nonce) e = _splitmix32(splitmix32_state);
@@ -6995,7 +7000,7 @@ public:
     }
 
     template <class SeedSeq, _is_seed_seq_enable_if<SeedSeq> = true>
-    void seed(SeedSeq& seq) {
+    void seed(SeedSeq&& seq) {
         // Seed sequence allows user to introduce more entropy into the state
 
         seq.generate(this->key.begin(), this->key.end());
