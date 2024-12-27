@@ -241,8 +241,31 @@ template <class FloatType, class FuncType, std::enable_if_t<std::is_floating_poi
 }
 
 // ====================
-// --- Misc helpers ---
+// --- Permutations ---
 // ====================
+
+// template<class Idx = std::size_t>
+// class Range {
+//     Idx low;
+//     Idx high;
+    
+//     constexpr Range(Idx low, Idx high) : low(low), high(high) {}
+    
+//     [[nodiscard]] constexpr Idx front() const noexcept { return this->low; }
+//     [[nodiscard]] constexpr Idx back() const noexcept { return this->high; }
+//     [[nodiscard]] constexpr Idx size() const noexcept { return this->high - this->low; }
+//     [[nodiscard]] constexpr Idx operator[](Idx pos) const noexcept { return this->low + pos; }
+    
+//     // Iterator stuff
+// };
+
+template<class ArrayType>
+bool is_permutation(const ArrayType& array) {
+    std::vector<std::size_t> p(array.size()); // Note: "non-allocating range adapter" would fit like a glove here
+    for (std::size_t i = 0; i < p.size(); ++i) p[i] = i;
+    
+    return std::is_permutation(array.begin(), array.end(), p.begin()); // I'm surprised it exists in the standard
+}
 
 template<class T>
 void apply_permutation(std::vector<T> &vector, std::vector<std::size_t> permutation) {
@@ -273,6 +296,10 @@ void sort_together(Array& array, SyncedArrays&... synced_arrays) {
     apply_permutation(array, permutation);
     (apply_permutation(synced_arrays, permutation), ...);
 }
+
+// ====================
+// --- Misc helpers ---
+// ====================
 
 template <class UintType, std::enable_if_t<std::is_integral<UintType>::value, bool> = true>
 [[nodiscard]] constexpr UintType uint_difference(UintType a, UintType b) {

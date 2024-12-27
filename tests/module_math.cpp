@@ -237,11 +237,17 @@ TEST_CASE("Basic math functions") {
     CHECK(math::ternary_bitselect(false, 9) == 0);
 }
 
-TEST_CASE("Syncronized sorting works") {
+TEST_CASE("Permutations work as expected") {
     CHECK(math::get_sorting_permutation(std::vector<double>{0.5, 2.4, 1.5}) == std::vector<std::size_t>{0, 2, 1});
     CHECK(math::get_sorting_permutation(std::vector<double>{0.5, 1.5, 2.4}) == std::vector<std::size_t>{0, 1, 2});
     CHECK(math::get_sorting_permutation(std::vector<double>{2.4, 1.5, 0.5}) == std::vector<std::size_t>{2, 1, 0});
-
+    
+    CHECK(math::is_permutation(std::vector{1, 2, 5, 4, 3, 0}));
+    CHECK(math::is_permutation(std::vector{0, 1, 2, 3}));
+    CHECK(!math::is_permutation(std::vector{0, 0, 1, 2, 3}));
+    CHECK(!math::is_permutation(std::vector{1, 2, 3}));
+    CHECK(!math::is_permutation(std::vector{0, 1, 5, 6}));
+    
     std::vector<double> vals = {2., 4., 6., 8.};
     math::apply_permutation(vals, {3, 2, 1, 0});
     CHECK(vals == std::vector<double>{8., 6., 4., 2.});
