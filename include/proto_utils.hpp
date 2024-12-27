@@ -1849,6 +1849,7 @@ inline Sink& add_file_sink(const std::string& filename, OpenMode open_mode = Ope
 //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+#include <algorithm>
 #if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_MATH)
 #ifndef UTLHEADERGUARD_MATH
 #define UTLHEADERGUARD_MATH
@@ -2083,6 +2084,36 @@ template <class FloatType, class FuncType, std::enable_if_t<std::is_floating_poi
 // ====================
 // --- Misc helpers ---
 // ====================
+
+template<class T>
+void apply_permutation(std::vector<T> &vector, std::vector<std::size_t> permutation) {
+    std::vector<T> res;
+    res.reserve(vector.size());
+    for (auto i : permutation) res.emplace_back(std::move(vector[i]));
+    vector = std::move(res);
+}
+
+template<class ArrayType, class Compare = std::less<>>
+std::vector<std::size_t> get_sorting_permutation(const ArrayType &array, Compare comp = Compare()) {
+    std::vector<std::size_t> permutation(array.size());
+    for (std::size_t i = 0; i < permutation.size(); ++i) permutation[i] = i;
+    
+    std::sort(permutation.begin(), permutation.end(), [&](const auto& lhs, const auto& rhs){
+        return comp(array[lhs], array[rhs]);
+    });
+    
+    return permutation;
+}
+
+template <class Array, class... SyncedArrays>
+void sort_together(Array& array, SyncedArrays&... synced_arrays) {
+    // Get permutation that would make the 1st array sorted
+    auto permutation = get_sorting_permutation(array);
+
+    // Apply permutation to all arrays to "sort them in sync"
+    apply_permutation(array, permutation);
+    (apply_permutation(synced_arrays, permutation), ...);
+}
 
 template <class UintType, std::enable_if_t<std::is_integral<UintType>::value, bool> = true>
 [[nodiscard]] constexpr UintType uint_difference(UintType a, UintType b) {

@@ -77,7 +77,7 @@ TEST_CASE_TEMPLATE("(math::is_multipliable_by_scalar<T> == false) for T = ", T, 
 }
 
 TEST_CASE("(math::memory_size<T, size_t> == ...) for T = ") {
-    using T = std::tuple<uint8_t, uint8_t, uint8_t>;
+    using T                    = std::tuple<uint8_t, uint8_t, uint8_t>;
     constexpr std::size_t size = 1920 * 1080;
     CHECK(math::memory_size<T, math::MemoryUnit::MiB>(size) == doctest::Approx(size * 3 / std::pow(1024., 2)));
 }
@@ -202,7 +202,7 @@ TEST_CASE("Basic math functions") {
     CHECK(math::rad_to_deg(math::PI_TWO) == doctest::Approx(360.).epsilon(eps));
     CHECK(math::rad_to_deg(17. * math::PI) == doctest::Approx(17 * 180.).epsilon(eps));
     CHECK(math::rad_to_deg(-math::PI) == doctest::Approx(-180.).epsilon(eps));
-    
+
     // Meshing
     const auto grid_1 = math::linspace(0., 1., math::Points(3));
     const auto grid_2 = math::linspace(0., 1., math::Intervals(2));
@@ -211,23 +211,23 @@ TEST_CASE("Basic math functions") {
     CHECK(grid_1[0] == doctest::Approx(0.0).epsilon(eps));
     CHECK(grid_1[1] == doctest::Approx(0.5).epsilon(eps));
     CHECK(grid_1[2] == doctest::Approx(1.0).epsilon(eps));
-    
-    const auto f = [](double x) -> double { return std::pow(x, 6); };
-    const double L1 = -2.;
-    const double L2 = 4.;
-    const auto integral = math::integrate_trapezoidal(f, L1, L2, math::Intervals(2000));
-    const auto integral_exact = std::pow(L2, 7) / 7. - std::pow(L1, 7) / 7.;
+
+    const auto   f              = [](double x) -> double { return std::pow(x, 6); };
+    const double L1             = -2.;
+    const double L2             = 4.;
+    const auto   integral       = math::integrate_trapezoidal(f, L1, L2, math::Intervals(2000));
+    const auto   integral_exact = std::pow(L2, 7) / 7. - std::pow(L1, 7) / 7.;
     CHECK(integral == doctest::Approx(integral_exact).epsilon(1e-4));
-    
+
     // Misc helpers
     CHECK(math::uint_difference('a', 'b') == char(1));
     CHECK(math::uint_difference('b', 'a') == char(1));
     CHECK(math::uint_difference(15u, 18u) == 3u);
     CHECK(math::uint_difference(18u, 15u) == 3u);
-    
+
     std::vector<int> vec(7);
     CHECK(math::ssize(vec) == 7);
-    
+
     // Branchless ternary
     CHECK(math::ternary_branchless(true, 17u, 6u) == 17u);
     CHECK(math::ternary_branchless(false, 17u, 6u) == 6u);
@@ -235,4 +235,22 @@ TEST_CASE("Basic math functions") {
     CHECK(math::ternary_bitselect(false, 8, -7) == -7);
     CHECK(math::ternary_bitselect(true, 9) == 9);
     CHECK(math::ternary_bitselect(false, 9) == 0);
+}
+
+TEST_CASE("Syncronized sorting works") {
+    CHECK(math::get_sorting_permutation(std::vector<double>{0.5, 2.4, 1.5}) == std::vector<std::size_t>{0, 2, 1});
+    CHECK(math::get_sorting_permutation(std::vector<double>{0.5, 1.5, 2.4}) == std::vector<std::size_t>{0, 1, 2});
+    CHECK(math::get_sorting_permutation(std::vector<double>{2.4, 1.5, 0.5}) == std::vector<std::size_t>{2, 1, 0});
+
+    std::vector<double> vals = {2., 4., 6., 8.};
+    math::apply_permutation(vals, {3, 2, 1, 0});
+    CHECK(vals == std::vector<double>{8., 6., 4., 2.});
+
+    std::vector<int>         target_array   = {1, 2, 5, 4, 3};
+    std::vector<char>        synced_array_1 = {'1', '2', '5', '4', '3'};
+    std::vector<std::string> synced_array_2 = {"1", "2", "5", "4", "3"};
+    math::sort_together(target_array, synced_array_1, synced_array_2);
+    CHECK(target_array == std::vector<int>{1, 2, 3, 4, 5});
+    CHECK(synced_array_1 == std::vector<char>{'1', '2', '3', '4', '5'});
+    CHECK(synced_array_2 == std::vector<std::string>{"1", "2", "3", "4", "5"});
 }
