@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <limits>
 #include <ostream>
+#include <string>
 #include <utility>
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include "thirdparty/doctest.h"
@@ -50,6 +51,9 @@ struct NonIncrementableWithIterator {
 
 std::ostream& operator<<(std::ostream& os, Printable value) { return os << "printable_value"; }
 
+template<class T>
+using nlim = std::numeric_limits<T>;
+
 TEST_CASE("Stringification") {
     using namespace std::string_literals;
     using namespace std::string_view_literals;
@@ -57,29 +61,41 @@ TEST_CASE("Stringification") {
     // Bool
     CHECK(log::stringify(false) == "false");
     CHECK(log::stringify(true) == "true");
+    
     // Char
     CHECK(log::stringify('g') == "g");
+    
     // Integer
     CHECK(log::stringify(0) == "0");
-    CHECK(log::stringify(17u) == "17");
-    CHECK(log::stringify(8ul) == "8");
     CHECK(log::stringify(-450) == "-450");
-    CHECK(!check_if_throws([] { return log::stringify(std::numeric_limits<std::int8_t>::max()); }));
-    CHECK(!check_if_throws([] { return log::stringify(std::numeric_limits<std::int8_t>::min()); }));
-    CHECK(!check_if_throws([] { return log::stringify(std::numeric_limits<std::int16_t>::max()); }));
-    CHECK(!check_if_throws([] { return log::stringify(std::numeric_limits<std::int16_t>::min()); }));
-    CHECK(!check_if_throws([] { return log::stringify(std::numeric_limits<std::int32_t>::max()); }));
-    CHECK(!check_if_throws([] { return log::stringify(std::numeric_limits<std::int32_t>::min()); }));
-    CHECK(!check_if_throws([] { return log::stringify(std::numeric_limits<std::int64_t>::max()); }));
-    CHECK(!check_if_throws([] { return log::stringify(std::numeric_limits<std::int64_t>::min()); }));
-    CHECK(!check_if_throws([] { return log::stringify(std::numeric_limits<std::uint8_t>::max()); }));
-    CHECK(!check_if_throws([] { return log::stringify(std::numeric_limits<std::uint8_t>::min()); }));
-    CHECK(!check_if_throws([] { return log::stringify(std::numeric_limits<std::uint16_t>::max()); }));
-    CHECK(!check_if_throws([] { return log::stringify(std::numeric_limits<std::uint16_t>::min()); }));
-    CHECK(!check_if_throws([] { return log::stringify(std::numeric_limits<std::uint32_t>::max()); }));
-    CHECK(!check_if_throws([] { return log::stringify(std::numeric_limits<std::uint32_t>::min()); }));
-    CHECK(!check_if_throws([] { return log::stringify(std::numeric_limits<std::uint64_t>::max()); }));
-    CHECK(!check_if_throws([] { return log::stringify(std::numeric_limits<std::uint64_t>::min()); }));
+    
+    CHECK(log::stringify(-17) == "-17");
+    CHECK(log::stringify(17u) == "17");
+    CHECK(log::stringify(-17l) == "-17");
+    CHECK(log::stringify(17ul) == "17");
+    CHECK(log::stringify(-17ll) == "-17");
+    CHECK(log::stringify(17ull) == "17");
+
+    CHECK(log::stringify(nlim<std::int8_t >::min()) == std::to_string(nlim<std::int8_t >::min()));
+    CHECK(log::stringify(nlim<std::int16_t>::min()) == std::to_string(nlim<std::int16_t>::min()));
+    CHECK(log::stringify(nlim<std::int32_t>::min()) == std::to_string(nlim<std::int32_t>::min()));
+    CHECK(log::stringify(nlim<std::int64_t>::min()) == std::to_string(nlim<std::int64_t>::min()));
+    
+    CHECK(log::stringify(nlim<std::int8_t >::max()) == std::to_string(nlim<std::int8_t >::max()));
+    CHECK(log::stringify(nlim<std::int16_t>::max()) == std::to_string(nlim<std::int16_t>::max()));
+    CHECK(log::stringify(nlim<std::int32_t>::max()) == std::to_string(nlim<std::int32_t>::max()));
+    CHECK(log::stringify(nlim<std::int64_t>::max()) == std::to_string(nlim<std::int64_t>::max()));
+    
+    CHECK(log::stringify(nlim<std::uint8_t >::min()) == std::to_string(nlim<std::uint8_t >::min()));
+    CHECK(log::stringify(nlim<std::uint16_t>::min()) == std::to_string(nlim<std::uint16_t>::min()));
+    CHECK(log::stringify(nlim<std::uint32_t>::min()) == std::to_string(nlim<std::uint32_t>::min()));
+    CHECK(log::stringify(nlim<std::uint64_t>::min()) == std::to_string(nlim<std::uint64_t>::min()));
+    
+    CHECK(log::stringify(nlim<std::uint8_t >::max()) == std::to_string(nlim<std::uint8_t >::max()));
+    CHECK(log::stringify(nlim<std::uint16_t>::max()) == std::to_string(nlim<std::uint16_t>::max()));
+    CHECK(log::stringify(nlim<std::uint32_t>::max()) == std::to_string(nlim<std::uint32_t>::max()));
+    CHECK(log::stringify(nlim<std::uint64_t>::max()) == std::to_string(nlim<std::uint64_t>::max()));
+    
     // Float
     CHECK(log::stringify(0.5) == "0.5");
     CHECK(log::stringify(-1.5) == "-1.5");
@@ -90,21 +106,27 @@ TEST_CASE("Stringification") {
     CHECK(!check_if_throws([] { return log::stringify(std::numeric_limits<double>::min()); }));
     CHECK(!check_if_throws([] { return log::stringify(std::numeric_limits<long double>::max()); }));
     CHECK(!check_if_throws([] { return log::stringify(std::numeric_limits<long double>::min()); }));
+    
     // Complex
     CHECK(log::stringify(std::complex{1, 2}) == "1 + 2 i");
+    
     // String view-convertible
     CHECK(log::stringify("lorem ipsum") == "lorem ipsum");
     CHECK(log::stringify("lorem ipsum"s) == "lorem ipsum");
     CHECK(log::stringify("lorem ipsum"sv) == "lorem ipsum");
+    
     // String-convertible
     CHECK(log::stringify(fs::path("lorem/ipsum")) == "lorem/ipsum");
+    
     // Array-like
     CHECK(log::stringify(std::array{1, 2, 3}) == "{ 1, 2, 3 }");
     CHECK(log::stringify(std::vector{1, 2, 3}) == "{ 1, 2, 3 }");
     CHECK(log::stringify(std::set{1, 2, 3}) == "{ 1, 2, 3 }");
+    
     // Tuple-like
     CHECK(log::stringify(std::pair{1, 2}) == "< 1, 2 >");
     CHECK(log::stringify(std::tuple{"lorem", 2, "ipsum"}) == "< lorem, 2, ipsum >");
+    
     // Printable
     CHECK(log::stringify(Printable{}) == "printable_value");
 

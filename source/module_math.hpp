@@ -9,6 +9,7 @@
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 #include <algorithm>
+#include <initializer_list>
 #if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_MATH)
 #ifndef UTLHEADERGUARD_MATH
 #define UTLHEADERGUARD_MATH
@@ -267,11 +268,12 @@ bool is_permutation(const ArrayType& array) {
     return std::is_permutation(array.begin(), array.end(), p.begin()); // I'm surprised it exists in the standard
 }
 
-template<class T>
-void apply_permutation(std::vector<T> &vector, std::vector<std::size_t> permutation) {
-    std::vector<T> res;
-    res.reserve(vector.size());
-    for (auto i : permutation) res.emplace_back(std::move(vector[i]));
+template<class ArrayType, class PermutationType = std::initializer_list<std::size_t>>
+void apply_permutation(ArrayType &vector, const PermutationType& permutation) {
+    ArrayType res(vector.size());
+    
+    typename ArrayType::size_type emplace_idx = 0;
+    for (auto i : permutation) res[emplace_idx++] = std::move(vector[i]);
     vector = std::move(res);
 }
 

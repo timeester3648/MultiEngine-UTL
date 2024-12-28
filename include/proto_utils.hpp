@@ -1325,9 +1325,9 @@ using ms = std::chrono::microseconds;
 
 inline const clock::time_point _program_entry_time_point = clock::now();
 
-// =======================
-// --- Stringification ---
-// =======================
+// ===================
+// --- Stringifier ---
+// ===================
 
 // --- Internal type traits ---
 // ----------------------------
@@ -1395,159 +1395,188 @@ constexpr int _max_int_digits = 2 + std::numeric_limits<T>::digits10;
 // (aka 1 less than one would expect) and doesn't account for possible '-'.
 // Also note that ints use 'digits10' and not 'max_digits10' which is only valid for floats.
 
-// --- Stringifiers ---
-// --------------------
+// --- Stringifier ---
+// -------------------
 
-template <class T>
-void _append_stringified(std::string& str, const T& value);
+// Generic stringifier with customizable API, this is sort of a "reference implementation",
+// the actual logger will adjust a few things in a way that hurts customization ability, but
+// improves performance
+struct Stringifier {
+    
+    // --- Type-wise methods ---
+    // -------------------------
+    
+    template <class T>
+    static void append_bool(std::string& buffer, const T& value) {
+        buffer += value ? "true" : "false";
+    }
 
-inline void _append_stringified_bool(std::string& str, bool value) { str += value ? "true" : "false"; }
+    template <class T>
+    static void append_int(std::string& buffer, const T& value) {
+        std::array<char, _max_int_digits<T>> stbuff;
+        const auto [number_end_ptr, error_code] = std::to_chars(stbuff.data(), stbuff.data() + stbuff.size(), value);
+        if (error_code != std::errc())
+            throw std::runtime_error("Stringifier encountered std::to_chars() error while serializing an integer.");
+        buffer.append(stbuff.data(), number_end_ptr - stbuff.data());
+    }
 
-// Fast implementation for stringifying an integer and appending it to 'std::string'
-template <class T>
-void _append_stringified_integer(std::string& str, T value) {
-    std::array<char, _max_int_digits<T>> buffer;
-    const auto [number_end_ptr, error_code] = std::to_chars(buffer.data(), buffer.data() + buffer.size(), value);
-    if (error_code != std::errc())
-        throw std::runtime_error(
-            "Integer stringification encountered std::to_chars() formatting error while serializing a value.");
-    str.append(buffer.data(), number_end_ptr - buffer.data());
-}
+    template <class T>
+    static void append_float(std::string& buffer, const T& value) {
+        std::array<char, _max_float_digits<T>> stbuff;
+        const auto [number_end_ptr, error_code] = std::to_chars(stbuff.data(), stbuff.data() + stbuff.size(), value);
+        if (error_code != std::errc())
+            throw std::runtime_error("Stringifier encountered std::to_chars() error while serializing a float.");
+        buffer.append(stbuff.data(), number_end_ptr - stbuff.data());
+    }
 
-// Fast implementation for stringifying a float and appending it to 'std::string'
-template <class T>
-void _append_stringified_float(std::string& str, T value) {
-    std::array<char, _max_float_digits<T>> buffer;
-    const auto [number_end_ptr, error_code] = std::to_chars(buffer.data(), buffer.data() + buffer.size(), value);
-    if (error_code != std::errc())
-        throw std::runtime_error(
-            "Float stringification encountered std::to_chars() formatting error while serializing a value.");
-    str.append(buffer.data(), number_end_ptr - buffer.data());
-}
+    template <class T>
+    static void append_complex(std::string& buffer, const T& value) {
+        append_float(buffer, value.real());
+        buffer += " + ";
+        append_float(buffer, value.imag());
+        buffer += " i";
+    }
 
-template <class T>
-void _append_stringified_complex(std::string& str, T value) {
-    _append_stringified_float(str, value.real());
-    str += " + ";
-    _append_stringified_float(str, value.imag());
-    str += " i";
-}
+    template <class T>
+    static void append_string(std::string& buffer, const T& value) {
+        buffer += value;
+    }
 
-template <class T>
-void _append_stringified_stringlike(std::string& str, const T& value) {
-    str += value;
-    // 'std::string' has operator '+=' for following types:
-    // 1) 'const std::string&'
-    // 2) char-like (includes all integral types)
-    // 3) 'std::string_view'-convertible
-}
+    template <class T>
+    static void append_array(std::string& buffer, const T& value) {
+        buffer += "{ ";
+        if (value.begin() != value.end())
+            for (auto it = value.begin();;) {
+                append(buffer, *it);
+                if (++it == value.end()) break; // prevents trailing comma
+                buffer += ", ";
+            }
+        buffer += " }";
+    }
 
-template <class T>
-void _append_stringified_string_convertible(std::string& str, const T& value) {
-    str += std::string(value);
-}
+    template <class T>
+    static void append_tuple(std::string& buffer, const T& value) {
+        _append_tuple_fwd(buffer, value);
+    }
 
-template <class T>
-void _append_stringified_array(std::string& str, const T& value) {
-    str += "{ ";
-    if (value.begin() != value.end())
-        for (auto it = value.begin();;) {
-            _append_stringified(str, *it);
-            if (++it == value.end()) break; // prevents trailing comma
-            str += ", ";
-        }
-    str += " }";
-}
+    template <class T>
+    static void append_printable(std::string& buffer, const T& value) {
+        buffer += (std::ostringstream() << value).str();
+    }
 
-template <class Tuplelike, std::size_t... Idx>
-void _append_stringified_tuple_impl(std::string& str, Tuplelike value, std::index_sequence<Idx...>) {
-    ((Idx == 0 ? "" : str += ", ", _append_stringified(str, std::get<Idx>(value))), ...);
-    // fold expression '( f(args), ... )' invokes 'f(args)' for all arguments in 'args...'
-    // in the same fashion, we can fold over 2 functions by doing '( ( f(args), g(args) ), ... )'
-}
+    // --- Main API ---
+    // ----------------
 
-template <template <class...> class Tuplelike, class... Args>
-void _append_stringified_tuple(std::string& str, const Tuplelike<Args...>& value) {
-    str += "< ";
-    _append_stringified_tuple_impl(str, value, std::index_sequence_for<Args...>{});
-    str += " >";
-}
+    template <class... Args>
+    static void append(std::string& buffer, Args&&... args) {
+        (_append_selector(buffer, std::forward<Args>(args)), ...);
+    }
 
-template <class T>
-void _append_stringified_printable(std::string& str, const T& value) {
-    str += (std::ostringstream() << value).str(); // rather slow but at this point there is no other option
-}
+    template <class... Args>
+    [[nodiscard]] static std::string stringify(Args&&... args) {
+        std::string buffer;
+        append(buffer, std::forward<Args>(args)...);
+        return buffer;
+    }
 
-// --- Selector ---
-// ----------------
+    template <class... Args>
+    [[nodiscard]] std::string operator()(Args&&... args) {
+        return stringify(std::forward<Args>(args)...);
+    } // allows stringifier to be used as a functor
 
-template <class T>
-void _append_stringified(std::string& str, const T& value) {
-    // Bool
-    if constexpr (std::is_same_v<T, bool>) _append_stringified_bool(str, value);
-    // Char
-    else if constexpr (std::is_same_v<T, char>) _append_stringified_stringlike(str, value);
-    // Integral
-    else if constexpr (std::is_integral_v<T>) _append_stringified_integer(str, value);
-    // Floating-point
-    else if constexpr (std::is_floating_point_v<T>) _append_stringified_float(str, value);
-    // Complex
-    else if constexpr (_has_real_v<T> && _has_imag_v<T>) _append_stringified_complex(str, value);
-    // 'std::string_view'-convertible (most strings and string-like types)
-    else if constexpr (std::is_convertible_v<T, std::string_view>) _append_stringified_stringlike(str, value);
-    // 'std::string'-convertible (some "nastier" string-like types, mainly 'std::path')
-    else if constexpr (std::is_convertible_v<T, std::string>) _append_stringified_string_convertible(str, value);
-    // Array-like
-    else if constexpr (_has_begin_v<T> && _has_end_v<T> && _has_input_iter_v<T>) _append_stringified_array(str, value);
-    // Tuple-like
-    else if constexpr (_has_get_v<T> && _has_tuple_size_v<T>) _append_stringified_tuple(str, value);
-    // 'std::ostream' printable
-    else if constexpr (_has_ostream_insert_v<T>) _append_stringified_printable(str, value);
-    // No valid stringification exists
-    else static_assert(_always_false_v<T>, "No valid stringification exists for the type.");
+    // --- Helpers ---
+    // ---------------
+private:
+    template <class Tuplelike, std::size_t... Idx>
+    static void _append_tuple_impl(std::string& str, Tuplelike value, std::index_sequence<Idx...>) {
+        ((Idx == 0 ? "" : str += ", ", append(str, std::get<Idx>(value))), ...);
+        // fold expression '( f(args), ... )' invokes 'f(args)' for all arguments in 'args...'
+        // in the same fashion, we can fold over 2 functions by doing '( ( f(args), g(args) ), ... )'
+    }
 
-    // Note: Using if-constexpr chain here allows us to pick and choose priority of different branches,
-    // removing any possible ambiguity we could encounter doing things through SFINAE or overloads.
-}
+    template <template <class...> class Tuplelike, class... Args>
+    static void _append_tuple_fwd(std::string& str, const Tuplelike<Args...>& value) {
+        str += "< ";
+        _append_tuple_impl(str, value, std::index_sequence_for<Args...>{});
+        str += " >";
+    }
 
-// --- Public API ---
-// ------------------
+    template <class T>
+    static void _append_selector(std::string& buffer, const T& value) {
+        // Bool
+        if constexpr (std::is_same_v<T, bool>) append_bool(buffer, value);
+        // Char
+        else if constexpr (std::is_same_v<T, char>) append_string(buffer, value);
+        // Integral
+        else if constexpr (std::is_integral_v<T>) append_int(buffer, value);
+        // Floating-point
+        else if constexpr (std::is_floating_point_v<T>) append_float(buffer, value);
+        // Complex
+        else if constexpr (_has_real_v<T> && _has_imag_v<T>) append_complex(buffer, value);
+        // 'std::string_view'-convertible (most strings and string-like types)
+        else if constexpr (std::is_convertible_v<T, std::string_view>) append_string(buffer, value);
+        // 'std::string'-convertible (some "nastier" string-like types, mainly 'std::path')
+        else if constexpr (std::is_convertible_v<T, std::string>) append_string(buffer, std::string(value));
+        // Array-like
+        else if constexpr (_has_begin_v<T> && _has_end_v<T> && _has_input_iter_v<T>) append_array(buffer, value);
+        // Tuple-like
+        else if constexpr (_has_get_v<T> && _has_tuple_size_v<T>) append_tuple(buffer, value);
+        // 'std::ostream' printable
+        else if constexpr (_has_ostream_insert_v<T>) append_printable(buffer, value);
+        // No valid stringification exists
+        else static_assert(_always_false_v<T>, "No valid stringification exists for the type.");
+
+        // Note: Using if-constexpr chain here allows us to pick and choose priority of different branches,
+        // removing any possible ambiguity we could encounter doing things through SFINAE or overloads.
+    }
+};
+
+// ===============================
+// --- Stringifier derivatives ---
+// ===============================
+
+// Customization of stringifier that optimizes a few things 
+struct FastStringifier : public Stringifier {
+    template <class... Args>
+    [[nodiscard]] static std::string stringify(Args&&... args) {
+        return Stringifier::stringify(std::forward<Args>(args)...);
+    }
+    
+    [[nodiscard]] static std::string stringify(int arg) { return std::to_string(arg); }
+    [[nodiscard]] static std::string stringify(long arg) { return std::to_string(arg); }
+    [[nodiscard]] static std::string stringify(long long arg) { return std::to_string(arg); }
+    [[nodiscard]] static std::string stringify(unsigned int arg) { return std::to_string(arg); }
+    [[nodiscard]] static std::string stringify(unsigned long arg) { return std::to_string(arg); }
+    [[nodiscard]] static std::string stringify(unsigned long long arg) { return std::to_string(arg); }
+    // for individual ints 'std::to_string()' beats 'append_int()' with <charconv> since any reasonable compiler
+    // implements it using the same <charconv> routine, but formatted directly into a string upon its creation
+    
+    template <class... Args>
+    [[nodiscard]] std::string operator()(Args&&... args) {
+        return FastStringifier::stringify(std::forward<Args>(args)...);
+    }
+};
 
 template <class... Args>
 void append_stringified(std::string& str, Args&&... args) {
-    (_append_stringified(str, std::forward<Args>(args)), ...);
+    FastStringifier::append(str, std::forward<Args>(args)...);
 }
 
 template <class... Args>
 [[nodiscard]] std::string stringify(Args&&... args) {
-    std::string buffer;
-    append_stringified(buffer, std::forward<Args>(args)...);
-    return buffer;
+    return FastStringifier::stringify(std::forward<Args>(args)...);
 }
-
-// Override "common special cases" that can be improved relative to a generic implementation
-[[nodiscard]] inline std::string stringify(int value) { return std::to_string(value); }
-[[nodiscard]] inline std::string stringify(long value) { return std::to_string(value); }
-[[nodiscard]] inline std::string stringify(long long value) { return std::to_string(value); }
-[[nodiscard]] inline std::string stringify(unsigned int value) { return std::to_string(value); }
-[[nodiscard]] inline std::string stringify(unsigned long value) { return std::to_string(value); }
-[[nodiscard]] inline std::string stringify(unsigned long long value) { return std::to_string(value); }
-// while <charconv> is slightly faster than 'std::to_string()' for formatting integers, the difference is quite small.
-// In cases where we append multiple values to a string and HAVE to make a copy it ends up faster, however when
-// stringifying a single integer 'std::to_string()' will format straight into the string and avoid copy, perhaps
-// that logic could be copied and improved based on <charconv> formatting algorithm, but that is more work than it
-// is worth for a such a specific overload. Note that we don't worry about '<charconv>' and 'std::to_string()' having
-// different formatting styles, as there is no variation in how an integer can be stringified (unlike with floats).
 
 template <class... Args>
 void print(Args&&... args) {
-    std::cout << stringify(std::forward<Args>(args)...);
+    std::cout << FastStringifier::stringify(std::forward<Args>(args)...);
 }
 
 template <class... Args>
 void println(Args&&... args) {
-    std::cout << stringify(std::forward<Args>(args)...) << '\n';
+    std::cout << FastStringifier::stringify(std::forward<Args>(args)...) << '\n';
 }
+// MARK:
 
 // ===============
 // --- Options ---
@@ -1789,13 +1818,13 @@ public:
 // =======================
 
 inline Sink& add_terminal_sink(std::ostream& os, Verbosity verbosity = Verbosity::INFO, Colors colors = Colors::ENABLE,
-                        clock::duration flush_interval = ms{}, const Columns& columns = Columns{}) {
+                               clock::duration flush_interval = ms{}, const Columns& columns = Columns{}) {
     return Logger::instance().emplace_sink(os, verbosity, colors, flush_interval, columns);
 }
 
 inline Sink& add_file_sink(const std::string& filename, OpenMode open_mode = OpenMode::REWRITE,
-                    Verbosity verbosity = Verbosity::TRACE, Colors colors = Colors::DISABLE,
-                    clock::duration flush_interval = ms{15}, const Columns& columns = Columns{}) {
+                           Verbosity verbosity = Verbosity::TRACE, Colors colors = Colors::DISABLE,
+                           clock::duration flush_interval = ms{15}, const Columns& columns = Columns{}) {
     auto& os = Logger::instance().emplace_managed_file(filename, open_mode);
     return Logger::instance().emplace_sink(os, verbosity, colors, flush_interval, columns);
 }
@@ -1850,6 +1879,7 @@ inline Sink& add_file_sink(const std::string& filename, OpenMode open_mode = Ope
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 #include <algorithm>
+#include <initializer_list>
 #if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_MATH)
 #ifndef UTLHEADERGUARD_MATH
 #define UTLHEADERGUARD_MATH
@@ -2108,11 +2138,12 @@ bool is_permutation(const ArrayType& array) {
     return std::is_permutation(array.begin(), array.end(), p.begin()); // I'm surprised it exists in the standard
 }
 
-template<class T>
-void apply_permutation(std::vector<T> &vector, std::vector<std::size_t> permutation) {
-    std::vector<T> res;
-    res.reserve(vector.size());
-    for (auto i : permutation) res.emplace_back(std::move(vector[i]));
+template<class ArrayType, class PermutationType = std::initializer_list<std::size_t>>
+void apply_permutation(ArrayType &vector, const PermutationType& permutation) {
+    ArrayType res(vector.size());
+    
+    typename ArrayType::size_type emplace_idx = 0;
+    for (auto i : permutation) res[emplace_idx++] = std::move(vector[i]);
     vector = std::move(res);
 }
 
