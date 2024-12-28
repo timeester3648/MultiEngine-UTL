@@ -1340,7 +1340,7 @@ inline const clock::time_point _program_entry_time_point = clock::now();
     struct trait_name_<T, std::void_t<decltype(__VA_ARGS__)>> : std::true_type {};                                     \
                                                                                                                        \
     template <class T>                                                                                                 \
-    constexpr bool trait_name_##_v = trait_name_<T>::value;
+    constexpr bool trait_name_##_v = trait_name_<T>::value
 
 utl_log_define_trait(_has_string_append, std::string() += std::declval<T>());
 utl_log_define_trait(_has_real, std::declval<T>().real());
@@ -1351,6 +1351,9 @@ utl_log_define_trait(_has_input_iter, std::next(std::declval<T>().begin()));
 utl_log_define_trait(_has_get, std::get<0>(std::declval<T>()));
 utl_log_define_trait(_has_tuple_size, std::tuple_size<T>::value);
 utl_log_define_trait(_has_ostream_insert, std::declval<std::ostream>() << std::declval<T>());
+utl_log_define_trait(_is_pad_left, std::declval<std::decay_t<T>>().is_pad_left);
+utl_log_define_trait(_is_pad_right, std::declval<std::decay_t<T>>().is_pad_right);
+utl_log_define_trait(_is_pad, std::declval<std::decay_t<T>>().is_pad);
 
 // Note:
 // Trait '_has_input_iter' is trickier than it may seem. Just doing '++std::declval<T>().begin()' will work
@@ -1395,17 +1398,47 @@ constexpr int _max_int_digits = 2 + std::numeric_limits<T>::digits10;
 // (aka 1 less than one would expect) and doesn't account for possible '-'.
 // Also note that ints use 'digits10' and not 'max_digits10' which is only valid for floats.
 
+// --- Alignment ---
+// -----------------
+
+// To align/pad values in a stringifier we can wrap then in thin structs
+// that gets some special alignment logic in stringifier formatting selector.
+
+template <class T>
+struct PadLeft {
+    constexpr PadLeft(const T& val, std::size_t size) : val(val), size(size) {} // this is needed for CTAD
+    const T&              val;
+    std::size_t           size;
+    constexpr static bool is_pad_left = true;
+}; // pads value the left (aka right alignment)
+
+template <class T>
+struct PadRight {
+    constexpr PadRight(const T& val, std::size_t size) : val(val), size(size) {}
+    const T&              val;
+    std::size_t           size;
+    constexpr static bool is_pad_right = true;
+}; // pads value the right (aka left alignment)
+
+template <class T>
+struct Pad {
+    constexpr Pad(const T& val, std::size_t size) : val(val), size(size) {}
+    const T&              val;
+    std::size_t           size;
+    constexpr static bool is_pad = true;
+}; // pads value on both sides (aka center alignment)
+
 // --- Stringifier ---
 // -------------------
 
-// Generic stringifier with customizable API, this is sort of a "reference implementation",
-// the actual logger will adjust a few things in a way that hurts customization ability, but
-// improves performance
+// Generic stringifier with customizable API. Formatting of specific types can be customized by inheriting it
+// and overriding specific methods. This is a reference implementation that is likely to be used in other modules.
+//
 struct Stringifier {
-    
+
     // --- Type-wise methods ---
     // -------------------------
-    
+
     template <class T>
     static void append_bool(std::string& buffer, const T& value) {
         buffer += value ? "true" : "false";
@@ -1488,23 +1521,51 @@ struct Stringifier {
     // ---------------
 private:
     template <class Tuplelike, std::size_t... Idx>
-    static void _append_tuple_impl(std::string& str, Tuplelike value, std::index_sequence<Idx...>) {
-        ((Idx == 0 ? "" : str += ", ", append(str, std::get<Idx>(value))), ...);
+    static void _append_tuple_impl(std::string& buffer, Tuplelike value, std::index_sequence<Idx...>) {
+        ((Idx == 0 ? "" : buffer += ", ", append(buffer, std::get<Idx>(value))), ...);
         // fold expression '( f(args), ... )' invokes 'f(args)' for all arguments in 'args...'
         // in the same fashion, we can fold over 2 functions by doing '( ( f(args), g(args) ), ... )'
     }
 
     template <template <class...> class Tuplelike, class... Args>
-    static void _append_tuple_fwd(std::string& str, const Tuplelike<Args...>& value) {
-        str += "< ";
-        _append_tuple_impl(str, value, std::index_sequence_for<Args...>{});
-        str += " >";
+    static void _append_tuple_fwd(std::string& buffer, const Tuplelike<Args...>& value) {
+        buffer += "< ";
+        _append_tuple_impl(buffer, value, std::index_sequence_for<Args...>{});
+        buffer += " >";
     }
 
     template <class T>
     static void _append_selector(std::string& buffer, const T& value) {
+        // Left-padded something
+        if constexpr (_is_pad_left_v<T>) {
+            std::string temp;
+            _append_selector(temp, value.val);
+            if (temp.size() < value.size) buffer.append(value.size - temp.size(), ' ');
+            buffer += temp;
+        }
+        // Right-padded something
+        else if constexpr (_is_pad_right_v<T>) {
+            const std::size_t old_size = buffer.size();
+            _append_selector(buffer, value.val);
+            const std::size_t appended_size = buffer.size() - old_size;
+            if (appended_size < value.size) buffer.append(value.size - appended_size, ' ');
+            // right-padding is faster than left padding since we don't need a temporary string to get appended size
+        }
+        // Center-padded something
+        else if constexpr (_is_pad_v<T>) {
+            std::string temp;
+            _append_selector(temp, value.val);
+            if (temp.size() < value.size) {
+                const std::size_t lpad_size = (value.size - temp.size()) / 2;
+                const std::size_t rpad_size = value.size - lpad_size - temp.size();
+                buffer.append(lpad_size, ' ');
+                buffer += temp;
+                buffer.append(rpad_size, ' ');
+            } else buffer += temp;
+        }
         // Bool
-        if constexpr (std::is_same_v<T, bool>) append_bool(buffer, value);
+        else if constexpr (std::is_same_v<T, bool>)
+            append_bool(buffer, value);
         // Char
         else if constexpr (std::is_same_v<T, char>) append_string(buffer, value);
         // Integral
@@ -1531,17 +1592,30 @@ private:
     }
 };
 
+// Note:
+// The stringifier shines at stringifying & concatenating multiple values into the same buffer.
+// Single-value is a specific case which allows all 'buffer += ...' to be replaced with most things being formatted
+// straight into a newly created string. We could optimize this, but that would make require an almost full logic
+// duplication and make the class cumbersome to extend since instead of a singural 'append_something()' methods there
+// would be 2: 'append_something()' and 'construct_something()'. It also doesn't seem to be worth it, the difference
+// in performance isn't that significat and we're still faster than most usual approaches to stringification.
+
 // ===============================
 // --- Stringifier derivatives ---
 // ===============================
 
-// Customization of stringifier that optimizes a few things 
+// Customization of stringifier that optimizes a few things.
+//
+// The reason we don't include this in the original stringifier is because it's intended to be a customizable
+// thing that can be extended/optimized/decorated by inheriting it and overriding specific methods. The changes
+// made by this stringifier wouldn't be compatible with such philosophy.
+//
 struct FastStringifier : public Stringifier {
     template <class... Args>
     [[nodiscard]] static std::string stringify(Args&&... args) {
         return Stringifier::stringify(std::forward<Args>(args)...);
     }
-    
+
     [[nodiscard]] static std::string stringify(int arg) { return std::to_string(arg); }
     [[nodiscard]] static std::string stringify(long arg) { return std::to_string(arg); }
     [[nodiscard]] static std::string stringify(long long arg) { return std::to_string(arg); }
@@ -1550,7 +1624,7 @@ struct FastStringifier : public Stringifier {
     [[nodiscard]] static std::string stringify(unsigned long long arg) { return std::to_string(arg); }
     // for individual ints 'std::to_string()' beats 'append_int()' with <charconv> since any reasonable compiler
     // implements it using the same <charconv> routine, but formatted directly into a string upon its creation
-    
+
     template <class... Args>
     [[nodiscard]] std::string operator()(Args&&... args) {
         return FastStringifier::stringify(std::forward<Args>(args)...);
@@ -7324,7 +7398,9 @@ namespace utl::shell {
 
     std::string result(length, '0');
     for (std::size_t i = 0; i < length; ++i)
-        result[i] = static_cast<char>(min_char + rand() % (max_char - min_char + 1));
+        result[i] = static_cast<char>(min_char + std::rand() % (max_char - min_char + 1));
+    // we don't really care about the quality of random here, and we already include <cstdlib>, 
+    // so rand() is fine, otherwise we'd have to include the entirety of <random> for this function
     return result;
 }
 

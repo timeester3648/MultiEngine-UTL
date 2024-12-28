@@ -140,12 +140,17 @@ TEST_CASE("Stringification") {
               std::vector{3}
     }) == "{ { 1, 2 }, { 3 } }");
     CHECK(log::stringify(std::vector<std::vector<std::vector<const char*>>>{{{"lorem"}}}) == "{ { { lorem } } }");
-
-    using array_t           = std::array<int, 3>;
-    using iter              = array_t::iterator;
-    constexpr bool has_it_1 = log::_has_input_iter_v<int>;
-    constexpr bool has_it_2 = log::_has_input_iter_v<NonIncrementableWithIterator>;
-    constexpr bool has_it_3 = log::_has_input_iter_v<array_t>;
-
-    std::next(std::array{1, 2, 3}.begin());
+    
+    // Left-padded values
+    CHECK(log::stringify(log::PadLeft{ "lorem", 10 }) == "     lorem");
+    CHECK(log::stringify(log::PadLeft{ "lorem", 2 }) == "lorem");
+    
+    // Right-padded values
+    CHECK(log::stringify(log::PadRight{ "lorem", 10 }) == "lorem     ");
+    CHECK(log::stringify(log::PadRight{ "lorem", 2 }) == "lorem");
+    
+    // Padded (center-aligned) values
+    CHECK(log::stringify(log::Pad{ "lorem", 9 }) == "  lorem  ");
+    CHECK(log::stringify(log::Pad{ "lorem", 10 }) == "  lorem   ");
+    CHECK(log::stringify(log::Pad{ "lorem", 2 }) == "lorem");
 }

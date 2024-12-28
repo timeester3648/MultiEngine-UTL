@@ -6,6 +6,7 @@
 #include <climits>
 #include <complex>
 #include <fstream>
+#include <iomanip>
 #include <ios>
 #include <iostream>
 #include <limits>
@@ -32,6 +33,7 @@ void benchmark_stringification() {
         return std::vector{shell::random_ascii_string(8), shell::random_ascii_string(8), shell::random_ascii_string(8),
                            shell::random_ascii_string(8)};
     };
+    const auto get_rand_string              = []() { return shell::random_ascii_string(8); };
 
     constexpr int repeats = 20'000;
 
@@ -221,6 +223,78 @@ void benchmark_stringification() {
             << get_rand_int() << " (should be {:}).";
         std::string str = oss.str();
         DO_NOT_OPTIMIZE_AWAY(str);
+    });
+    
+    // --- Left-pad formatting ---
+    // ---------------------------
+    bench.title("Left-pad a string")
+        .timeUnit(nanosecond, "ns")
+        .minEpochIterations(20)
+        .warmup(10)
+        .relative(true);
+        
+    constexpr std::size_t pad_size = 20;
+    
+    std::vector<std::string> strings(10'000);
+    const auto reset_strings = [&]{ for (auto& e :strings) e = ""; };
+    
+    reset_strings();
+    benchmark("log::stringify(log::PadLeft{})", [&]() {
+        for (auto& e :strings) e = log::stringify(log::PadLeft{ get_rand_string(), pad_size });
+        DO_NOT_OPTIMIZE_AWAY(strings);
+    });
+    
+    reset_strings();
+    benchmark("Manual alignment with std::string.append()", [&]() {
+        for (auto& e :strings) {
+            const std::string temp = get_rand_string();
+            if (temp.size() < pad_size) e.append(pad_size - temp.size(), ' ');
+            e += temp;
+        }
+        DO_NOT_OPTIMIZE_AWAY(strings);
+    });
+    
+    reset_strings();
+    benchmark("std::ostringstream << std::setw() << std::right", [&]() {
+        for (auto& e :strings) {
+            std::ostringstream oss;
+            oss << std::setw(pad_size) << std::right << get_rand_string();
+            e = oss.str();
+        }
+        DO_NOT_OPTIMIZE_AWAY(strings);
+    });
+    
+    // --- Right-pad formatting ---
+    // ---------------------------
+    bench.title("Right-pad a string")
+        .timeUnit(nanosecond, "ns")
+        .minEpochIterations(20)
+        .warmup(10)
+        .relative(true);
+        
+    reset_strings();
+    benchmark("log::stringify(log::PadRight{})", [&]() {
+        for (auto& e :strings) e = log::stringify(log::PadRight{ get_rand_string(), pad_size });
+        DO_NOT_OPTIMIZE_AWAY(strings);
+    });
+    
+    reset_strings();
+    benchmark("Manual alignment with std::string.append()", [&]() {
+        for (auto& e :strings) {
+            e = get_rand_string();
+            if (e.size() < pad_size) e.append(pad_size - e.size(), ' ');
+        }
+        DO_NOT_OPTIMIZE_AWAY(strings);
+    });
+    
+    reset_strings();
+    benchmark("std::ostringstream << std::setw() << std::left", [&]() {
+        for (auto& e :strings) {
+            std::ostringstream oss;
+            oss << std::setw(pad_size) << std::left << get_rand_string();
+            e = oss.str();
+        }
+        DO_NOT_OPTIMIZE_AWAY(strings);
     });
 }
 

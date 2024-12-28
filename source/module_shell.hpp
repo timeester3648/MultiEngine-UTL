@@ -69,7 +69,9 @@ namespace utl::shell {
 
     std::string result(length, '0');
     for (std::size_t i = 0; i < length; ++i)
-        result[i] = static_cast<char>(min_char + rand() % (max_char - min_char + 1));
+        result[i] = static_cast<char>(min_char + std::rand() % (max_char - min_char + 1));
+    // we don't really care about the quality of random here, and we already include <cstdlib>, 
+    // so rand() is fine, otherwise we'd have to include the entirety of <random> for this function
     return result;
 }
 
