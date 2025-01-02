@@ -516,7 +516,7 @@ public:
         return buffer;
     }
 
-    void to_file(const std::string& filepath, Format format = Format::PRETTY) {
+    void to_file(const std::string& filepath, Format format = Format::PRETTY) const {
         auto chars = this->to_string(format);
         std::ofstream(filepath).write(chars.data(), chars.size());
         // maybe a little faster than doing 'std::ofstream(filepath) << node.to_string(format)'
@@ -526,7 +526,7 @@ public:
     // ------------------
 
     template <class T>
-    T to_struct() const {
+    [[nodiscard]] T to_struct() const {
         static_assert(
             _always_false_v<T>,
             "Provided type doesn't have a defined JSON reflection. Use 'UTL_JSON_REFLECT' macro to define one.");

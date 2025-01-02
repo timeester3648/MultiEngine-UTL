@@ -29,7 +29,7 @@
 | Control Character Escape Sequence Support | ✔ |  |
 | Unicode HEX Sequence Support | ✔ | Supports UTF-8 |
 | Trait-based Type Conversions | ✔ |  |
-| Structure Reflection | ✘ | Requires compiler intrinsics or C++26 to implement |
+| Structure Reflection | ✔ |  |
 | Compile-time JSON Schema | ✘ | Outside the project scope |
 | Lazy Node Loading | ✘ | Outside the project scope |
 
@@ -69,11 +69,11 @@ class Node {
     template <class T> bool is() const;
     
     bool is_object() const;
-    bool is_array() const;
+    bool is_array()  const;
     bool is_string() const;
     bool is_number() const;
-    bool is_bool() const;
-    bool is_null() const;
+    bool is_bool()   const;
+    bool is_null()   const;
     
     template <class T>       T* get_if();
     template <class T> const T* get_if() const;
@@ -102,8 +102,10 @@ class Node {
     
     template <class T> Node(const T& value); // type-trait based conversion
     
-    // - Other -
-    std::string to_string(Format format = Format::PRETTY) const;
+    // Serializing
+    std::string          to_string(                           Format format = Format::PRETTY) const;
+    void                 to_file(const std::string& filepath, Format format = Format::PRETTY) const;
+    template <class T> T to_struct()                                                          const;
 };
 
 // Typedefs
@@ -115,13 +117,17 @@ using Bool   = Node::bool_type;
 using Null   = Node::null_type;
 
 // Parsing
-Node import_string(const std::string& buffer);
-Node import_file(const std::string& filepath);
-Node literals::operator""_utl_json(const char* c_str, std::size_t c_str_size);
+Node                    from_string(const std::string& chars   );
+Node                    from_file(  const std::string& filepath);
+template <class T> Node from_struct(const           T& value   );
 
-// Serializing
-void export_string(std::string& buffer, const Node& node, Format format = Format::PRETTY);
-void export_file(const std::string& filepath, const Node& node, Format format = Format::PRETTY);
+Node literals::operator""_utl_json(const char* c_str, std::size_t c_str_size);
+void set_recursion_limit(int max_depth);
+
+// Reflection
+#define UTL_JSON_REFLECT(struct_name, ...)
+
+template <class T> constexpr bool is_reflected_struct;
 ```
 
 ## Methods
@@ -254,6 +260,14 @@ Serializes JSON node to a string using a given `format`.
 
 Serializes JSON node to the file at `filepath` using a given `format`.
 
+> ```cpp
+> template <class T> Node from_struct(const T& value);
+> ```
+
+Serializes JSON node to the structure / class object of type `T`.
+
+The type `T` must be reflected with `UTL_JSON_REFLECT()` macro, otherwise compilation fails with a proper assertion.
+
 ### Parsing
 
 > ```cpp
@@ -267,6 +281,14 @@ Parses JSON from a given string `buffer`.
 > ```
 
 Parses JSON from the file at `filepath`.
+
+> ```cpp
+> template <class T> Node from_struct(const T& value);
+> ```
+
+Parses JSON from structure / class object `value`.
+
+The type `T` must be reflected with `UTL_JSON_REFLECT()` macro, otherwise compilation fails with a proper assertion.
 
 > ```cpp
 > Node literals::operator""_utl_json(const char* c_str, std::size_t c_str_size);
@@ -294,6 +316,26 @@ Sets max recursion depth during parsing, default value is `1000`.
 > ```
 
 Shorter typedefs for all existing JSON value types.
+
+### Reflection
+
+> ```cpp
+> #define UTL_JSON_REFLECT(struct_name, ...)
+> ```
+
+Reflects structure / class `struct_name` with member variables `...`.
+
+Declaring this macro defines methods `Node::to_struct<struct_name>()` and `from_struct(const struct_name&)` for parsing and serialization.
+
+**Note 1:** Reflection supports nested classes, each class should be reflected with a macro and `to_struct()` / `from_struct()` will call each other recursively whenever appropriate. See [examples](#structure-reflection).
+
+**Note 2:** Reflection does not impose any strict limitations on member variable types, it uses the same set of type traits as other methods to deduce appropriate conversions. It is expected however, that array-like member variable should support `.resize()` ([std::vector](https://en.cppreference.com/w/cpp/container/vector) and [std::list](https://en.cppreference.com/w/cpp/container/list) satisfy that) or provide an API similar to [std::array](https://en.cppreference.com/w/cpp/container/array). For object-like types it is expected that new elements can be inserted with `operator[]` (std::map](https://en.cppreference.com/w/cpp/container/map) and [std::unordered_map](https://en.cppreference.com/w/cpp/container/unordered_map) satisfy that).
+
+> ```cpp
+> template <class T> constexpr bool is_reflected_struct;
+> ```
+
+Evaluates to `true` if `T` was reflected with `UTL_JSON_REFLECT()`, `false` otherwise.
 
 ## Examples 
 
@@ -491,6 +533,64 @@ ERROR: Caught exception:
 JSON node selector encountered unexpected marker symbol {v} at pos 48 (should be one of {0123456789{["tfn}).
 Line 4:         "key_2":  value_2",
         ------------------^-------- [!]
+```
+
+### Structure reflection
+
+[ [Run this code](https://godbolt.org/#z:OYLghAFBqd5QCxAYwPYBMCmBRdBLAF1QCcAaPECAMzwBtMA7AQwFtMQByARg9KtQYEAysib0QXACx8BBAKoBnTAAUAHpwAMvAFYTStJg1DIApACYAQuYukl9ZATwDKjdAGFUtAK4sGe1wAyeAyYAHI%2BAEaYxCBmABykAA6oCoRODB7evnrJqY4CQSHhLFEx8baY9vkMQgRMxASZPn5cFVXptfUEhWGR0bEJCnUNTdmtQ109xaUDAJS2qF7EyOwc5gDMwcjeWADUJutuCAQEiQogAPQXxEwA7gB0wIQIXhFeSsuyjAT3aCwXABEWIRiHgLKhgOhDKgAG4XRLEVBEAgAT0SwWAAH0vI5aAoLiwmENohctjtMPDEURsbiFPcEIlEgdsCYNABBVlsobELwOXYeBg0YD7ADsVnZu0luwiqE8UvluyYXlUdDw9RRmOC/H26wBuwIPMwB3FbPlQ3QIBA3IxuyhBEwCsdBz15jMZg0Zkk9w0Xo9ruNnPlgal3N5BF2AHlEtUFKKTY7JcFw8BQehMakAF4O527LjugMShNJ3aJBB4TEkLDEHV6gCsBdNUpMIr1qGj6QUDaDhcl5stMMwDhIBzcfatBoxzN2ClEtAxmKoXgYDg7NbjrrwWEEhBRrtI%2BzdtAhXA0/pbXZDBAtVrwWcx4YTjscbHT9rOj5ztY0p/W8al6EWCJ6EfEDJWfTBMUSaInHQBMcy4e5PRFDQAE4jUsMwG2bAEsPZOQABUAkxAApIQI1CTEACVsAAMQCbA3HwiABSFfclRVOd1U1QVUH3O1MH3GcxHnRdlxjfdwNfTAzgkvAXyg0EMFmBsCKI0jyKo2j6MY5iBCFS0o3E3YU03dNbwEksywrYgq2U39OU5YtCWCCBZnXHtdneG1mDYBREiYFZPIIWhcMbSUrl2ZR6iUXZ1NCXYqERFhpwNMNg0lJUiATNBBTwYUcxYvLmysc97I87QFGcEBQgwB0KoEJtdV2eq/BARLUBYV8eQcCAcqFOyTXSlLrzQHEdTcEcDzMABaWbdlqbrwyyuLdlm6aTFrNwGFdcbJpa%2B5qWtIxXNC%2BUIqEaDhKzWKyPirLQwcIbMtQadLrnLM0z6vK132w7Usew5CuAZkTrKsL9g8okPgICBdi%2B4B7nY1UuK1F7GpwpqPjVd7ME%2BvS8sR5VkeIDVUflAanoUaHYfh%2B5%2BNAoNdRzLGrtxzFafphnJQpyGqeiGG4fxhG2xjR5UzM67nWZt7zLx3LhfbAQ6RMtNMwdHnwYi%2B5tcMWDKt2AQHPPdkOHmWhOFrXg/A4LRSFQTgJssaxp0WZZszMdYeFIAhNFN%2BYAGsQBFBDg5FOJPckOIzAANhQk9a30ThJCt327c4Xhzg0b3ffmOBYBgRAUA69F6DICheuLuh%2Bm2QxgC4aPvz4Oh7WIc4IAiVOImCdVOC9rvmBJiMIm0Qcfe4Xg/jYQQIwYWgUVTrA3mANwxDxXveCwQkjHEG2N7wYhR7wAdzl30hMFUQccVWW2k0qVO5wiG4SY8LBU4nFh19IAdiBlJQAUwLewA5xGBznwAwwAFAADU8CYFuFGRgn9%2BCCBEGIdgUgZCCEUCodQp9dCtAMCA0wTtLD6DwBEc4kB5giw7Jwaa5pnREKsJYLgIpVoRjMLwWE0RUyYAoa5Noh9nAQFcKMFoZ8GDoCmH0GIrRchpAEKInIKR5EMCkSUfo4xKiCJqMMRonhmh6DsNozoDQ1EzHGLoxRFjJjBF6OomR8xKpLBWBIM2FsU6n3thwXYqg4jR2mtHSQcMCHCnrt6b0uwIC4EICQA8ntZi8DHloWY8wECYCYFWSgbiODJ1IB/L8pBra2y8RnEAWckmm1IHnQuixTg4nIJQP4JdoihFYKsXx/jAnBNrrmaO4Tba4xiamPQSDhCzjQdIUZWC1CpzwaQW4NxEjr2yZbQpqcvERhxIkMaqAqA%2BL8QEoJNcjC9P6ZEjwLBmnVg2FwBJ2dd4pNIIHSQfTY6SDMFwPxGhawoWDvXROOTeD5KzkUzh6dbBlPuckgOAxEJR3rnEWsLD1gaDiChF5AL1geOKeCipjzzYcA4WszxuKc7zG/qkZwkggA%3D%3D) ]
+
+```cpp
+struct Config {
+    bool        auxiliary_info = true;
+    std::string date           = "2024.04.02";
+
+    struct Options {
+        int grid_size = 120;
+        int phi_order = 5;
+    } options;
+
+    std::vector<std::string> scaling_functions = {"identity", "log10"};
+    std::size_t              time_steps        = 500;
+    double                   time_period       = 1.24709e+2;
+};
+
+UTL_JSON_REFLECT(Config, auxiliary_info, date, scaling_functions, time_steps, time_period);
+UTL_JSON_REFLECT(Config::Options, grid_size, phi_order);
+
+// ...
+
+using namespace utl;
+
+// Parse JSON from struct
+auto       config = Config{};
+json::Node json   = json::from_struct(config);
+
+// Test the result
+std::cout << "--- Struct to JSON ---\n" << json.to_string();
+
+// Serialize JSON to struct
+auto serialized_config = json.to_struct<Config>();
+
+// Test the result
+assert( config.auxiliary_info    == serialized_config.auxiliary_info    );
+assert( config.date              == serialized_config.date              );
+assert( config.options.grid_size == serialized_config.options.grid_size );
+// ...and so on
+```
+
+Output:
+```
+--- Struct to JSON ---
+{
+    "auxiliary_info": true,
+    "date": "2024.04.02",
+    "scaling_functions": [
+        "identity",
+        "log10"
+    ],
+    "time_period": 124.709,
+    "time_steps": 500
+}
 ```
 
 ## Tests
