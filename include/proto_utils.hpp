@@ -8,7 +8,6 @@
 //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-#include <cstdint>
 #if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_JSON)
 #ifndef UTLHEADERGUARD_JSON
 #define UTLHEADERGUARD_JSON
@@ -134,6 +133,31 @@ constexpr int _log_10_ceil(T num) {
     return res;
 }
 
+// --- Type traits ---
+// -------------------
+
+#define utl_json_define_trait(trait_name_, ...)                                                                        \
+    template <class T, class = void>                                                                                   \
+    struct trait_name_ : std::false_type {};                                                                           \
+                                                                                                                       \
+    template <class T>                                                                                                 \
+    struct trait_name_<T, std::void_t<decltype(__VA_ARGS__)>> : std::true_type {};                                     \
+                                                                                                                       \
+    template <class T>                                                                                                 \
+    constexpr bool trait_name_##_v = trait_name_<T>::value;                                                            \
+                                                                                                                       \
+    template <class T>                                                                                                 \
+    using trait_name_##_enable_if = std::enable_if_t<trait_name_<T>::value, bool>
+
+utl_json_define_trait(_has_begin, std::declval<std::decay_t<T>>().begin());
+utl_json_define_trait(_has_end, std::declval<std::decay_t<T>>().end());
+utl_json_define_trait(_has_input_it, std::next(std::declval<T>().begin()));
+
+utl_json_define_trait(_has_key_type, std::declval<typename std::decay_t<T>::key_type>());
+utl_json_define_trait(_has_mapped_type, std::declval<typename std::decay_t<T>::mapped_type>());
+
+#undef utl_json_define_trait
+
 // Workaround for 'static_assert(false)' making program ill-formed even
 // when placed inide an 'if constexpr' branch that never compiles.
 // 'static_assert(_always_false_v<T)' on the the other hand doesn't,
@@ -141,21 +165,41 @@ constexpr int _log_10_ceil(T num) {
 template <class>
 inline constexpr bool _always_false_v = false;
 
-// Type trait that checks existence of '.begin()', 'end()' members
-template <class Type, class = void, class = void>
-struct _is_const_iterable_through : std::false_type {};
+// --- MAP macro ---
+// -----------------
 
-template <class Type>
-struct _is_const_iterable_through<Type, std::void_t<decltype(++std::declval<Type>().begin())>,
-                                  std::void_t<decltype(std::declval<Type>().end())>> : std::true_type {};
+// This is an implementation of a classic MAP macro that applies some function macro
+// to all elements of __VA_ARGS__, it looks much uglier than usual because we have to prefix
+// everything with verbose 'utl_json_', but that's the price of avoiding name collisions.
+//
+// Created by William Swanson in 2012 and declared as public domain.
+//
+// Macro supports up to 365 arguments. We will need it for structure reflection.
 
-// Type trait that checks existence of '::key_type', '::mapped_type' members
-template <class Type, class = void, class = void>
-struct _is_assotiative : std::false_type {};
+#define utl_json_eval_0(...) __VA_ARGS__
+#define utl_json_eval_1(...) utl_json_eval_0(utl_json_eval_0(utl_json_eval_0(__VA_ARGS__)))
+#define utl_json_eval_2(...) utl_json_eval_1(utl_json_eval_1(utl_json_eval_1(__VA_ARGS__)))
+#define utl_json_eval_3(...) utl_json_eval_2(utl_json_eval_2(utl_json_eval_2(__VA_ARGS__)))
+#define utl_json_eval_4(...) utl_json_eval_3(utl_json_eval_3(utl_json_eval_3(__VA_ARGS__)))
+#define utl_json_eval(...) utl_json_eval_4(utl_json_eval_4(utl_json_eval_4(__VA_ARGS__)))
 
-template <class Type>
-struct _is_assotiative<Type, std::void_t<typename Type::key_type>, std::void_t<typename Type::mapped_type>>
-    : std::true_type {};
+#define utl_json_map_end(...)
+#define utl_json_map_out
+#define utl_json_map_comma ,
+
+#define utl_json_map_get_end_2() 0, utl_json_map_end
+#define utl_json_map_get_end_1(...) utl_json_map_get_end_2
+#define utl_json_map_get_end(...) utl_json_map_get_end_1
+#define utl_json_map_next_0(test, next, ...) next utl_json_map_out
+#define utl_json_map_next_1(test, next) utl_json_map_next_0(test, next, 0)
+#define utl_json_map_next(test, next) utl_json_map_next_1(utl_json_map_get_end test, next)
+
+#define utl_json_map_0(f, x, peek, ...) f(x) utl_json_map_next(peek, utl_json_map_1)(f, peek, __VA_ARGS__)
+#define utl_json_map_1(f, x, peek, ...) f(x) utl_json_map_next(peek, utl_json_map_0)(f, peek, __VA_ARGS__)
+
+// Resulting macro, applies the function macro `f` to each of the remaining parameters
+#define utl_json_map(f, ...)                                                                                           \
+    utl_json_eval(utl_json_map_1(f, __VA_ARGS__, ()()(), ()()(), ()()(), 0)) static_assert(true)
 
 // ===================================
 // --- JSON type conversion traits ---
@@ -176,10 +220,11 @@ struct _null_type_impl {
 };
 
 template <class T>
-constexpr bool is_object_like_v = _is_const_iterable_through<T>::value && _is_assotiative<T>::value;
+constexpr bool is_object_like_v =
+    _has_begin_v<T> && _has_end_v<T> && _has_input_it_v<T> && _has_mapped_type_v<T> && _has_key_type_v<T>;
 // NOTE: Also check for 'key_type' being convertible to 'std::string'
 template <class T>
-constexpr bool is_array_like_v = _is_const_iterable_through<T>::value;
+constexpr bool is_array_like_v = _has_begin_v<T> && _has_end_v<T> && _has_input_it_v<T>;
 template <class T>
 constexpr bool is_string_like_v = std::is_convertible_v<T, std::string_view>;
 template <class T>
@@ -188,6 +233,7 @@ template <class T>
 constexpr bool is_bool_like_v = std::is_same_v<T, _bool_type_impl>;
 template <class T>
 constexpr bool is_null_like_v = std::is_same_v<T, _null_type_impl>;
+;
 
 template <class T>
 constexpr bool is_json_type_convertible_v = is_object_like_v<T> || is_array_like_v<T> || is_string_like_v<T> ||
@@ -329,32 +375,25 @@ public:
         // Don't take types that decay to Node/object/array/string to prevent
         // shadowing native copy/move assignment for those types
 
-        constexpr bool is_object_like  = _is_const_iterable_through<T>::value && _is_assotiative<T>::value;
-        constexpr bool is_array_like   = _is_const_iterable_through<T>::value;
-        constexpr bool is_string_like  = std::is_convertible_v<T, std::string_view>;
-        constexpr bool is_numeric_like = std::is_convertible_v<T, number_type>;
-        constexpr bool is_bool_like    = std::is_same_v<T, bool_type>;
-        constexpr bool is_null_like    = std::is_same_v<T, null_type>;
-
         // Several "type-like' characteristics can be true at the same time,
         // to resolve ambiguity we assign the following conversion priority:
         // string > object > array > bool > null > numeric
 
-        if constexpr (is_string_like) {
+        if constexpr (is_string_like_v<T>) {
             this->data.emplace<string_type>(value);
-        } else if constexpr (is_object_like) {
+        } else if constexpr (is_object_like_v<T>) {
             this->data.emplace<object_type>();
             auto& object = this->get_object();
             for (const auto& [key, val] : value) object[key] = val;
-        } else if constexpr (is_array_like) {
+        } else if constexpr (is_array_like_v<T>) {
             this->data.emplace<array_type>();
             auto& array = this->get_array();
             for (const auto& elem : value) array.emplace_back(elem);
-        } else if constexpr (is_bool_like) {
+        } else if constexpr (is_bool_like_v<T>) {
             this->data.emplace<bool_type>(value);
-        } else if constexpr (is_null_like) {
+        } else if constexpr (is_null_like_v<T>) {
             this->data.emplace<null_type>(value);
-        } else if constexpr (is_numeric_like) {
+        } else if constexpr (is_numeric_like_v<T>) {
             this->data.emplace<number_type>(value);
         } else {
             static_assert(_always_false_v<T>, "Method is a non-exhaustive visitor of std::variant<>.");
@@ -481,6 +520,25 @@ public:
         auto chars = this->to_string(format);
         std::ofstream(filepath).write(chars.data(), chars.size());
         // maybe a little faster than doing 'std::ofstream(filepath) << node.to_string(format)'
+    }
+
+    // --- Reflection ---
+    // ------------------
+
+    template <class T>
+    T to_struct() const {
+        static_assert(
+            _always_false_v<T>,
+            "Provided type doesn't have a defined JSON reflection. Use 'UTL_JSON_REFLECT' macro to define one.");
+        // compile-time protection against calling 'from_struct()' on types that don't have reflection,
+        // we can also provide a proper error message here
+        return {};
+        // this is needed to silence "no return in a function" warning that appears even if this specialization
+        // (which by itself should cause a compile error) doesn't get compiled
+
+        // specializations of this template that will actually perform the conversion will be defined by
+        // macros outside the class body, this is a perfectly legal thing to do, even if unintuitive compared
+        // to non-template members, see https://en.cppreference.com/w/cpp/language/member_template
     }
 };
 
@@ -1222,6 +1280,106 @@ inline Node operator""_utl_json(const char* c_str, std::size_t c_str_size) {
 }
 } // namespace literals
 
+// ============================
+// --- Structure reflection ---
+// ============================
+
+// --- from-struct utils ---
+// -------------------------
+
+template <class T>
+constexpr bool _is_reflected_struct = false;
+// this trait allows us to "mark" all reflected struct types, we use it to handle nested classes
+// and call 'to_struct()' / 'from_struct()' recursively whenever necessary
+
+template <class T>
+utl::json::Node from_struct(const T&) {
+    static_assert(_always_false_v<T>,
+                  "Provided type doesn't have a defined JSON reflection. Use 'UTL_JSON_REFLECT' macro to define one.");
+    // compile-time protection against calling 'from_struct()' on types that don't have reflection,
+    // we can also provide a proper error message here
+    return {};
+    // this is needed to silence "no return in a function" warning that appears even if this specialization
+    // (which by itself should cause a compile error) doesn't get compiled
+}
+
+template <class T>
+void _assign_value_to_node(Node& node, const T& value) {
+    if constexpr (_is_reflected_struct<T>) node = from_struct(value);
+    else node = value;
+}
+
+#define utl_json_from_struct_assign(fieldname_) _assign_value_to_node(json[#fieldname_], val.fieldname_);
+
+// --- to-struct utils ---
+// -----------------------
+
+// Assigning JSON node to a value for arbitrary type is a bit of an "incorrect" problem,
+// since we can't possinly know the API of the type we're assigning stuff to.
+// Object-like and array-like types need special handling that expands their nodes recursively,
+// we can't directly assign 'std::vector<Node>' to 'std::vector<double>' like we would we simpler types.
+template <class T>
+void _assign_node_to_value_recursively(T& value, const Node& node) {
+    if constexpr (is_string_like_v<T>) value = node.get_string();
+    else if constexpr (is_object_like_v<T>) {
+        const auto object = node.get_object();
+        for (const auto& [key, val] : object) _assign_node_to_value_recursively(value[key], val);
+    } else if constexpr (is_array_like_v<T>) {
+        const auto array = node.get_array();
+        value.resize(array.size());
+        for (std::size_t i = 0; i < array.size(); ++i) _assign_node_to_value_recursively(value[i], array[i]);
+    } else if constexpr (is_bool_like_v<T>) value = node.get_bool();
+    else if constexpr (is_null_like_v<T>) value = node.get_null();
+    else if constexpr (is_numeric_like_v<T>) value = node.get_number();
+    else if constexpr (_is_reflected_struct<T>) value = node.to_struct<T>();
+    else static_assert(_always_false_v<T>, "Method is a non-exhaustive visitor of std::variant<>.");
+}
+
+// Not sure how to generically handle array-like types with compile-time known size,
+// so we're just gonna make a special case for 'std::array'
+template <class T, std::size_t N>
+void _assign_node_to_value_recursively(std::array<T, N>& value, const Node& node) {
+    using namespace std::string_literals;
+
+    const auto array = node.get_array();
+
+    if (array.size() != value.size())
+        throw std::runtime_error("JSON to structure serializer encountered non-mathing std::array size of "s +
+                                 std::to_string(value.size()) + ", corresponding node has a size of "s +
+                                 std::to_string(array.size()) + "."s);
+
+    for (std::size_t i = 0; i < array.size(); ++i) _assign_node_to_value_recursively(value[i], array[i]);
+}
+
+#define utl_json_to_struct_assign(fieldname_) _assign_node_to_value_recursively(val.fieldname_, this->at(#fieldname_));
+
+// --- Codegen ---
+// ---------------
+
+#define UTL_JSON_REFLECT(struct_name_, ...)                                                                            \
+                                                                                                                       \
+    template <>                                                                                                        \
+    constexpr bool utl::json::_is_reflected_struct<struct_name_> = true;                                               \
+                                                                                                                       \
+    template <>                                                                                                        \
+    utl::json::Node utl::json::from_struct<struct_name_>(const struct_name_& val) {                                    \
+        utl::json::Node json;                                                                                          \
+        /* map 'json["<FIELDNAME>"] = val.<FIELDNAME>;' */                                                             \
+        utl_json_map(utl_json_from_struct_assign, __VA_ARGS__);                                                        \
+        return json;                                                                                                   \
+    }                                                                                                                  \
+                                                                                                                       \
+    template <>                                                                                                        \
+    auto utl::json::Node::to_struct<struct_name_>() const->struct_name_ {                                              \
+        struct_name_ val;                                                                                              \
+        /* map 'val.<FIELDNAME> = this->at("<FIELDNAME>").get<decltype(val.<FIELDNAME>)>();' */                        \
+        utl_json_map(utl_json_to_struct_assign, __VA_ARGS__);                                                          \
+        return val;                                                                                                    \
+    }                                                                                                                  \
+                                                                                                                       \
+    static_assert(true)
+
+
 } // namespace utl::json
 
 #endif
@@ -1342,12 +1500,11 @@ inline const clock::time_point _program_entry_time_point = clock::now();
     template <class T>                                                                                                 \
     constexpr bool trait_name_##_v = trait_name_<T>::value
 
-utl_log_define_trait(_has_string_append, std::string() += std::declval<T>());
 utl_log_define_trait(_has_real, std::declval<T>().real());
 utl_log_define_trait(_has_imag, std::declval<T>().imag());
 utl_log_define_trait(_has_begin, std::declval<T>().begin());
 utl_log_define_trait(_has_end, std::declval<T>().end());
-utl_log_define_trait(_has_input_iter, std::next(std::declval<T>().begin()));
+utl_log_define_trait(_has_input_it, std::next(std::declval<T>().begin()));
 utl_log_define_trait(_has_get, std::get<0>(std::declval<T>()));
 utl_log_define_trait(_has_tuple_size, std::tuple_size<T>::value);
 utl_log_define_trait(_has_ostream_insert, std::declval<std::ostream>() << std::declval<T>());
@@ -1356,7 +1513,7 @@ utl_log_define_trait(_is_pad_right, std::declval<std::decay_t<T>>().is_pad_right
 utl_log_define_trait(_is_pad, std::declval<std::decay_t<T>>().is_pad);
 
 // Note:
-// Trait '_has_input_iter' is trickier than it may seem. Just doing '++std::declval<T>().begin()' will work
+// Trait '_has_input_it' is trickier than it may seem. Just doing '++std::declval<T>().begin()' will work
 // most of the time, but there are cases where it returns 'false' for very much iterable types.
 //
 // """
@@ -1434,7 +1591,12 @@ struct Pad {
 // Generic stringifier with customizable API. Formatting of specific types can be customized by inheriting it
 // and overriding specific methods. This is a reference implementation that is likely to be used in other modules.
 //
-struct Stringifier {
+// For example of how to extend stringifier see 'utl::log' documentation.
+//
+template <class Derived>
+struct StringifierBase {
+    using self    = StringifierBase;
+    using derived = Derived;
 
     // --- Type-wise methods ---
     // -------------------------
@@ -1464,9 +1626,9 @@ struct Stringifier {
 
     template <class T>
     static void append_complex(std::string& buffer, const T& value) {
-        append_float(buffer, value.real());
+        derived::append_float(buffer, value.real());
         buffer += " + ";
-        append_float(buffer, value.imag());
+        derived::append_float(buffer, value.imag());
         buffer += " i";
     }
 
@@ -1480,7 +1642,7 @@ struct Stringifier {
         buffer += "{ ";
         if (value.begin() != value.end())
             for (auto it = value.begin();;) {
-                append(buffer, *it);
+                derived::append(buffer, *it);
                 if (++it == value.end()) break; // prevents trailing comma
                 buffer += ", ";
             }
@@ -1489,7 +1651,7 @@ struct Stringifier {
 
     template <class T>
     static void append_tuple(std::string& buffer, const T& value) {
-        _append_tuple_fwd(buffer, value);
+        self::_append_tuple_fwd(buffer, value);
     }
 
     template <class T>
@@ -1500,21 +1662,26 @@ struct Stringifier {
     // --- Main API ---
     // ----------------
 
+    template <class T>
+    static void append(std::string& buffer, const T& value) {
+        self::_append_selector(buffer, value);
+    }
+
     template <class... Args>
-    static void append(std::string& buffer, Args&&... args) {
-        (_append_selector(buffer, std::forward<Args>(args)), ...);
+    static void append(std::string& buffer, const Args&... args) {
+        (derived::append(buffer, args), ...);
     }
 
     template <class... Args>
     [[nodiscard]] static std::string stringify(Args&&... args) {
         std::string buffer;
-        append(buffer, std::forward<Args>(args)...);
+        derived::append(buffer, std::forward<Args>(args)...);
         return buffer;
     }
 
     template <class... Args>
     [[nodiscard]] std::string operator()(Args&&... args) {
-        return stringify(std::forward<Args>(args)...);
+        return derived::stringify(std::forward<Args>(args)...);
     } // allows stringifier to be used as a functor
 
     // --- Helpers ---
@@ -1522,7 +1689,7 @@ struct Stringifier {
 private:
     template <class Tuplelike, std::size_t... Idx>
     static void _append_tuple_impl(std::string& buffer, Tuplelike value, std::index_sequence<Idx...>) {
-        ((Idx == 0 ? "" : buffer += ", ", append(buffer, std::get<Idx>(value))), ...);
+        ((Idx == 0 ? "" : buffer += ", ", derived::append(buffer, std::get<Idx>(value))), ...);
         // fold expression '( f(args), ... )' invokes 'f(args)' for all arguments in 'args...'
         // in the same fashion, we can fold over 2 functions by doing '( ( f(args), g(args) ), ... )'
     }
@@ -1530,7 +1697,7 @@ private:
     template <template <class...> class Tuplelike, class... Args>
     static void _append_tuple_fwd(std::string& buffer, const Tuplelike<Args...>& value) {
         buffer += "< ";
-        _append_tuple_impl(buffer, value, std::index_sequence_for<Args...>{});
+        self::_append_tuple_impl(buffer, value, std::index_sequence_for<Args...>{});
         buffer += " >";
     }
 
@@ -1539,14 +1706,14 @@ private:
         // Left-padded something
         if constexpr (_is_pad_left_v<T>) {
             std::string temp;
-            _append_selector(temp, value.val);
+            self::_append_selector(temp, value.val);
             if (temp.size() < value.size) buffer.append(value.size - temp.size(), ' ');
             buffer += temp;
         }
         // Right-padded something
         else if constexpr (_is_pad_right_v<T>) {
             const std::size_t old_size = buffer.size();
-            _append_selector(buffer, value.val);
+            self::_append_selector(buffer, value.val);
             const std::size_t appended_size = buffer.size() - old_size;
             if (appended_size < value.size) buffer.append(value.size - appended_size, ' ');
             // right-padding is faster than left padding since we don't need a temporary string to get appended size
@@ -1554,7 +1721,7 @@ private:
         // Center-padded something
         else if constexpr (_is_pad_v<T>) {
             std::string temp;
-            _append_selector(temp, value.val);
+            self::_append_selector(temp, value.val);
             if (temp.size() < value.size) {
                 const std::size_t lpad_size = (value.size - temp.size()) / 2;
                 const std::size_t rpad_size = value.size - lpad_size - temp.size();
@@ -1565,25 +1732,25 @@ private:
         }
         // Bool
         else if constexpr (std::is_same_v<T, bool>)
-            append_bool(buffer, value);
+            derived::append_bool(buffer, value);
         // Char
-        else if constexpr (std::is_same_v<T, char>) append_string(buffer, value);
+        else if constexpr (std::is_same_v<T, char>) derived::append_string(buffer, value);
         // Integral
-        else if constexpr (std::is_integral_v<T>) append_int(buffer, value);
+        else if constexpr (std::is_integral_v<T>) derived::append_int(buffer, value);
         // Floating-point
-        else if constexpr (std::is_floating_point_v<T>) append_float(buffer, value);
+        else if constexpr (std::is_floating_point_v<T>) derived::append_float(buffer, value);
         // Complex
-        else if constexpr (_has_real_v<T> && _has_imag_v<T>) append_complex(buffer, value);
+        else if constexpr (_has_real_v<T> && _has_imag_v<T>) derived::append_complex(buffer, value);
         // 'std::string_view'-convertible (most strings and string-like types)
-        else if constexpr (std::is_convertible_v<T, std::string_view>) append_string(buffer, value);
+        else if constexpr (std::is_convertible_v<T, std::string_view>) derived::append_string(buffer, value);
         // 'std::string'-convertible (some "nastier" string-like types, mainly 'std::path')
-        else if constexpr (std::is_convertible_v<T, std::string>) append_string(buffer, std::string(value));
+        else if constexpr (std::is_convertible_v<T, std::string>) derived::append_string(buffer, std::string(value));
         // Array-like
-        else if constexpr (_has_begin_v<T> && _has_end_v<T> && _has_input_iter_v<T>) append_array(buffer, value);
+        else if constexpr (_has_begin_v<T> && _has_end_v<T> && _has_input_it_v<T>) derived::append_array(buffer, value);
         // Tuple-like
-        else if constexpr (_has_get_v<T> && _has_tuple_size_v<T>) append_tuple(buffer, value);
+        else if constexpr (_has_get_v<T> && _has_tuple_size_v<T>) derived::append_tuple(buffer, value);
         // 'std::ostream' printable
-        else if constexpr (_has_ostream_insert_v<T>) append_printable(buffer, value);
+        else if constexpr (_has_ostream_insert_v<T>) derived::append_printable(buffer, value);
         // No valid stringification exists
         else static_assert(_always_false_v<T>, "No valid stringification exists for the type.");
 
@@ -1604,17 +1771,21 @@ private:
 // --- Stringifier derivatives ---
 // ===============================
 
-// Customization of stringifier that optimizes a few things.
+// "Default" customization of stringifier, here we can optimize a few things.
 //
 // The reason we don't include this in the original stringifier is because it's intended to be a customizable
-// thing that can be extended/optimized/decorated by inheriting it and overriding specific methods. The changes
-// made by this stringifier wouldn't be compatible with such philosophy.
+// class that can be extended/optimized/decorated by inheriting it and overriding specific methods. The changes
+// made by some optimizations wouldn't be compatible with such philosophy.
 //
-struct FastStringifier : public Stringifier {
-    template <class... Args>
-    [[nodiscard]] static std::string stringify(Args&&... args) {
-        return Stringifier::stringify(std::forward<Args>(args)...);
-    }
+struct Stringifier : public StringifierBase<Stringifier> {
+    using base = StringifierBase<Stringifier>;
+
+    // template <class... Args>
+    // [[nodiscard]] static std::string stringify(Args&&... args) {
+    //     return StringifierBase::stringify(std::forward<Args>(args)...);
+    // }
+
+    using base::stringify;
 
     [[nodiscard]] static std::string stringify(int arg) { return std::to_string(arg); }
     [[nodiscard]] static std::string stringify(long arg) { return std::to_string(arg); }
@@ -1625,30 +1796,33 @@ struct FastStringifier : public Stringifier {
     // for individual ints 'std::to_string()' beats 'append_int()' with <charconv> since any reasonable compiler
     // implements it using the same <charconv> routine, but formatted directly into a string upon its creation
 
+    [[nodiscard]] static std::string stringify(std::string&& arg) { return arg; }
+    // no need to do all the appending stuff for individual r-value strings, just forward them as is
+
     template <class... Args>
     [[nodiscard]] std::string operator()(Args&&... args) {
-        return FastStringifier::stringify(std::forward<Args>(args)...);
+        return Stringifier::stringify(std::forward<Args>(args)...);
     }
 };
 
 template <class... Args>
 void append_stringified(std::string& str, Args&&... args) {
-    FastStringifier::append(str, std::forward<Args>(args)...);
+    Stringifier::append(str, std::forward<Args>(args)...);
 }
 
 template <class... Args>
 [[nodiscard]] std::string stringify(Args&&... args) {
-    return FastStringifier::stringify(std::forward<Args>(args)...);
+    return Stringifier::stringify(std::forward<Args>(args)...);
 }
 
 template <class... Args>
 void print(Args&&... args) {
-    std::cout << FastStringifier::stringify(std::forward<Args>(args)...);
+    std::cout << Stringifier::stringify(std::forward<Args>(args)...);
 }
 
 template <class... Args>
 void println(Args&&... args) {
-    std::cout << FastStringifier::stringify(std::forward<Args>(args)...) << '\n';
+    std::cout << Stringifier::stringify(std::forward<Args>(args)...) << '\n';
 }
 // MARK:
 
@@ -1741,7 +1915,7 @@ public:
         if (this->columns.level) this->format_column_level(buffer, meta.verbosity);
         if (this->columns.message) this->format_column_message(buffer, args...);
 
-        if (this->colors == Colors::ENABLE) { buffer += "\033[0m"; }
+        if (this->colors == Colors::ENABLE) buffer += "\033[0m";
 
         buffer += '\n';
 
@@ -1750,10 +1924,9 @@ public:
         // flush every message immediately
         if (this->flush_interval.count() == 0) {
             this->os.flush();
-            return;
         }
         // or flush periodically
-        if (now - this->last_flushed > this->flush_interval) {
+        else if (now - this->last_flushed > this->flush_interval) {
             this->last_flushed = now;
             this->os.flush();
         }
@@ -1843,7 +2016,6 @@ public:
     void format_column_message(std::string& buffer, const Args&... args) {
         buffer += ' ';
         append_stringified(buffer, args...);
-        //(buffer += ... += args); // parenthesis here are necessary
     }
 };
 
@@ -1891,7 +2063,7 @@ public:
 // --- Sink public API ---
 // =======================
 
-inline Sink& add_terminal_sink(std::ostream& os, Verbosity verbosity = Verbosity::INFO, Colors colors = Colors::ENABLE,
+inline Sink& add_ostream_sink(std::ostream& os, Verbosity verbosity = Verbosity::INFO, Colors colors = Colors::ENABLE,
                                clock::duration flush_interval = ms{}, const Columns& columns = Columns{}) {
     return Logger::instance().emplace_sink(os, verbosity, colors, flush_interval, columns);
 }

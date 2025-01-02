@@ -109,12 +109,11 @@ inline const clock::time_point _program_entry_time_point = clock::now();
     template <class T>                                                                                                 \
     constexpr bool trait_name_##_v = trait_name_<T>::value
 
-utl_log_define_trait(_has_string_append, std::string() += std::declval<T>());
 utl_log_define_trait(_has_real, std::declval<T>().real());
 utl_log_define_trait(_has_imag, std::declval<T>().imag());
 utl_log_define_trait(_has_begin, std::declval<T>().begin());
 utl_log_define_trait(_has_end, std::declval<T>().end());
-utl_log_define_trait(_has_input_iter, std::next(std::declval<T>().begin()));
+utl_log_define_trait(_has_input_it, std::next(std::declval<T>().begin()));
 utl_log_define_trait(_has_get, std::get<0>(std::declval<T>()));
 utl_log_define_trait(_has_tuple_size, std::tuple_size<T>::value);
 utl_log_define_trait(_has_ostream_insert, std::declval<std::ostream>() << std::declval<T>());
@@ -123,7 +122,7 @@ utl_log_define_trait(_is_pad_right, std::declval<std::decay_t<T>>().is_pad_right
 utl_log_define_trait(_is_pad, std::declval<std::decay_t<T>>().is_pad);
 
 // Note:
-// Trait '_has_input_iter' is trickier than it may seem. Just doing '++std::declval<T>().begin()' will work
+// Trait '_has_input_it' is trickier than it may seem. Just doing '++std::declval<T>().begin()' will work
 // most of the time, but there are cases where it returns 'false' for very much iterable types.
 //
 // """
@@ -201,7 +200,12 @@ struct Pad {
 // Generic stringifier with customizable API. Formatting of specific types can be customized by inheriting it
 // and overriding specific methods. This is a reference implementation that is likely to be used in other modules.
 //
-struct Stringifier {
+// For example of how to extend stringifier see 'utl::log' documentation.
+//
+template <class Derived>
+struct StringifierBase {
+    using self    = StringifierBase;
+    using derived = Derived;
 
     // --- Type-wise methods ---
     // -------------------------
@@ -231,9 +235,9 @@ struct Stringifier {
 
     template <class T>
     static void append_complex(std::string& buffer, const T& value) {
-        append_float(buffer, value.real());
+        derived::append_float(buffer, value.real());
         buffer += " + ";
-        append_float(buffer, value.imag());
+        derived::append_float(buffer, value.imag());
         buffer += " i";
     }
 
@@ -247,7 +251,7 @@ struct Stringifier {
         buffer += "{ ";
         if (value.begin() != value.end())
             for (auto it = value.begin();;) {
-                append(buffer, *it);
+                derived::append(buffer, *it);
                 if (++it == value.end()) break; // prevents trailing comma
                 buffer += ", ";
             }
@@ -256,7 +260,7 @@ struct Stringifier {
 
     template <class T>
     static void append_tuple(std::string& buffer, const T& value) {
-        _append_tuple_fwd(buffer, value);
+        self::_append_tuple_fwd(buffer, value);
     }
 
     template <class T>
@@ -267,21 +271,26 @@ struct Stringifier {
     // --- Main API ---
     // ----------------
 
+    template <class T>
+    static void append(std::string& buffer, const T& value) {
+        self::_append_selector(buffer, value);
+    }
+
     template <class... Args>
-    static void append(std::string& buffer, Args&&... args) {
-        (_append_selector(buffer, std::forward<Args>(args)), ...);
+    static void append(std::string& buffer, const Args&... args) {
+        (derived::append(buffer, args), ...);
     }
 
     template <class... Args>
     [[nodiscard]] static std::string stringify(Args&&... args) {
         std::string buffer;
-        append(buffer, std::forward<Args>(args)...);
+        derived::append(buffer, std::forward<Args>(args)...);
         return buffer;
     }
 
     template <class... Args>
     [[nodiscard]] std::string operator()(Args&&... args) {
-        return stringify(std::forward<Args>(args)...);
+        return derived::stringify(std::forward<Args>(args)...);
     } // allows stringifier to be used as a functor
 
     // --- Helpers ---
@@ -289,7 +298,7 @@ struct Stringifier {
 private:
     template <class Tuplelike, std::size_t... Idx>
     static void _append_tuple_impl(std::string& buffer, Tuplelike value, std::index_sequence<Idx...>) {
-        ((Idx == 0 ? "" : buffer += ", ", append(buffer, std::get<Idx>(value))), ...);
+        ((Idx == 0 ? "" : buffer += ", ", derived::append(buffer, std::get<Idx>(value))), ...);
         // fold expression '( f(args), ... )' invokes 'f(args)' for all arguments in 'args...'
         // in the same fashion, we can fold over 2 functions by doing '( ( f(args), g(args) ), ... )'
     }
@@ -297,7 +306,7 @@ private:
     template <template <class...> class Tuplelike, class... Args>
     static void _append_tuple_fwd(std::string& buffer, const Tuplelike<Args...>& value) {
         buffer += "< ";
-        _append_tuple_impl(buffer, value, std::index_sequence_for<Args...>{});
+        self::_append_tuple_impl(buffer, value, std::index_sequence_for<Args...>{});
         buffer += " >";
     }
 
@@ -306,14 +315,14 @@ private:
         // Left-padded something
         if constexpr (_is_pad_left_v<T>) {
             std::string temp;
-            _append_selector(temp, value.val);
+            self::_append_selector(temp, value.val);
             if (temp.size() < value.size) buffer.append(value.size - temp.size(), ' ');
             buffer += temp;
         }
         // Right-padded something
         else if constexpr (_is_pad_right_v<T>) {
             const std::size_t old_size = buffer.size();
-            _append_selector(buffer, value.val);
+            self::_append_selector(buffer, value.val);
             const std::size_t appended_size = buffer.size() - old_size;
             if (appended_size < value.size) buffer.append(value.size - appended_size, ' ');
             // right-padding is faster than left padding since we don't need a temporary string to get appended size
@@ -321,7 +330,7 @@ private:
         // Center-padded something
         else if constexpr (_is_pad_v<T>) {
             std::string temp;
-            _append_selector(temp, value.val);
+            self::_append_selector(temp, value.val);
             if (temp.size() < value.size) {
                 const std::size_t lpad_size = (value.size - temp.size()) / 2;
                 const std::size_t rpad_size = value.size - lpad_size - temp.size();
@@ -332,25 +341,25 @@ private:
         }
         // Bool
         else if constexpr (std::is_same_v<T, bool>)
-            append_bool(buffer, value);
+            derived::append_bool(buffer, value);
         // Char
-        else if constexpr (std::is_same_v<T, char>) append_string(buffer, value);
+        else if constexpr (std::is_same_v<T, char>) derived::append_string(buffer, value);
         // Integral
-        else if constexpr (std::is_integral_v<T>) append_int(buffer, value);
+        else if constexpr (std::is_integral_v<T>) derived::append_int(buffer, value);
         // Floating-point
-        else if constexpr (std::is_floating_point_v<T>) append_float(buffer, value);
+        else if constexpr (std::is_floating_point_v<T>) derived::append_float(buffer, value);
         // Complex
-        else if constexpr (_has_real_v<T> && _has_imag_v<T>) append_complex(buffer, value);
+        else if constexpr (_has_real_v<T> && _has_imag_v<T>) derived::append_complex(buffer, value);
         // 'std::string_view'-convertible (most strings and string-like types)
-        else if constexpr (std::is_convertible_v<T, std::string_view>) append_string(buffer, value);
+        else if constexpr (std::is_convertible_v<T, std::string_view>) derived::append_string(buffer, value);
         // 'std::string'-convertible (some "nastier" string-like types, mainly 'std::path')
-        else if constexpr (std::is_convertible_v<T, std::string>) append_string(buffer, std::string(value));
+        else if constexpr (std::is_convertible_v<T, std::string>) derived::append_string(buffer, std::string(value));
         // Array-like
-        else if constexpr (_has_begin_v<T> && _has_end_v<T> && _has_input_iter_v<T>) append_array(buffer, value);
+        else if constexpr (_has_begin_v<T> && _has_end_v<T> && _has_input_it_v<T>) derived::append_array(buffer, value);
         // Tuple-like
-        else if constexpr (_has_get_v<T> && _has_tuple_size_v<T>) append_tuple(buffer, value);
+        else if constexpr (_has_get_v<T> && _has_tuple_size_v<T>) derived::append_tuple(buffer, value);
         // 'std::ostream' printable
-        else if constexpr (_has_ostream_insert_v<T>) append_printable(buffer, value);
+        else if constexpr (_has_ostream_insert_v<T>) derived::append_printable(buffer, value);
         // No valid stringification exists
         else static_assert(_always_false_v<T>, "No valid stringification exists for the type.");
 
@@ -371,17 +380,21 @@ private:
 // --- Stringifier derivatives ---
 // ===============================
 
-// Customization of stringifier that optimizes a few things.
+// "Default" customization of stringifier, here we can optimize a few things.
 //
 // The reason we don't include this in the original stringifier is because it's intended to be a customizable
-// thing that can be extended/optimized/decorated by inheriting it and overriding specific methods. The changes
-// made by this stringifier wouldn't be compatible with such philosophy.
+// class that can be extended/optimized/decorated by inheriting it and overriding specific methods. The changes
+// made by some optimizations wouldn't be compatible with such philosophy.
 //
-struct FastStringifier : public Stringifier {
-    template <class... Args>
-    [[nodiscard]] static std::string stringify(Args&&... args) {
-        return Stringifier::stringify(std::forward<Args>(args)...);
-    }
+struct Stringifier : public StringifierBase<Stringifier> {
+    using base = StringifierBase<Stringifier>;
+
+    // template <class... Args>
+    // [[nodiscard]] static std::string stringify(Args&&... args) {
+    //     return StringifierBase::stringify(std::forward<Args>(args)...);
+    // }
+
+    using base::stringify;
 
     [[nodiscard]] static std::string stringify(int arg) { return std::to_string(arg); }
     [[nodiscard]] static std::string stringify(long arg) { return std::to_string(arg); }
@@ -392,30 +405,33 @@ struct FastStringifier : public Stringifier {
     // for individual ints 'std::to_string()' beats 'append_int()' with <charconv> since any reasonable compiler
     // implements it using the same <charconv> routine, but formatted directly into a string upon its creation
 
+    [[nodiscard]] static std::string stringify(std::string&& arg) { return arg; }
+    // no need to do all the appending stuff for individual r-value strings, just forward them as is
+
     template <class... Args>
     [[nodiscard]] std::string operator()(Args&&... args) {
-        return FastStringifier::stringify(std::forward<Args>(args)...);
+        return Stringifier::stringify(std::forward<Args>(args)...);
     }
 };
 
 template <class... Args>
 void append_stringified(std::string& str, Args&&... args) {
-    FastStringifier::append(str, std::forward<Args>(args)...);
+    Stringifier::append(str, std::forward<Args>(args)...);
 }
 
 template <class... Args>
 [[nodiscard]] std::string stringify(Args&&... args) {
-    return FastStringifier::stringify(std::forward<Args>(args)...);
+    return Stringifier::stringify(std::forward<Args>(args)...);
 }
 
 template <class... Args>
 void print(Args&&... args) {
-    std::cout << FastStringifier::stringify(std::forward<Args>(args)...);
+    std::cout << Stringifier::stringify(std::forward<Args>(args)...);
 }
 
 template <class... Args>
 void println(Args&&... args) {
-    std::cout << FastStringifier::stringify(std::forward<Args>(args)...) << '\n';
+    std::cout << Stringifier::stringify(std::forward<Args>(args)...) << '\n';
 }
 // MARK:
 
@@ -508,7 +524,7 @@ public:
         if (this->columns.level) this->format_column_level(buffer, meta.verbosity);
         if (this->columns.message) this->format_column_message(buffer, args...);
 
-        if (this->colors == Colors::ENABLE) { buffer += "\033[0m"; }
+        if (this->colors == Colors::ENABLE) buffer += "\033[0m";
 
         buffer += '\n';
 
@@ -517,10 +533,9 @@ public:
         // flush every message immediately
         if (this->flush_interval.count() == 0) {
             this->os.flush();
-            return;
         }
         // or flush periodically
-        if (now - this->last_flushed > this->flush_interval) {
+        else if (now - this->last_flushed > this->flush_interval) {
             this->last_flushed = now;
             this->os.flush();
         }
@@ -610,7 +625,6 @@ public:
     void format_column_message(std::string& buffer, const Args&... args) {
         buffer += ' ';
         append_stringified(buffer, args...);
-        //(buffer += ... += args); // parenthesis here are necessary
     }
 };
 
@@ -658,7 +672,7 @@ public:
 // --- Sink public API ---
 // =======================
 
-inline Sink& add_terminal_sink(std::ostream& os, Verbosity verbosity = Verbosity::INFO, Colors colors = Colors::ENABLE,
+inline Sink& add_ostream_sink(std::ostream& os, Verbosity verbosity = Verbosity::INFO, Colors colors = Colors::ENABLE,
                                clock::duration flush_interval = ms{}, const Columns& columns = Columns{}) {
     return Logger::instance().emplace_sink(os, verbosity, colors, flush_interval, columns);
 }
