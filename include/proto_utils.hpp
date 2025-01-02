@@ -8,6 +8,7 @@
 //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+#include <memory>
 #if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_JSON)
 #ifndef UTLHEADERGUARD_JSON
 #define UTLHEADERGUARD_JSON
@@ -18,6 +19,7 @@
 #include <charconv>         // to_chars(), from_chars()
 #include <cmath>            // isfinite()
 #include <codecvt>          // codecvt_utf8<>
+#include <cstddef>          // size_t
 #include <cuchar>           // size_t, char32_t, mbstate_t
 #include <fstream>          // ifstream, ofstream
 #include <initializer_list> // initializer_list<>
@@ -34,7 +36,15 @@
 
 // ____________________ DEVELOPER DOCS ____________________
 
-// TODO:
+// Reasonably simple parser / serializer, doen't use any intrinsics or compiler-specific stuff.
+// Unlike some other implementation, doesn't include the tokenizing step - we parse everything in a single 1D scan
+// over the data, constructing recursive JSON struct on the fly. The main reason we can do this so easily is is due
+// to a nice quirk of JSON - parsing nodes, we can always determine node type based on a single first character,
+// see '_parser::parse_node()'.
+//
+// Struct reflection is implemented through macros - alternative way would be to use templates with __PRETTY_FUNCTION__
+// (or __FUNCSIG__) and do some constexpr string parsing to perform "magic" reflection without requiring, but that
+// relies on implementation-defined format of those strings and may trash the compile times, macros work everywhere.
 
 // ____________________ IMPLEMENTATION ____________________
 
@@ -965,7 +975,7 @@ struct _parser {
                     _pretty_error(cursor, this->chars));
 
             // Reached the end of the string
-            if (c == '"') {
+            else if (c == '"') {
                 string_value.append(this->chars.data() + segment_start, cursor - segment_start);
                 ++cursor; // move past the closing quote '"'
                 return {cursor, std::move(string_value)};

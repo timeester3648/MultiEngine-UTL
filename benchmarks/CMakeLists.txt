@@ -15,5 +15,8 @@ add_utl_bencmark(benchmark_random)
 
 # Link OpenMP if doing benchmarks with it.
 # Don't forget to add '-fopenmp' to 'target_compile_options' 
-#find_package(OpenMP REQUIRED)
+# find_package(OpenMP REQUIRED)
 # target_link_libraries(benchmark_parallel PRIVATE OpenMP::OpenMP_CXX)
+
+# Profiling flags for 'perf':
+# -O2 -g -ggdb -fno-omit-frame-pointer
