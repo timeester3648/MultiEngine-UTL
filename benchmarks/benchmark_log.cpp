@@ -328,6 +328,6 @@ void benchmark_raw_logging_overhead() {
 int main() {
     using namespace utl;
 
-    benchmark_stringification();
-    //benchmark_raw_logging_overhead();
+    //benchmark_stringification();
+    benchmark_raw_logging_overhead();
 }

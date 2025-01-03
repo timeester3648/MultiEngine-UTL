@@ -467,6 +467,50 @@ struct MessageMetadata {
 constexpr bool operator<(Verbosity l, Verbosity r) { return static_cast<int>(l) < static_cast<int>(r); }
 constexpr bool operator<=(Verbosity l, Verbosity r) { return static_cast<int>(l) <= static_cast<int>(r); }
 
+// --- Column widths ---
+// ---------------------
+
+constexpr unsigned int _w_uptime_sec = 4;
+constexpr unsigned int _w_uptime_ms  = 3;
+
+constexpr std::size_t _w_callsite_before_dot = 22;
+constexpr std::size_t _w_callsite_after_dot  = 4;
+
+constexpr std::size_t _col_w_datetime = sizeof("yyyy-mm-dd HH:MM:SS") - 1;
+constexpr std::size_t _col_w_uptime   = _w_uptime_sec + 1 + _w_uptime_ms;
+constexpr std::size_t _col_w_thread   = sizeof("thread") - 1;
+constexpr std::size_t _col_w_callsite = _w_callsite_before_dot + 1 + _w_callsite_after_dot;
+constexpr std::size_t _col_w_level    = sizeof("level") - 1;
+
+// --- Column left/right delimers ---
+// ----------------------------------
+
+constexpr std::string_view _col_ld_datetime = "";
+constexpr std::string_view _col_rd_datetime = " ";
+constexpr std::string_view _col_ld_uptime   = "(";
+constexpr std::string_view _col_rd_uptime   = ")";
+constexpr std::string_view _col_ld_thread   = "[";
+constexpr std::string_view _col_rd_thread   = "]";
+constexpr std::string_view _col_ld_callsite = " ";
+constexpr std::string_view _col_rd_callsite = " ";
+constexpr std::string_view _col_ld_level    = "";
+constexpr std::string_view _col_rd_level    = "|";
+constexpr std::string_view _col_ld_message  = " ";
+constexpr std::string_view _col_rd_message  = "\n";
+
+// --- ANSI Colors ---
+// -------------------
+
+constexpr std::string_view _color_heading = "\033[36;1m"; // bold cyan
+constexpr std::string_view _color_reset   = "\033[0m";
+
+constexpr std::string_view _color_trace = "\033[90m";   // gray
+constexpr std::string_view _color_info  = "\033[37m";   // white
+constexpr std::string_view _color_warn  = "\033[33m";   // yellow
+constexpr std::string_view _color_err   = "\033[31;1m"; // bold red
+
+// MARK:
+
 // ==================
 // --- Sink class ---
 // ==================
@@ -475,22 +519,20 @@ class Sink {
 private:
     using os_ref_wrapper = std::reference_wrapper<std::ostream>;
 
-    std::variant<std::monostate, os_ref_wrapper, std::ofstream> os_variant;
-    Verbosity                                                   verbosity;
-    Colors                                                      colors;
-    clock::duration                                             flush_interval;
-    Columns                                                     columns;
-    clock::time_point                                           last_flushed;
+    std::variant<os_ref_wrapper, std::ofstream> os_variant;
+    Verbosity                                   verbosity;
+    Colors                                      colors;
+    clock::duration                             flush_interval;
+    Columns                                     columns;
+    clock::time_point                           last_flushed;
+    bool                                        print_header = true;
 
     friend struct _logger;
 
     std::ostream& ostream_ref() {
         if (const auto ref_wrapper_ptr = std::get_if<os_ref_wrapper>(&this->os_variant)) return ref_wrapper_ptr->get();
         else return std::get<std::ofstream>(this->os_variant);
-        // monostate case should be impossible
     }
-
-    // MARK:
 
 public:
     Sink()            = delete;
@@ -522,6 +564,10 @@ public:
         this->columns = columns;
         return *this;
     }
+    Sink& skip_header(bool skip = true) {
+        this->print_header = !skip;
+        return *this;
+    }
 
 private:
     template <class... Args>
@@ -530,8 +576,6 @@ private:
 
         thread_local std::string buffer;
 
-        // const bool need_time = this->columns.uptime || this->flush_interval.count() != 0;
-        // const clock::time_point now = [need_time]{ return need_time ? clock::now() : clock::time_point{}; }();
         const clock::time_point now = clock::now();
 
         // To minimize logging overhead we use string buffer, append characters to it and then write the whole buffer
@@ -545,13 +589,33 @@ private:
         // reuse the reserved memory and no new allocations take place.
 
         buffer.clear();
+        
+        // Print log header on the first call
+        if (this->print_header) {
+            this->print_header = false;
+
+            if (this->colors == Colors::ENABLE) buffer += _color_heading;
+            if (this->columns.datetime)
+                append_stringified(buffer, _col_ld_datetime, PadRight{"date       time", _col_w_datetime},
+                                   _col_rd_datetime);
+            if (this->columns.uptime)
+                append_stringified(buffer, _col_ld_uptime, PadRight{"uptime", _col_w_uptime}, _col_rd_uptime);
+            if (this->columns.thread)
+                append_stringified(buffer, _col_ld_thread, PadRight{"thread", _col_w_thread}, _col_rd_thread);
+            if (this->columns.callsite)
+                append_stringified(buffer, _col_ld_callsite, PadRight{"callsite", _col_w_callsite}, _col_rd_callsite);
+            if (this->columns.level)
+                append_stringified(buffer, _col_ld_level, PadRight{"level", _col_w_level}, _col_rd_level);
+            if (this->columns.message) append_stringified(buffer, _col_ld_message, "message", _col_rd_message);
+            if (this->colors == Colors::ENABLE) buffer += _color_reset;
+        }
 
         // Format columns one-by-one
         if (this->colors == Colors::ENABLE) switch (meta.verbosity) {
-            case Verbosity::ERR: buffer += "\033[31;1m"; break;
-            case Verbosity::WARN: buffer += "\033[33m"; break;
-            case Verbosity::INFO: buffer += "\033[37m"; break;
-            case Verbosity::TRACE: buffer += "\033[90m"; break;
+            case Verbosity::ERR: buffer += _color_err; break;
+            case Verbosity::WARN: buffer += _color_warn; break;
+            case Verbosity::INFO: buffer += _color_info; break;
+            case Verbosity::TRACE: buffer += _color_trace; break;
             }
 
         if (this->columns.datetime) this->format_column_datetime(buffer);
@@ -561,9 +625,7 @@ private:
         if (this->columns.level) this->format_column_level(buffer, meta.verbosity);
         if (this->columns.message) this->format_column_message(buffer, args...);
 
-        if (this->colors == Colors::ENABLE) buffer += "\033[0m";
-
-        buffer += '\n';
+        if (this->colors == Colors::ENABLE) buffer += _color_reset;
 
         this->ostream_ref().write(buffer.data(), buffer.size());
 
@@ -584,15 +646,15 @@ private:
 
         _available_localtime_impl(&time_moment, &timer);
 
-        constexpr std::size_t datetime_width = sizeof("yyyy-mm-dd HH:MM:SS");
-        // size includes the null terminator added by 'strftime()'
-
         // Format time straight into the buffer
-        std::array<char, datetime_width> strftime_buffer;
+        std::array<char, _col_w_datetime + 1>
+            strftime_buffer; // size includes the null terminator added by 'strftime()'
         std::strftime(strftime_buffer.data(), strftime_buffer.size(), "%Y-%m-%d %H:%M:%S", &time_moment);
 
-        strftime_buffer.back() = ' '; // replace null-terminator added by 'strftime()' with a space
+        // strftime_buffer.back() = ' '; // replace null-terminator added by 'strftime()' with a space
+        buffer += _col_ld_datetime;
         buffer.append(strftime_buffer.data(), strftime_buffer.size());
+        buffer += _col_rd_datetime;
     }
 
     void format_column_uptime(std::string& buffer, clock::time_point now) {
@@ -603,65 +665,64 @@ private:
         const unsigned int sec_digits = _integer_digit_count(sec);
         const unsigned int ms_digits  = _integer_digit_count(ms);
 
-        constexpr unsigned int sec_width = 4;
-        constexpr unsigned int ms_width  = 3;
+        buffer += _col_ld_uptime;
 
-        buffer += '(';
-
-        // Emulate '<< std::right << std::setw(sec_width) << sec'
-        if (sec_digits < sec_width) buffer.append(sec_width - sec_digits, ' ');
+        // Left-pad the value to column width (doing it manually is a bit faster than using PadLeft{})
+        if (sec_digits < _w_uptime_sec) buffer.append(_w_uptime_sec - sec_digits, ' ');
         append_stringified(buffer, sec);
 
         buffer += '.';
 
-        // Emulate '<< std::right << std::setw(ms_width) << std::setfill('0') << ms'
-        if (ms_digits < ms_width) buffer.append(ms_width - ms_digits, '0');
+        // Add leading zeroes to a fixed length
+        if (ms_digits < _w_uptime_ms) buffer.append(_w_uptime_ms - ms_digits, '0');
         append_stringified(buffer, ms);
 
-        buffer += ')';
+        buffer += _col_rd_uptime;
     }
 
     void format_column_thread(std::string& buffer) {
-        buffer += '[';
-        constexpr std::size_t thread_id_width = sizeof("thread") - 1;
-        const auto            thread_id       = _get_thread_index(std::this_thread::get_id());
-        if (_integer_digit_count(thread_id) < thread_id_width) buffer.append(thread_id_width - thread_id, ' ');
+        const auto thread_id       = _get_thread_index(std::this_thread::get_id());
+        const auto thread_id_width = _integer_digit_count(thread_id);
+
+        buffer += _col_ld_thread;
+        if (thread_id_width < _col_w_thread) buffer.append(_col_w_thread - thread_id_width, ' ');
         append_stringified(buffer, thread_id);
-        buffer += ']';
+        buffer += _col_rd_thread;
     }
 
     void format_column_callsite(std::string& buffer, const Callsite& callsite) {
-        constexpr std::streamsize width_before_dot = 28;
-        constexpr std::streamsize width_after_dot  = 4;
-
         // Get just filename from the full path
         std::string_view filename = callsite.file.substr(callsite.file.find_last_of("/\\") + 1);
 
-        // Emulate '<< std::right << std::setw(width_before_dot) << filename'
-        // trim first characters if it's too long
-        if (filename.size() < width_before_dot) buffer.append(width_before_dot - filename.size(), ' ');
-        else filename.remove_prefix(width_before_dot - filename.size());
+        // Left-pad callsite to column width, trim first characters if it's too long
+        if (filename.size() < _w_callsite_before_dot) buffer.append(_w_callsite_before_dot - filename.size(), ' ');
+        else filename.remove_prefix(_w_callsite_before_dot - filename.size());
 
+        buffer += _col_ld_callsite;
         buffer += filename;
         buffer += ':';
-        // Emulate '<< std::left << std::setw(width_after_dot) << line'
+        // Right-pad line number
         append_stringified(buffer, callsite.line);
-        buffer.append(width_after_dot - _integer_digit_count(callsite.line), ' ');
+        buffer.append(_w_callsite_after_dot - _integer_digit_count(callsite.line), ' ');
+        buffer += _col_rd_callsite;
     }
 
     void format_column_level(std::string& buffer, Verbosity level) {
+        buffer += _col_ld_level;
         switch (level) {
-        case Verbosity::ERR: buffer += "   ERR|"; return;
-        case Verbosity::WARN: buffer += "  WARN|"; return;
-        case Verbosity::INFO: buffer += "  INFO|"; return;
-        case Verbosity::TRACE: buffer += " TRACE|"; return;
+        case Verbosity::ERR: buffer += "  ERR"; break;
+        case Verbosity::WARN: buffer += " WARN"; break;
+        case Verbosity::INFO: buffer += " INFO"; break;
+        case Verbosity::TRACE: buffer += "TRACE"; break;
         }
+        buffer += _col_rd_level;
     }
 
     template <class... Args>
     void format_column_message(std::string& buffer, const Args&... args) {
-        buffer += ' ';
+        buffer += _col_ld_message;
         append_stringified(buffer, args...);
+        buffer += _col_rd_message;
     }
 };
 
@@ -672,6 +733,8 @@ private:
 struct _logger {
     inline static std::vector<Sink> sinks;
 
+    static inline Sink default_sink{std::cout, Verbosity::TRACE, Colors::ENABLE, ms(0), Columns{}};
+
     static _logger& instance() {
         static _logger logger;
         return logger;
@@ -681,11 +744,10 @@ struct _logger {
     void push_message(const Callsite& callsite, const MessageMetadata& meta, const Args&... args) {
         // When no sinks were manually created, default sink-to-terminal takes over
         if (this->sinks.empty()) {
-            static Sink default_sink(std::cout, Verbosity::TRACE, Colors::ENABLE, ms(0), Columns{});
+            // static Sink default_sink(std::cout, Verbosity::TRACE, Colors::ENABLE, ms(0), Columns{});
             default_sink.format(callsite, meta, args...);
-        }
-
-        for (auto& sink : this->sinks) sink.format(callsite, meta, args...);
+        } else
+            for (auto& sink : this->sinks) sink.format(callsite, meta, args...);
     }
 };
 

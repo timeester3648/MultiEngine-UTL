@@ -80,6 +80,7 @@ struct Sink {
     Sink& set_colors(Colors colors);
     Sink& set_flush_interval(clock::duration flush_interval);
     Sink& set_flush_interval(const Columns& columns);
+    Sink& skip_header(bool skip = true);
 };
 
 Sink& add_ostream_sink(
@@ -153,7 +154,7 @@ UTL_LOG_WARN("Low element quality, solution might be unstable");
 UTL_LOG_TRACE("Err -> ", log::PadLeft{1.2e+3, 8});
 UTL_LOG_TRACE("Err -> ", log::PadLeft{1.7e+5, 8});
 UTL_LOG_TRACE("Err -> ", log::PadLeft{4.8e+8, 8});
-UTL_LOG_ERR("The solver has burst in flames!");
+UTL_LOG_ERR("The solver has burst into flames!");
 
 // no sinks were specified => 'std::cout' chosen by default
 ```
@@ -177,7 +178,7 @@ log::add_file_sink("info.log").set_verbosity(log::Verbosity::INFO).set_colors(lo
 
 // Instead of calling 'set_...()' we can also pass arguments directly into 'add_..._sink()' function,
 // let's also append all logs to a persistent file that doesn't get rewriten between executions
-log::add_file_sink("history.log", log::OpenMode::APPEND);
+log::add_file_sink("history.log", log::OpenMode::APPEND).skip_header();
 
 // Add another file for logged messages only (no date/uptime/thread/callsite columns)
 log::Columns cols;
@@ -201,7 +202,7 @@ Output:
 
 <img src ="images/log_multiple_sinks_output.png">
 
-**+ several log files created**
+*+ several log files created*
 
 ### Printing & stringification
 
@@ -241,6 +242,21 @@ Except compiled...
 ```
 
 # ------------------------
+
+```cpp
+template<class... Args>
+void push_message(const Args&... args) {
+    // Push message to default logger if no others exists
+    if (loggers.empty()) {
+        static Logger default_logger{...};
+        default_logger.push_message(...)
+    }
+    // Push message to existing loggers
+    // ...
+}
+```
+
+
 
 **Format:**
 
