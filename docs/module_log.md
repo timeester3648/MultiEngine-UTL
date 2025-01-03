@@ -123,7 +123,7 @@ Wrappers used to pad values with specific alignment when using this module's str
 | ----------------------- | ---------------------------------------------------- | -------------------------- |
 | `PadLeft{ val, size }`  | `<< std::setw(size) << std::right << val`            | **<**`      text`**>**    |
 | `PadRight{ val, size }` | `<< std::setw(size) << std::left << val`             | **<**`text      `**>**     |
-| `Pad{ val, size }`      | No center alignment function in the standard library | **<**`   text   `**>**   |
+| `Pad{ val, size }`      | No center alignment function in the standard library | **<**`    text    `**>**   |
 
 ### Extendable stringifier (advanced feature)
 
