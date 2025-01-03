@@ -10,7 +10,7 @@ Goals:
 - Unintrusive macros
 - Nicely colored formatting that is easy to look at and to `grep`
 - Concise syntax (no `<<` or `printf`-like specifiers), just list the arguments and let the variadic handle formatting and conversion
-- Reasonably fast performance
+- Reasonably fast performance (in most cases faster than logging things with `std::ofstream`)
 
 Key features:
 
@@ -48,7 +48,7 @@ struct StringifierBase {
 // Stringification & printing
 struct Stringifier { /* same API as StringifierBase<> */ };
 
-template <class... Args> void append_stringified(std::string& str, Args&&... args);
+template <class... Args> void append_stringified(std::string& buffer, Args&&... args);
 template <class... Args> std::string stringify(Args&&... args);
 
 template <class... Args> void print(  Args&&... args);
@@ -70,12 +70,6 @@ struct Columns {
 
 // Logger sink
 struct Sink {
-    Sink()            = delete;
-    Sink(const Sink&) = delete;
-    Sink(Sink&&)      = default;
-    
-    Sink(std::ostream& os, Verbosity verbosity, Colors colors, clock::duration flush_interval, const Columns& columns);
-    
     Sink& set_verbosity(Verbosity verbosity);
     Sink& set_colors(Colors colors);
     Sink& set_flush_interval(clock::duration flush_interval);
@@ -105,11 +99,30 @@ Sink& add_file_sink(
 #define UTL_LOG_WARN(...)
 #define UTL_LOG_INFO(...)
 #define UTL_LOG_TRACE(...)
+
+#define UTL_LOG_DERR(...)
+#define UTL_LOG_DWARN(...)
+#define UTL_LOG_DINFO(...)
+#define UTL_LOG_DTRACE(...)
 ```
 
 ## Methods
 
 ### Padding wrappers
+
+```cpp
+template <class T> struct PadLeft  { constexpr PadLeft( const T& val, std::size_t size); }
+template <class T> struct PadRight { constexpr PadRight(const T& val, std::size_t size); }
+template <class T> struct Pad      { constexpr Pad(     const T& val, std::size_t size); }
+```
+
+Wrappers used to pad values with specific alignment when using this module's stringification.
+
+| Padding wrapper         | Equivalent `std::ostream` operator                   | Example for { "text", 10 } |
+| ----------------------- | ---------------------------------------------------- | -------------------------- |
+| `PadLeft{ val, size }`  | `<< std::setw(size) << std::right << val`            | **<**`       text`**>**    |
+| `PadRight{ val, size }` | `<< std::setw(size) << std::left << val`             | **<**`text      `**>**     |
+| `Pad{ val, size }`      | No center alignment function in the standard library | **<**`    text    `**>**   |
 
 ### Extendable stringifier (advanced feature)
 
@@ -119,11 +132,147 @@ It is an advanced feature and not need for the regular logging, see [section at 
 
 ### Stringification & printing
 
+```cpp
+struct Stringifier { /* ... */ };
+```
+
+Functor class that contains stringification logic of this module. Can be used to provide third-party APIs with stringification logic of `utl::log`.
+
+Compatible with `utl::mvl` formatters.
+
+```cpp
+template <class... Args> void append_stringified(std::string& buffer, Args&&... args);
+```
+
+Stringifies all `args...` and appends them to a string `buffer`.
+
+```cpp
+template <class... Args> std::string stringify(Args&&... args);
+```
+
+Stringifies all `args...` and concatenates them into a string.
+
+```cpp
+template <class... Args> void print(  Args&&... args);
+template <class... Args> void println(Args&&... args);
+```
+
+Stringifies all `args...` and prints the result to `std::cout`.
+
+`println()` also starts a new line at the end.
+
 ### Logging options
+
+```cpp
+enum class Verbosity { ERR, WARN, INFO, TRACE };
+```
+
+Enumeration that determines verbosity level of the logger sink. Sinks will only output messages that are at or above the their priority. Different levels have following priorities:
+
+| Verbosity level | Priority | Logging style  |
+| --------------- | -------- | -------------- |
+| `ERR`           | **1**    | 🔴 **Bold red** |
+| `WARN`          | **2**    | 🟡 Yellow       |
+| `INFO`          | **3**    | ⚪ White        |
+| `TRACE`         | **4**    | ⚫ Gray         |
+
+**Note 1:** "Logging style" column applies only of sink colors are set to`Colors::ENABLE`.
+
+**Note 2:** By default `std::ostream` sinks will have verbosity level `INFO`, while file sinks will have verbosity level `TRACE`.
+
+```cpp
+enum class OpenMode { REWRITE, APPEND };
+```
+
+Enumeration that determines whether file sinks opens the file for rewrite or appends to it.
+
+**Note:** By default file sinks will open in a `REWRITE` mode, use `APPEND` if you want to grow an existing log.
+
+```cpp
+enum class Colors { ENABLE, DISABLE };
+```
+
+Enumeration that determines whether the sink uses [ANSI color codes](https://en.wikipedia.org/wiki/ANSI_escape_code) to color its output.
+
+This should work in most modern terminals.
+
+**Note:** By default `std::ostream` sinks will be colored, while file sinks will have their colors disabled.
+
+```cpp
+struct Columns {
+    bool datetime = true;
+    bool uptime   = true;
+    bool thread   = true;
+    bool callsite = true;
+    bool level    = true;
+    bool message  = true;
+};
+```
+
+POD struct that determines which columns should be formatted and logged.
 
 ### Logger sink
 
+```cpp
+struct Sink {
+    Sink& set_verbosity(Verbosity verbosity);
+    Sink& set_colors(Colors colors);
+    Sink& set_flush_interval(clock::duration flush_interval);
+    Sink& set_flush_interval(const Columns& columns);
+    Sink& skip_header(bool skip = true);
+};
+```
+
+Class that represents a logger sink (whether it is an `std::ofstream` reference or a managed file).
+
+`set_...()` methods can be used to modify sink options using a reference returned by `add_ostream_sink()` or `add_file_sink()`, rather than passing them all the start.
+
+`skip_header()` method disables the line with column titles at the start, this is mainly useful for appending new data to an existing log.
+
+```cpp
+Sink& add_ostream_sink(
+    std::ostream& os,
+    Verbosity verbosity            = Verbosity::INFO,
+    Colors colors                  = Colors::ENABLE,
+    clock::duration flush_interval = std::chrono::milliseconds{},
+    const Columns& columns         = Columns{}
+);
+```
+
+Adds sink to ostream `os` with a given set of options. Returns reference to the added sink.
+
+```cpp
+Sink& add_file_sink(
+    const std::string& filename,
+    OpenMode open_mode             = OpenMode::REWRITE,
+    Verbosity verbosity            = Verbosity::TRACE,
+    Colors colors                  = Colors::DISABLE,
+    clock::duration flush_interval = std::chrono::milliseconds{15},
+    const Columns& columns         = Columns{}
+);
+```
+
+Adds sink to the log file `filename` with a given set of options. Returns reference to the added sink.
+
 ### Logging macros
+
+```cpp
+#define UTL_LOG_ERR(...)
+#define UTL_LOG_WARN(...)
+#define UTL_LOG_INFO(...)
+#define UTL_LOG_TRACE(...)
+```
+
+Stringifies arguments `...` and logs them at the corresponding verbosity level.
+
+```cpp
+#define UTL_LOG_DERR(...)
+#define UTL_LOG_DWARN(...)
+#define UTL_LOG_DINFO(...)
+#define UTL_LOG_DTRACE(...)
+```
+
+Logging macros that only compile in *debug* mode.
 
 ## Examples
 
@@ -240,43 +389,6 @@ Print any objects you want, for example: < lorem, 0.25, ipsum >
 This is almost like Python!
 Except compiled...
 ```
-
-# ------------------------
-
-```cpp
-template<class... Args>
-void push_message(const Args&... args) {
-    // Push message to default logger if no others exists
-    if (loggers.empty()) {
-        static Logger default_logger{...};
-        default_logger.push_message(...)
-    }
-    // Push message to existing loggers
-    // ...
-}
-```
-
-
-
-**Format:**
-
-```
-
-Initialized `utl::log`.
-Directory: /home/Documents/PROJECT/CPP/proto_utl/proj
-Arguments: <NONE>
-Date: 2024-11-31, 18:26:07.061
-
-date       | time         | uptime | thread          | callsite               | level | message
-2024-11-31 | 18:26:07.061 |        | 140146221688576 |        example.h  :15  | INFO  |
-2024-11-31 | 18:26:07.061 |        | 140146221688576 | long_file_name.hpp:127 | WARN  |
-2024-11-31 | 18:26:07.061 |        | 140146221688576 |                        | ERR   |
-
-date       time     (uptime   )[thread]
-2024-11-18 22:34:46 (    .019s)[     1]           benchmark_log.cpp:23   WARN | But it should be
-```
-
-Info renders in gray, warning in yellow, errors in red.
 
 ## Advanced guide to custom stringifiers
 
