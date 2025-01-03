@@ -121,9 +121,9 @@ Wrappers used to pad values with specific alignment when using this module's str
 
 | Padding wrapper         | Equivalent `std::ostream` operator                   | Example for { "text", 10 } |
 | ----------------------- | ---------------------------------------------------- | -------------------------- |
-| `PadLeft{ val, size }`  | `<< std::setw(size) << std::right << val`            | **<**`       text`**>**    |
+| `PadLeft{ val, size }`  | `<< std::setw(size) << std::right << val`            | **<**`      text`**>**    |
 | `PadRight{ val, size }` | `<< std::setw(size) << std::left << val`             | **<**`text      `**>**     |
-| `Pad{ val, size }`      | No center alignment function in the standard library | **<**`    text    `**>**   |
+| `Pad{ val, size }`      | No center alignment function in the standard library | **<**`   text   `**>**   |
 
 ### Extendable stringifier (advanced feature)
 
