@@ -22,6 +22,7 @@
 #include <iostream>      // cout
 #include <iterator>      // next()
 #include <limits>        // numeric_limits<>
+#include <list>          // list<>
 #include <mutex>         // lock_guard<>, mutex
 #include <ostream>       // ostream
 #include <sstream>       // std::ostringstream
@@ -33,12 +34,41 @@
 #include <type_traits>   // is_integral_v<>, is_floating_point_v<>, is_same_v<>, is_convertible_to_v<>
 #include <unordered_map> // unordered_map<>
 #include <utility>       // forward<>()
-#include <vector>        // vector<>
+#include <variant>       // variant<>
 
 // ____________________ DEVELOPER DOCS ____________________
 
-// NOTE: DOCS
-#include <variant>
+// Reasonable performance and convenient logger.
+//
+// The main highligh of this module (and the main performance win relative to 'std::ostream')
+// is a generic stringifier class that both convenient and quite fast at formatting multiple values.
+//
+// This stringifier is copied as an implementation dependency in some other modules ('utl::mvl'
+// and 'utl::table') and customized with CRTP to format things in all kinds of specific ways.
+//
+// The logger implementation itself is actually not that efficient (even though not completely
+// naive either), a proper performance-oriented approach would use following things:
+//
+//    1. More 'constexpr' things to avoid having to constantly check styling conditions at runtime
+//   
+//    2. A separate persistent thread to flush the buffer
+//   
+//       Note: I did try using a stripped down version of 'utl::parallel::ThreadPool' to upload tasks
+//             for flushing the buffer, it generatly improves performance by ~30%, however I decided it
+//             is not worth the added complexity & cpu usage for that little gain
+//
+//    3. More platform-specific methods to query stuff like time & thread id with minimal overhead
+//
+//    4. A centralized formatting & info querying facility so multiple sinks don't have to repeat
+//       formatting & querying logic.
+//   
+//       Such facility would have to decide the bare minimum of work possible base on all existing
+//       sink options, perform the formatting, and then just distribute string view to actual sinks.
+//
+//       This drastically complicated the logic and can be rather at odds with point (1) since unlike
+//       the individual sinks, I don't see a way of making style checks here constexpr, but in the end
+//       that would be a proper solution.
+//
 
 // ____________________ IMPLEMENTATION ____________________
 
@@ -526,6 +556,7 @@ private:
     Columns                                     columns;
     clock::time_point                           last_flushed;
     bool                                        print_header = true;
+    mutable std::mutex ostream_mutex;
 
     friend struct _logger;
 
@@ -537,7 +568,7 @@ private:
 public:
     Sink()            = delete;
     Sink(const Sink&) = delete;
-    Sink(Sink&&)      = default;
+    Sink(Sink&&)      = delete;
 
     Sink(std::ofstream&& os, Verbosity verbosity, Colors colors, clock::duration flush_interval, const Columns& columns)
         : os_variant(std::move(os)), verbosity(verbosity), colors(colors), flush_interval(flush_interval),
@@ -589,7 +620,7 @@ private:
         // reuse the reserved memory and no new allocations take place.
 
         buffer.clear();
-        
+
         // Print log header on the first call
         if (this->print_header) {
             this->print_header = false;
@@ -629,6 +660,10 @@ private:
 
         this->ostream_ref().write(buffer.data(), buffer.size());
 
+        // 'std::ostream' isn't guaranteed to be thread-safe, even through many implementations seem to have
+        // some thread-safety built into `std::cout` the same cannot be said about a generic 'std::ostream'
+        std::lock_guard<std::mutex> ostream_lock(this->ostream_mutex);
+        
         // flush every message immediately
         if (this->flush_interval.count() == 0) {
             this->ostream_ref().flush();
@@ -731,7 +766,10 @@ private:
 // ====================
 
 struct _logger {
-    inline static std::vector<Sink> sinks;
+    inline static std::list<Sink> sinks;
+    // we use list<> because we don't want sinks to ever reallocate when growing / shrinking
+    // (reallocation requres a move-constructor, which 'std::mutex' doesn't have),
+    // the added overhead of iterating a list is negligible
 
     static inline Sink default_sink{std::cout, Verbosity::TRACE, Colors::ENABLE, ms(0), Columns{}};
 
