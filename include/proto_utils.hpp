@@ -6054,21 +6054,115 @@ __builtin_assume(__VA_ARGS__)
     return buffer;
 }
 
-// - Size of __VA_ARGS__ in variadic macros -
-#define _utl_expand_va_args(x_) x_ // a fix for MSVC bug not expanding __VA_ARGS__ properly
+// ===================
+// --- Macro Utils ---
+// ===================
 
-#define _utl_va_args_count_impl(x01_, x02_, x03_, x04_, x05_, x06_, x07_, x08_, x09_, x10_, x11_, x12_, x13_, x14_,    \
-                                x15_, x16_, x17_, x18_, x19_, x20_, x21_, x22_, x23_, x24_, x25_, x26_, x27_, x28_,    \
-                                x29_, x30_, x31_, x32_, x33_, x34_, x35_, x36_, x37_, x38_, x39_, x40_, x41_, x42_,    \
-                                x43_, x44_, x45_, x46_, x47_, x48_, x49_, N_, ...)                                     \
+// --- Size of __VA_ARGS__ in variadic macros ---
+// ----------------------------------------------
+
+#define utl_predef_expand_va_args(x_) x_ // a fix for MSVC bug not expanding __VA_ARGS__ properly
+
+#define utl_predef_va_args_count_impl(x01_, x02_, x03_, x04_, x05_, x06_, x07_, x08_, x09_, x10_, x11_, x12_, x13_,    \
+                                      x14_, x15_, x16_, x17_, x18_, x19_, x20_, x21_, x22_, x23_, x24_, x25_, x26_,    \
+                                      x27_, x28_, x29_, x30_, x31_, x32_, x33_, x34_, x35_, x36_, x37_, x38_, x39_,    \
+                                      x40_, x41_, x42_, x43_, x44_, x45_, x46_, x47_, x48_, x49_, N_, ...)             \
     N_
 
 #define UTL_PREDEF_VA_ARGS_COUNT(...)                                                                                  \
-    _utl_expand_va_args(_utl_va_args_count_impl(__VA_ARGS__, 49, 48, 47, 46, 45, 44, 43, 42, 41, 40, 39, 38, 37, 36,   \
-                                                35, 34, 33, 32, 31, 30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19,    \
-                                                18, 17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0))
+    utl_predef_expand_va_args(utl_predef_va_args_count_impl(                                                           \
+        __VA_ARGS__, 49, 48, 47, 46, 45, 44, 43, 42, 41, 40, 39, 38, 37, 36, 35, 34, 33, 32, 31, 30, 29, 28, 27, 26,   \
+        25, 24, 23, 22, 21, 20, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0))
 
-// - Enum with string conversion -
+// --- Map function macro to __VA_ARGS__ ---
+// -----------------------------------------
+
+#define utl_predef_map_eval_0(...) __VA_ARGS__
+#define utl_predef_map_eval_1(...) utl_predef_map_eval_0(utl_predef_map_eval_0(utl_predef_map_eval_0(__VA_ARGS__)))
+#define utl_predef_map_eval_2(...) utl_predef_map_eval_1(utl_predef_map_eval_1(utl_predef_map_eval_1(__VA_ARGS__)))
+#define utl_predef_map_eval_3(...) utl_predef_map_eval_2(utl_predef_map_eval_2(utl_predef_map_eval_2(__VA_ARGS__)))
+#define utl_predef_map_eval_4(...) utl_predef_map_eval_3(utl_predef_map_eval_3(utl_predef_map_eval_3(__VA_ARGS__)))
+#define utl_predef_map_eval(...) utl_predef_map_eval_4(utl_predef_map_eval_4(utl_predef_map_eval_4(__VA_ARGS__)))
+
+#define utl_predef_map_end(...)
+#define utl_predef_map_out
+#define utl_predef_map_comma ,
+
+#define utl_predef_map_get_end_2() 0, utl_predef_map_end
+#define utl_predef_map_get_end_1(...) utl_predef_map_get_end2
+#define utl_predef_map_get_end(...) utl_predef_map_get_end_1
+#define utl_predef_map_next_0(test, next, ...) next utl_predef_map_out
+#define utl_predef_map_next_1(test, next) utl_predef_map_next_0(test, next, 0)
+#define utl_predef_map_next(test, next) utl_predef_map_next_1(utl_predef_map_get_end test, next)
+
+#define utl_predef_map_0(f, x, peek, ...) f(x) utl_predef_map_next(peek, utl_predef_map_1)(f, peek, __VA_ARGS__)
+#define utl_predef_map_1(f, x, peek, ...) f(x) utl_predef_map_next(peek, utl_predef_map_0)(f, peek, __VA_ARGS__)
+
+#define utl_predef_map_list_next_1(test, next) utl_predef_map_next_0(test, utl_predef_map_comma next, 0)
+#define utl_predef_map_list_next(test, next) utl_predef_map_list_next_1(utl_predef_map_get_end test, next)
+
+#define utl_predef_map_list_0(f, x, peek, ...)                                                                         \
+    f(x) utl_predef_map_list_next(peek, utl_predef_map_list_1)(f, peek, __VA_ARGS__)
+#define utl_predef_map_list_1(f, x, peek, ...)                                                                         \
+    f(x) utl_predef_map_list_next(peek, utl_predef_map_list_0)(f, peek, __VA_ARGS__)
+
+// Applies the function macro `f` to each of the remaining parameters.
+#define UTL_PREDEF_MAP(f, ...) utl_predef_map_eval(utl_predef_map_1(f, __VA_ARGS__, ()()(), ()()(), ()()(), 0))
+
+// Applies the function macro `f` to each of the remaining parameters and
+// inserts commas between the results.
+#define UTL_PREDEF_MAP_LIST(f, ...)                                                                                    \
+    utl_predef_map_eval(utl_predef_map_list_1(f, __VA_ARGS__, ()()(), ()()(), ()()(), 0))
+
+// ===============
+// --- Codegen ---
+// ===============
+
+// --- Type trait generation ---
+// -----------------------------
+
+// This macro generates a type trait 'trait_name_' that returns 'true' for any 'T'
+// such that 'T'-dependent expression passed into '...' compiles.
+//
+// Also generates as helper-constant 'trait_name_##_v` like the one all standard traits provide.
+//
+// Also generates as shortcut for 'enable_if' based on that trait.
+//
+// This macro saves MASSIVE amount of boilerplate in some cases, making for a much more expressive "trait definitions".
+
+#define UTL_PREDEF_TYPE_TRAIT(trait_name_, ...)                                                                         \
+    template <class T, class = void>                                                                                   \
+    struct trait_name_ : std::false_type {};                                                                           \
+                                                                                                                       \
+    template <class T>                                                                                                 \
+    struct trait_name_<T, std::void_t<decltype(__VA_ARGS__)>> : std::true_type {};                                     \
+                                                                                                                       \
+    template <class T>                                                                                                 \
+    constexpr bool trait_name_##_v = trait_name_<T>::value;                                                            \
+                                                                                                                       \
+    template <class T>                                                                                                 \
+    using trait_name_##_enable_if = std::enable_if_t<trait_name_<T>::value, bool>
+
+// Shortcuts for different types of requirements
+#define UTL_PREDEF_TYPE_TRAIT_HAS_BINARY_OP(trait_name_, op_)                                                           \
+    UTL_PREDEF_TYPE_TRAIT(trait_name_, std::declval<std::decay_t<T>>() op_ std::declval<std::decay_t<T>>())
+
+#define UTL_PREDEF_TYPE_TRAIT_HAS_ASSIGNMENT_OP(trait_name_, op_)                                                       \
+    UTL_PREDEF_TYPE_TRAIT(trait_name_, std::declval<std::decay_t<T>&>() op_ std::declval<std::decay_t<T>>())
+// for operators like '+=' lhs should be a reference
+
+#define UTL_PREDEF_TYPE_TRAIT_HAS_UNARY_OP(trait_name_, op_)                                                            \
+    UTL_PREDEF_TYPE_TRAIT(trait_name_, op_ std::declval<std::decay_t<T>>())
+
+#define UTL_PREDEF_TYPE_TRAIT_HAS_MEMBER(trait_name_, member_)                                                          \
+    UTL_PREDEF_TYPE_TRAIT(trait_name_, std::declval<std::decay_t<T>>().member_)
+
+#define UTL_PREDEF_TYPE_TRAIT_HAS_MEMBER_TYPE(trait_name_, member_)                                                     \
+    UTL_PREDEF_TYPE_TRAIT(trait_name_, std::declval<typename std::decay_t<T>::member_>())
+
+// --- Enum with string conversion ---
+// -----------------------------------
+
 [[nodiscard]] inline std::string _trim_enum_string(const std::string& str) {
     std::string::const_iterator left_it = str.begin();
     while (left_it != str.end() && std::isspace(*left_it)) ++left_it;
@@ -6123,7 +6217,7 @@ inline void _split_enum_args(const char* va_args, std::string* strings, int coun
 
 #define UTL_PREDEF_IS_FUNCTION_DEFINED(function_name_, return_type_, ...)                                              \
     template <class ReturnType, class... ArgTypes>                                                                     \
-    class _utl_is_function_defined_impl_##function_name_ {                                                             \
+    class utl_is_function_defined_impl_##function_name_ {                                                             \
     private:                                                                                                           \
         typedef char no[sizeof(ReturnType) + 1];                                                                       \
                                                                                                                        \
@@ -6138,7 +6232,7 @@ inline void _split_enum_args(const char* va_args, std::string* strings, int coun
     };                                                                                                                 \
                                                                                                                        \
     using is_function_defined_##function_name_ =                                                                       \
-        _utl_is_function_defined_impl_##function_name_<return_type_, __VA_ARGS__>;
+        utl_is_function_defined_impl_##function_name_<return_type_, __VA_ARGS__>;
 // TASK:
 // We need to detect at compile time if function FUNC(ARGS...) exists.
 // FUNC identifier isn't guaranteed to be declared.
