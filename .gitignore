@@ -23,6 +23,7 @@
 !*.md
 !*.svg
 !*.jpg
+!*.png
 # > Data
 !*.json
 

@@ -1423,7 +1423,6 @@ void _assign_node_to_value_recursively(std::array<T, N>& value, const Node& node
 #include <iostream>      // cout
 #include <iterator>      // next()
 #include <limits>        // numeric_limits<>
-#include <list>          // list<>
 #include <mutex>         // lock_guard<>, mutex
 #include <ostream>       // ostream
 #include <sstream>       // std::ostringstream
@@ -1440,6 +1439,7 @@ void _assign_node_to_value_recursively(std::array<T, N>& value, const Node& node
 // ____________________ DEVELOPER DOCS ____________________
 
 // NOTE: DOCS
+#include <variant>
 
 // ____________________ IMPLEMENTATION ____________________
 
@@ -1834,7 +1834,6 @@ template <class... Args>
 void println(Args&&... args) {
     std::cout << Stringifier::stringify(std::forward<Args>(args)...) << '\n';
 }
-// MARK:
 
 // ===============
 // --- Options ---
@@ -1847,14 +1846,14 @@ enum class OpenMode { REWRITE, APPEND };
 enum class Colors { ENABLE, DISABLE };
 
 struct Columns {
-    bool datetime;
-    bool uptime;
-    bool thread;
-    bool callsite;
-    bool level;
-    bool message;
+    bool datetime = true;
+    bool uptime   = true;
+    bool thread   = true;
+    bool callsite = true;
+    bool level    = true;
+    bool message  = true;
 
-    Columns() : datetime(true), uptime(true), thread(true), callsite(true), level(true), message(true) {}
+    // Columns() : datetime(true), uptime(true), thread(true), callsite(true), level(true), message(true) {}
 };
 
 struct Callsite {
@@ -1875,27 +1874,65 @@ constexpr bool operator<=(Verbosity l, Verbosity r) { return static_cast<int>(l)
 
 class Sink {
 private:
-    std::ostream&     os;
-    Verbosity         verbosity;
-    Colors            colors;
-    clock::duration   flush_interval;
-    Columns           columns;
-    clock::time_point last_flushed;
+    using os_ref_wrapper = std::reference_wrapper<std::ostream>;
+
+    std::variant<std::monostate, os_ref_wrapper, std::ofstream> os_variant;
+    Verbosity                                                   verbosity;
+    Colors                                                      colors;
+    clock::duration                                             flush_interval;
+    Columns                                                     columns;
+    clock::time_point                                           last_flushed;
+
+    friend struct _logger;
+
+    std::ostream& ostream_ref() {
+        if (const auto ref_wrapper_ptr = std::get_if<os_ref_wrapper>(&this->os_variant)) return ref_wrapper_ptr->get();
+        else return std::get<std::ofstream>(this->os_variant);
+        // monostate case should be impossible
+    }
+
+    // MARK:
 
 public:
     Sink()            = delete;
     Sink(const Sink&) = delete;
     Sink(Sink&&)      = default;
 
-    Sink(std::ostream& os, Verbosity verbosity, Colors colors, clock::duration flush_interval, const Columns& columns)
-        : os(os), verbosity(verbosity), colors(colors), flush_interval(flush_interval), columns(columns) {}
+    Sink(std::ofstream&& os, Verbosity verbosity, Colors colors, clock::duration flush_interval, const Columns& columns)
+        : os_variant(std::move(os)), verbosity(verbosity), colors(colors), flush_interval(flush_interval),
+          columns(columns) {}
 
+    Sink(std::reference_wrapper<std::ostream> os, Verbosity verbosity, Colors colors, clock::duration flush_interval,
+         const Columns& columns)
+        : os_variant(os), verbosity(verbosity), colors(colors), flush_interval(flush_interval), columns(columns) {}
+
+    // We want a way of changing sink options using its handle / reference returned by the logger
+    Sink& set_verbosity(Verbosity verbosity) {
+        this->verbosity = verbosity;
+        return *this;
+    }
+    Sink& set_colors(Colors colors) {
+        this->colors = colors;
+        return *this;
+    }
+    Sink& set_flush_interval(clock::duration flush_interval) {
+        this->flush_interval = flush_interval;
+        return *this;
+    }
+    Sink& set_columns(const Columns& columns) {
+        this->columns = columns;
+        return *this;
+    }
+
+private:
     template <class... Args>
     void format(const Callsite& callsite, const MessageMetadata& meta, const Args&... args) {
         if (meta.verbosity > this->verbosity) return;
 
         thread_local std::string buffer;
 
+        // const bool need_time = this->columns.uptime || this->flush_interval.count() != 0;
+        // const clock::time_point now = [need_time]{ return need_time ? clock::now() : clock::time_point{}; }();
         const clock::time_point now = clock::now();
 
         // To minimize logging overhead we use string buffer, append characters to it and then write the whole buffer
@@ -1929,16 +1966,16 @@ public:
 
         buffer += '\n';
 
-        this->os.write(buffer.data(), buffer.size());
+        this->ostream_ref().write(buffer.data(), buffer.size());
 
         // flush every message immediately
         if (this->flush_interval.count() == 0) {
-            this->os.flush();
+            this->ostream_ref().flush();
         }
         // or flush periodically
         else if (now - this->last_flushed > this->flush_interval) {
             this->last_flushed = now;
-            this->os.flush();
+            this->ostream_ref().flush();
         }
     }
 
@@ -2033,17 +2070,11 @@ public:
 // --- Logger class ---
 // ====================
 
-class Logger {
-private:
-    inline static std::vector<Sink>        sinks;
-    inline static std::list<std::ofstream> managed_files;
-    // we don't want 'managed_files' to reallocate its elements at any point
-    // since that would leave corresponding sinks with dangling references,
-    // which is why list is used
+struct _logger {
+    inline static std::vector<Sink> sinks;
 
-public:
-    static Logger& instance() {
-        static Logger logger;
+    static _logger& instance() {
+        static _logger logger;
         return logger;
     }
 
@@ -2057,16 +2088,6 @@ public:
 
         for (auto& sink : this->sinks) sink.format(callsite, meta, args...);
     }
-
-    Sink& emplace_sink(std::ostream& os, Verbosity verbosity, Colors colors, clock::duration flush_interval,
-                       const Columns& columns) {
-        return this->sinks.emplace_back(os, verbosity, colors, flush_interval, columns);
-    }
-
-    std::ofstream& emplace_managed_file(const std::string& filename, OpenMode open_mode) {
-        const auto ios_open_mode = (open_mode == OpenMode::APPEND) ? std::ios::out | std::ios::app : std::ios::out;
-        return this->managed_files.emplace_back(filename, ios_open_mode);
-    }
 };
 
 // =======================
@@ -2074,15 +2095,16 @@ public:
 // =======================
 
 inline Sink& add_ostream_sink(std::ostream& os, Verbosity verbosity = Verbosity::INFO, Colors colors = Colors::ENABLE,
-                               clock::duration flush_interval = ms{}, const Columns& columns = Columns{}) {
-    return Logger::instance().emplace_sink(os, verbosity, colors, flush_interval, columns);
+                              clock::duration flush_interval = ms{}, const Columns& columns = Columns{}) {
+    return _logger::instance().sinks.emplace_back(os, verbosity, colors, flush_interval, columns);
 }
 
 inline Sink& add_file_sink(const std::string& filename, OpenMode open_mode = OpenMode::REWRITE,
                            Verbosity verbosity = Verbosity::TRACE, Colors colors = Colors::DISABLE,
                            clock::duration flush_interval = ms{15}, const Columns& columns = Columns{}) {
-    auto& os = Logger::instance().emplace_managed_file(filename, open_mode);
-    return Logger::instance().emplace_sink(os, verbosity, colors, flush_interval, columns);
+    const auto ios_open_mode = (open_mode == OpenMode::APPEND) ? std::ios::out | std::ios::app : std::ios::out;
+    return _logger::instance().sinks.emplace_back(std::ofstream(filename, ios_open_mode), verbosity, colors,
+                                                  flush_interval, columns);
 }
 
 // ======================
@@ -2090,16 +2112,16 @@ inline Sink& add_file_sink(const std::string& filename, OpenMode open_mode = Ope
 // ======================
 
 #define UTL_LOG_ERR(...)                                                                                               \
-    utl::log::Logger::instance().push_message({__FILE__, __LINE__}, {utl::log::Verbosity::ERR}, __VA_ARGS__)
+    utl::log::_logger::instance().push_message({__FILE__, __LINE__}, {utl::log::Verbosity::ERR}, __VA_ARGS__)
 
 #define UTL_LOG_WARN(...)                                                                                              \
-    utl::log::Logger::instance().push_message({__FILE__, __LINE__}, {utl::log::Verbosity::WARN}, __VA_ARGS__)
+    utl::log::_logger::instance().push_message({__FILE__, __LINE__}, {utl::log::Verbosity::WARN}, __VA_ARGS__)
 
 #define UTL_LOG_INFO(...)                                                                                              \
-    utl::log::Logger::instance().push_message({__FILE__, __LINE__}, {utl::log::Verbosity::INFO}, __VA_ARGS__)
+    utl::log::_logger::instance().push_message({__FILE__, __LINE__}, {utl::log::Verbosity::INFO}, __VA_ARGS__)
 
 #define UTL_LOG_TRACE(...)                                                                                             \
-    utl::log::Logger::instance().push_message({__FILE__, __LINE__}, {utl::log::Verbosity::TRACE}, __VA_ARGS__)
+    utl::log::_logger::instance().push_message({__FILE__, __LINE__}, {utl::log::Verbosity::TRACE}, __VA_ARGS__)
 
 #ifdef _DEBUG
 #define UTL_LOG_DERR(...) UTL_LOG_ERR(__VA_ARGS__)
