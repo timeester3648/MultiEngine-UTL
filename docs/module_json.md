@@ -4,12 +4,13 @@
 
 **json** module aims to provide an intuitive JSON manipulation API similar to [nlohmann_json](https://github.com/nlohmann/json) while being a bit more lightweight and explicit about the underlying type conversions. The key difference are:
 
-- `utl::json` doesn't introduce **any** global identifiers (including macros and operators)
+- `utl::json` doesn't introduce any invasive macros or operators
 - Objects support transparent comparators (which means `std::string_view` and `const char*` can be used for lookup)
 - [Decent performance](#benchmarks) without relying on compiler intrinsics
 - All JSON types map to standard library containers, no need to learn custom APIs
 - Simple integration (single header, barely over `1k` lines)
 - [Nice error messages](#error-handling)
+- [Full support for class reflection](#complex-structure-reflection)
 
 > [!Note]
 > Despite rather competitive performance, considerably faster parsing can be achieved with custom formatters, SIMD and unordered key optimizations (see [simdjson](https://github.com/simdjson/simdjson), [Glaze](https://github.com/stephenberry/glaze), [RapidJSON](https://github.com/Tencent/rapidjson)  and [yyjson](https://github.com/ibireme/yyjson)), this, however often comes at the expense of user convenience (like with *RapidJSON*) or features (such as missing escape sequence handling in *simdjson* and *yyjson*, *Glaze* has it all, but requires [C++23](https://en.cppreference.com/w/cpp/23)).
@@ -29,8 +30,8 @@
 | Control Character Escape Sequence Support | ✔ |  |
 | Unicode HEX Sequence Support | ✔ | Supports UTF-8 |
 | Trait-based Type Conversions | ✔ |  |
-| Structure Reflection | ✔ |  |
-| Compile-time JSON Schema | ✘ | Outside the project scope |
+| Structure Reflection | ✔ | Arbitrary reflection including nested types and containers[²](#complex-structure-reflection) |
+| Compile-time JSON Schema | ✘ | Outside the project scope, can be emulated with reflection |
 | Lazy Node Loading | ✘ | Outside the project scope |
 
 ## Definitions
@@ -302,7 +303,7 @@ The type `T` must be reflected with `UTL_JSON_REFLECT()` macro, otherwise compil
 
 Sets max recursion depth during parsing, default value is `1000`.
 
-**Note:** JSON parsers need recursion depth limit to prevent malicious inputs (such as 100'000+ nested object opening braces) from causing stack overflows.
+**Note:** JSON parsers need recursion depth limit to prevent malicious inputs (such as 100'000+ nested object opening braces) from causing stack overflows, instead we get a controllable error.
 
 ### Typedefs
 
@@ -327,7 +328,7 @@ Reflects structure / class `struct_name` with member variables `...`.
 
 Declaring this macro defines methods `Node::to_struct<struct_name>()` and `from_struct(const struct_name&)` for parsing and serialization.
 
-**Note 1:** Reflection supports nested classes, each class should be reflected with a macro and `to_struct()` / `from_struct()` will call each other recursively whenever appropriate. See [examples](#structure-reflection).
+**Note 1:** Reflection supports nested classes, each class should be reflected with a macro and `to_struct()` / `from_struct()` will call each other recursively whenever appropriate. Containers of reflected classes are also supported with any level of nesting. See [examples](#structure-reflection).
 
 **Note 2:** Reflection does not impose any strict limitations on member variable types, it uses the same set of type traits as other methods to deduce appropriate conversions. It is expected however, that array-like member variable should support `.resize()` ([std::vector](https://en.cppreference.com/w/cpp/container/vector) and [std::list](https://en.cppreference.com/w/cpp/container/list) satisfy that) or provide an API similar to [std::array](https://en.cppreference.com/w/cpp/container/array). For object-like types it is expected that new elements can be inserted with `operator[]` (std::map](https://en.cppreference.com/w/cpp/container/map) and [std::unordered_map](https://en.cppreference.com/w/cpp/container/unordered_map) satisfy that).
 
@@ -554,7 +555,7 @@ struct Config {
     double                   time_period       = 1.24709e+2;
 };
 
-UTL_JSON_REFLECT(Config, auxiliary_info, date, scaling_functions, time_steps, time_period);
+UTL_JSON_REFLECT(Config, auxiliary_info, date, options, scaling_functions, time_steps, time_period);
 UTL_JSON_REFLECT(Config::Options, grid_size, phi_order);
 
 // ...
@@ -584,12 +585,116 @@ Output:
 {
     "auxiliary_info": true,
     "date": "2024.04.02",
+    "options": {
+        "grid_size": 120,
+        "phi_order": 5
+    },
     "scaling_functions": [
         "identity",
         "log10"
     ],
     "time_period": 124.709,
     "time_steps": 500
+}
+```
+
+### Complex structure reflection
+
+> [!Note]
+> There is no particular limitations on what kind of nested structures can be reflected, as long as there is a logically sound path to converting one thing to another `utl::json` will figure out a way.
+
+[ [Run this code]() ]
+
+```cpp
+// Set up some complex nested structs
+struct Point {
+    double x, y, z;
+};
+
+struct Task {
+    std::string input_path;
+    std::string output_path;
+    double      time_limit;
+};
+
+struct TaskList {
+    std::map<std::string, Task> map_of_tasks;
+    // this is fine
+    
+    std::vector<std::vector<Point>> matrix_of_points;
+    // this is also fine
+    
+    // std::vector<std::vector<std::vector<std::map<std::string, Point>>>> tensor_of_maps_of_points;
+    // ... this would also be fine
+};
+
+UTL_JSON_REFLECT(Point, x, y, z);
+UTL_JSON_REFLECT(Task, input_path, output_path, time_limit);
+UTL_JSON_REFLECT(TaskList, map_of_tasks, matrix_of_points);
+
+// ...
+
+using namespace utl;
+
+const TaskList task_list = {
+    // Map of tasks
+    {
+        { "task_1", { "input_1.dat", "output_1.dat", 170. } },
+        { "task_2", { "input_2.dat", "output_2.dat", 185. } }
+    },
+    // Matrix of 3D points
+    {
+        { { 0, 0, 0}, { 1, 0, 0 } },
+        { { 0, 1, 0}, { 0, 0, 1 } }
+    }
+};
+
+// Parse JSON from struct,
+// this also doubles as a cheaty way of stringifying structs for debugging
+std::cout << json::from_struct(task_list).to_string();
+```
+
+Output:
+```
+{
+    "map_of_tasks": {
+        "task_1": {
+            "input_path": "input_1.dat",
+            "output_path": "output_1.dat",
+            "time_limit": 170
+        },
+        "task_2": {
+            "input_path": "input_2.dat",
+            "output_path": "output_2.dat",
+            "time_limit": 185
+        }
+    },
+    "matrix_of_points": [
+        [
+            {
+                "x": 0,
+                "y": 0,
+                "z": 0
+            },
+            {
+                "x": 1,
+                "y": 0,
+                "z": 0
+            }
+        ],
+        [
+            {
+                "x": 0,
+                "y": 1,
+                "z": 0
+            },
+            {
+                "x": 0,
+                "y": 0,
+                "z": 1
+            }
+        ]
+    ]
 }
 ```
 

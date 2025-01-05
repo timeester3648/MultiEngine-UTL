@@ -29,22 +29,25 @@
 #include <string>           // string, stoul()
 #include <string_view>      // string_view
 #include <system_error>     // errc()
-#include <type_traits>      // enable_if_t<>, void_t, is_convertible_v<>, is_same_v<>
+#include <type_traits>      // enable_if_t<>, void_t, is_convertible_v<>, is_same_v<>, conjunction<>, disjunction<>, negation<>
 #include <utility>          // move(), declval<>()
 #include <variant>          // variant<>
 #include <vector>           // vector<>
 
 // ____________________ DEVELOPER DOCS ____________________
 
-// Reasonably simple parser / serializer, doen't use any intrinsics or compiler-specific stuff.
-// Unlike some other implementation, doesn't include the tokenizing step - we parse everything in a single 1D scan
-// over the data, constructing recursive JSON struct on the fly. The main reason we can do this so easily is is due
-// to a nice quirk of JSON - parsing nodes, we can always determine node type based on a single first character,
+// Reasonably simple (if we discound reflection) parser / serializer, doen't use any intrinsics or compiler-specific 
+// stuff. Unlike some other implementation, doesn't include the tokenizing step - we parse everything in a single 1D
+// scan over the data, constructing recursive JSON struct on the fly. The main reason we can do this so easily is is
+// due to a nice quirk of JSON - parsing nodes, we can always determine node type based on a single first character,
 // see '_parser::parse_node()'.
 //
 // Struct reflection is implemented through macros - alternative way would be to use templates with __PRETTY_FUNCTION__
 // (or __FUNCSIG__) and do some constexpr string parsing to perform "magic" reflection without requiring, but that
 // relies on implementation-defined format of those strings and may trash the compile times, macros work everywhere.
+//
+// Proper type traits and 'if constexpr' recursive introspection are a key to making APIs that can convert stuff
+// between JSON and other types seamlessly, which is exactly what we do here, it even accounts for reflection.
 
 // ____________________ IMPLEMENTATION ____________________
 
@@ -71,7 +74,7 @@ inline bool _unicode_codepoint_to_utf8(std::string& destination, char32_t cp) {
     return true;
 }
 
-inline std::string _read_file_to_string(const std::string& path) {
+[[nodiscard]] inline std::string _read_file_to_string(const std::string& path) {
     using namespace std::string_literals;
 
     // This seems the to be the fastest way of reading a text file
@@ -93,7 +96,7 @@ inline std::string _read_file_to_string(const std::string& path) {
 }
 
 template <class T>
-constexpr int _log_10_ceil(T num) {
+[[nodiscard]] constexpr int _log_10_ceil(T num) noexcept {
     return num < 10 ? 1 : 1 + _log_10_ceil(num / 10);
 }
 
@@ -154,10 +157,7 @@ constexpr int _log_10_ceil(T num) {
     struct trait_name_<T, std::void_t<decltype(__VA_ARGS__)>> : std::true_type {};                                     \
                                                                                                                        \
     template <class T>                                                                                                 \
-    constexpr bool trait_name_##_v = trait_name_<T>::value;                                                            \
-                                                                                                                       \
-    template <class T>                                                                                                 \
-    using trait_name_##_enable_if = std::enable_if_t<trait_name_<T>::value, bool>
+    constexpr bool trait_name_##_v = trait_name_<T>::value
 
 utl_json_define_trait(_has_begin, std::declval<std::decay_t<T>>().begin());
 utl_json_define_trait(_has_end, std::declval<std::decay_t<T>>().end());
@@ -229,25 +229,84 @@ struct _null_type_impl {
     } // so we can check 'Null == Null'
 };
 
-template <class T>
-constexpr bool is_object_like_v =
-    _has_begin_v<T> && _has_end_v<T> && _has_input_it_v<T> && _has_mapped_type_v<T> && _has_key_type_v<T>;
-// NOTE: Also check for 'key_type' being convertible to 'std::string'
-template <class T>
-constexpr bool is_array_like_v = _has_begin_v<T> && _has_end_v<T> && _has_input_it_v<T>;
-template <class T>
-constexpr bool is_string_like_v = std::is_convertible_v<T, std::string_view>;
-template <class T>
-constexpr bool is_numeric_like_v = std::is_convertible_v<T, _number_type_impl>;
-template <class T>
-constexpr bool is_bool_like_v = std::is_same_v<T, _bool_type_impl>;
-template <class T>
-constexpr bool is_null_like_v = std::is_same_v<T, _null_type_impl>;
-;
+struct _dummy_type {};
+
+// 'possible_value_type<T>::value' evaluates to:
+//    - 'T::value_type' if 'T' has 'value_type'
+//    - '_dummy_type' otherwise
+template <class T, class = void>
+struct possible_value_type {
+    using type = _dummy_type;
+};
 
 template <class T>
-constexpr bool is_json_type_convertible_v = is_object_like_v<T> || is_array_like_v<T> || is_string_like_v<T> ||
-                                            is_numeric_like_v<T> || is_bool_like_v<T> || is_null_like_v<T>;
+struct possible_value_type<T, std::void_t<decltype(std::declval<typename std::decay_t<T>::value_type>())>> {
+    using type = typename T::value_type;
+};
+
+// 'possible_mapped_type<T>::value' evaluates to:
+//    - 'T::mapped_type' if 'T' has 'mapped_type'
+//    - '_dummy_type' otherwise
+template <class T, class = void>
+struct possible_mapped_type {
+    using type = _dummy_type;
+};
+
+template <class T>
+struct possible_mapped_type<T, std::void_t<decltype(std::declval<typename std::decay_t<T>::mapped_type>())>> {
+    using type = typename T::mapped_type;
+};
+// these type traits are a key to checking properties of 'T::value_type' & 'T::mapped_type' for a 'T' which may or may
+// not have them (which is exactly the case with recursive traits that we're gonna use later to deduce convertability
+// to recursive JSON). '_dummy_type' here is necessary to end the recursion of 'std::disjuction'
+
+#define utl_json_type_trait_conjunction(trait_name_, ...)                                                              \
+    template <class T>                                                                                                 \
+    struct trait_name_ : std::conjunction<__VA_ARGS__> {};                                                             \
+                                                                                                                       \
+    template <class T>                                                                                                 \
+    constexpr bool trait_name_##_v = trait_name_<T>::value
+
+#define utl_json_type_trait_disjunction(trait_name_, ...)                                                              \
+    template <class T>                                                                                                 \
+    struct trait_name_ : std::disjunction<__VA_ARGS__> {};                                                             \
+                                                                                                                       \
+    template <class T>                                                                                                 \
+    constexpr bool trait_name_##_v = trait_name_<T>::value
+
+// Note:
+// The reason we use 'struct trait_name : std::conjunction<...>' instead of 'using trait_name = std::conjunction<...>'
+// is because 1st option allows for recursive type traits, while 'using' syntax doesn't. We have some recursive type
+// traits here in form of 'is_json_type_convertible<>', which expands over the 'T' checking that 'T', 'T::value_type'
+// (if exists), 'T::mapped_type' (if exists) and their other layered value/mapped types are all satisfying the
+// necessary convertability trait. This allows us to make a trait which fully deduces whether some
+// complex datatype can be converted to a JSON recursively.
+
+utl_json_type_trait_conjunction(is_object_like, _has_begin<T>, _has_end<T>, _has_key_type<T>, _has_mapped_type<T>);
+utl_json_type_trait_conjunction(is_array_like, _has_begin<T>, _has_end<T>, _has_input_it<T>);
+utl_json_type_trait_conjunction(is_string_like, std::is_convertible<T, std::string_view>);
+utl_json_type_trait_conjunction(is_numeric_like, std::is_convertible<T, _number_type_impl>);
+utl_json_type_trait_conjunction(is_bool_like, std::is_same<T, _bool_type_impl>);
+utl_json_type_trait_conjunction(is_null_like, std::is_same<T, _null_type_impl>);
+
+utl_json_type_trait_disjunction(_is_directly_json_convertible, is_string_like<T>, is_numeric_like<T>, is_bool_like<T>,
+                                is_null_like<T>);
+
+utl_json_type_trait_conjunction(
+    is_json_convertible,
+    std::disjunction<
+        // either the type itself is convertible
+        _is_directly_json_convertible<T>,
+        // ... or it's an array of convertible elements
+        std::conjunction<is_array_like<T>, is_json_convertible<typename possible_value_type<T>::type>>,
+        // ... or it's an object of convertible elements
+        std::conjunction<is_object_like<T>, is_json_convertible<typename possible_mapped_type<T>::type>>>,
+    // end recusion by short-circuiting conjunction with 'false' once we arrive to '_dummy_type',
+    // arriving here means the type isn't convertable to JSON
+    std::negation<std::is_same<T, _dummy_type>>);
+
+#undef utl_json_type_trait_conjunction
+#undef utl_json_type_trait_disjunction
 
 // ==================
 // --- Node class ---
@@ -376,11 +435,11 @@ public:
     // ----------------
 
     // Converting assignment
-    template <class T, std::enable_if_t<
-                           !std::is_same_v<std::decay_t<T>, Node> && !std::is_same_v<std::decay_t<T>, object_type> &&
-                               !std::is_same_v<std::decay_t<T>, array_type> &&
-                               !std::is_same_v<std::decay_t<T>, string_type> && is_json_type_convertible_v<T>,
-                           bool> = true>
+    template <class T, std::enable_if_t<!std::is_same_v<std::decay_t<T>, Node> &&
+                                            !std::is_same_v<std::decay_t<T>, object_type> &&
+                                            !std::is_same_v<std::decay_t<T>, array_type> &&
+                                            !std::is_same_v<std::decay_t<T>, string_type> && is_json_convertible_v<T>,
+                                        bool> = true>
     Node& operator=(const T& value) {
         // Don't take types that decay to Node/object/array/string to prevent
         // shadowing native copy/move assignment for those types
@@ -497,11 +556,11 @@ public:
     Node(Node&&)      = default;
 
     // Converting ctor
-    template <class T, std::enable_if_t<
-                           !std::is_same_v<std::decay_t<T>, Node> && !std::is_same_v<std::decay_t<T>, object_type> &&
-                               !std::is_same_v<std::decay_t<T>, array_type> &&
-                               !std::is_same_v<std::decay_t<T>, string_type> && is_json_type_convertible_v<T>,
-                           bool> = true>
+    template <class T, std::enable_if_t<!std::is_same_v<std::decay_t<T>, Node> &&
+                                            !std::is_same_v<std::decay_t<T>, object_type> &&
+                                            !std::is_same_v<std::decay_t<T>, array_type> &&
+                                            !std::is_same_v<std::decay_t<T>, string_type> && is_json_convertible_v<T>,
+                                        bool> = true>
     Node(const T& value) {
         *this = value;
     }
@@ -540,7 +599,7 @@ public:
         static_assert(
             _always_false_v<T>,
             "Provided type doesn't have a defined JSON reflection. Use 'UTL_JSON_REFLECT' macro to define one.");
-        // compile-time protection against calling 'from_struct()' on types that don't have reflection,
+        // compile-time protection against calling 'to_struct()' on types that don't have reflection,
         // we can also provide a proper error message here
         return {};
         // this is needed to silence "no return in a function" warning that appears even if this specialization
@@ -1265,7 +1324,7 @@ inline void _serialize_json_to_buffer(std::string& chars, const Node& node, Form
 // --- JSON Parsing public API ---
 // ===============================
 
-inline Node from_string(const std::string& chars) {
+[[nodiscard]] inline Node from_string(const std::string& chars) {
     _parser           parser(chars);
     const std::size_t json_start   = parser.skip_nonsignificant_whitespace(0); // skip leading whitespace
     auto [end_cursor, result_node] = parser.parse_node(json_start); // starts parsing recursively from the root node
@@ -1279,13 +1338,13 @@ inline Node from_string(const std::string& chars) {
 
     return result_node;
 }
-inline Node from_file(const std::string& filepath) {
+[[nodiscard]] inline Node from_file(const std::string& filepath) {
     const std::string chars = _read_file_to_string(filepath);
     return from_string(chars);
 }
 
 namespace literals {
-inline Node operator""_utl_json(const char* c_str, std::size_t c_str_size) {
+[[nodiscard]] inline Node operator""_utl_json(const char* c_str, std::size_t c_str_size) {
     return from_string(std::string(c_str, c_str_size));
 }
 } // namespace literals
@@ -1303,7 +1362,7 @@ constexpr bool _is_reflected_struct = false;
 // and call 'to_struct()' / 'from_struct()' recursively whenever necessary
 
 template <class T>
-utl::json::Node from_struct(const T&) {
+[[nodiscard]] utl::json::Node from_struct(const T&) {
     static_assert(_always_false_v<T>,
                   "Provided type doesn't have a defined JSON reflection. Use 'UTL_JSON_REFLECT' macro to define one.");
     // compile-time protection against calling 'from_struct()' on types that don't have reflection,
@@ -1315,8 +1374,27 @@ utl::json::Node from_struct(const T&) {
 
 template <class T>
 void _assign_value_to_node(Node& node, const T& value) {
-    if constexpr (_is_reflected_struct<T>) node = from_struct(value);
-    else node = value;
+    if constexpr (is_json_convertible_v<T>) node = value;
+    // it is critical that the trait above performs DEEP check for JSON convertability and not a shallow one,
+    // we want to detect things like 'std::vector<int>' as convertible, but not things like 'std::vector<MyStruct>',
+    // these should expand over their element type / mapped type further until either they either reach
+    // the reflected 'MyStruct' or end up on a dead end, which means an impossible conversion
+    else if constexpr (_is_reflected_struct<T>) node = from_struct(value);
+    else if constexpr (is_object_like_v<T>) {
+        node = Object{};
+        for (const auto& [key, val] : value) {
+            Node single_node;
+            _assign_value_to_node(single_node, val);
+            node.get_object().emplace(key, std::move(single_node));
+        }
+    } else if constexpr (is_array_like_v<T>) {
+        node = Array{};
+        for (const auto& elem : value) {
+            Node single_node;
+            _assign_value_to_node(single_node, elem);
+            node.get_array().emplace_back(std::move(single_node));
+        }
+    } else static_assert(_always_false_v<T>, "Could not resolve recursive conversion from 'T' to 'json::Node'.");
 }
 
 #define utl_json_from_struct_assign(fieldname_) _assign_value_to_node(json[#fieldname_], val.fieldname_);
