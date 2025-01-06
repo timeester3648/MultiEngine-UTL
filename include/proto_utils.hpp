@@ -1487,6 +1487,7 @@ void _assign_node_to_value_recursively(std::array<T, N>& value, const Node& node
 //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+#include <tuple>
 #if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_LOG)
 #ifndef UTLHEADERGUARD_LOG
 #define UTLHEADERGUARD_LOG
@@ -2138,7 +2139,7 @@ private:
         if (this->colors == Colors::ENABLE) buffer += _color_reset;
 
         this->ostream_ref().write(buffer.data(), buffer.size());
-
+        
         // 'std::ostream' isn't guaranteed to be thread-safe, even through many implementations seem to have
         // some thread-safety built into `std::cout` the same cannot be said about a generic 'std::ostream'
         std::lock_guard<std::mutex> ostream_lock(this->ostream_mutex);
@@ -2167,7 +2168,7 @@ private:
 
         // strftime_buffer.back() = ' '; // replace null-terminator added by 'strftime()' with a space
         buffer += _col_ld_datetime;
-        buffer.append(strftime_buffer.data(), strftime_buffer.size());
+        buffer.append(strftime_buffer.data(), _col_w_datetime);
         buffer += _col_rd_datetime;
     }
 
