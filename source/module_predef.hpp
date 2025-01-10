@@ -49,7 +49,7 @@ namespace utl::predef {
 // --- Compiler Detection Macro ---
 // ================================
 
-#if defined(_MSC_VER) || defined(_MSC_FULL_VER)
+#if defined(_MSC_VER)
 #define UTL_PREDEF_COMPILER_IS_MSVC
 #elif defined(__GNUC__) || defined(__GNUC_MINOR__) || defined(__GNUC_PATCHLEVEL__)
 #define UTL_PREDEF_COMPILER_IS_GCC
@@ -257,15 +257,42 @@ constexpr bool debug =
 // --- Optimization macros ---
 // ===========================
 
-#if defined(UTL_PREDEF_COMPILER_IS_MSVC)
+// Note:
+// These are mainly valuable as a reference implementation for portable optimization built-ins,
+// which is why they are made to independent of other macros in this module.
+
+// Force inline
+// (requires regular 'inline' after the macro)
+#if defined(_MSC_VER)
 #define UTL_PREDEF_FORCE_INLINE __forceinline
-#elif defined(UTL_PREDEF_COMPILER_IS_GCC) || defined(UTL_PREDEF_COMPILER_IS_CLANG) ||                                  \
-    defined(UTL_PREDEF_COMPILER_IS_CLANG)
+#elif defined(__GNUC__) || defined(__clang__) || defined(__INTEL_COMPILER)
 #define UTL_PREDEF_FORCE_INLINE __attribute__((always_inline))
 #else
 #define UTL_PREDEF_FORCE_INLINE
 #endif
 
+// Force noinline
+#if defined (_MSC_VER)
+#define UTL_PREDEF_FORCE_NOINLINE __declspec((noinline))
+#elif defined(__GNUC__) || defined(__clang__) || defined(__INTEL_COMPILER)
+#define UTL_PREDEF_FORCE_NOINLINE __attribute__((noinline))
+#endif
+
+// Branch prediction hints
+// (legacy, use '[[likely]]', '[[unlikely]] in C++20 and on)
+#if defined(__GNUC__) || defined(__clang__)
+#define UTL_PREDEF_LEGACY_LIKELY(x) __builtin_expect(!!(x), 1)
+#else
+#define UTL_PREDEF_LEGACY_LIKELY(x) (x)
+#endif
+
+#if defined(__GNUC__) || defined(__clang__)
+#define UTL_PREDEF_LEGACY_UNLIKELY(x) __builtin_expect(!!(x), 0)
+#else
+#define UTL_PREDEF_LEGACY_UNLIKELY(x) (x)
+#endif
+
+// Assume condition
 #if defined(UTL_PREDEF_STANDARD_IS_23_PLUS)
 #define UTL_PREDEF_ASSUME [[assume(__VA_ARGS__))]]
 #elif defined(UTL_PREDEF_COMPILER_IS_MSVC)

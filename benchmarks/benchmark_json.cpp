@@ -58,8 +58,6 @@ void benchmark_on_data(const std::string& filepath) {
         const auto json = json::from_file(parsing_target_minimized);
         DO_NOT_OPTIMIZE_AWAY(json);
     });
-    
-    return;
 
     benchmark("nlohmann", [&]() {
         nlohmann::json json;
@@ -118,7 +116,7 @@ void benchmark_on_data(const std::string& filepath) {
 
     benchmark("utl::json",
               [&]() { json_utl.to_file(serializing_target_minimized, json::Format::MINIMIZED); });
-
+    
     benchmark("nlohmann", [&]() { std::ofstream(serializing_target_minimized) << json_nlohmann.dump(); });
 
     benchmark("PicoJSON", [&]() { std::ofstream(serializing_target_minimized) << json_picojson.serialize(); });
@@ -170,8 +168,16 @@ int main() {
         utl::json::Node(numbers).to_file("benchmarks/data/numbers.json");
     }
     
+    //auto json = json::from_file("benchmarks/data/database.json");
+    //std::cout << json.contains("comment_1") << '\n';
+    
     // Benchmark on different datasets
     benchmark_on_data("benchmarks/data/strings.json");
-    //benchmark_on_data("benchmarks/data/numbers.json");
-    //benchmark_on_data("benchmarks/data/database.json");
+    benchmark_on_data("benchmarks/data/numbers.json");
+    benchmark_on_data("benchmarks/data/database.json");
+    
+    // UTL_PROFILER("Total") {
+    //     auto json = json::from_file("benchmarks/data/database.json");
+    //     DO_NOT_OPTIMIZE_AWAY(json);
+    // }
 }

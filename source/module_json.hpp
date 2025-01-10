@@ -29,14 +29,14 @@
 #include <string>           // string, stoul()
 #include <string_view>      // string_view
 #include <system_error>     // errc()
-#include <type_traits>      // enable_if_t<>, void_t, is_convertible_v<>, is_same_v<>, conjunction<>, disjunction<>, negation<>
-#include <utility>          // move(), declval<>()
-#include <variant>          // variant<>
-#include <vector>           // vector<>
+#include <type_traits> // enable_if_t<>, void_t, is_convertible_v<>, is_same_v<>, conjunction<>, disjunction<>, negation<>
+#include <utility>     // move(), declval<>()
+#include <variant>     // variant<>
+#include <vector>      // vector<>
 
 // ____________________ DEVELOPER DOCS ____________________
 
-// Reasonably simple (if we discound reflection) parser / serializer, doen't use any intrinsics or compiler-specific 
+// Reasonably simple (if we discound reflection) parser / serializer, doen't use any intrinsics or compiler-specific
 // stuff. Unlike some other implementation, doesn't include the tokenizing step - we parse everything in a single 1D
 // scan over the data, constructing recursive JSON struct on the fly. The main reason we can do this so easily is is
 // due to a nice quirk of JSON - parsing nodes, we can always determine node type based on a single first character,
@@ -548,12 +548,19 @@ public:
     // -- Constructors --
     // ------------------
 
+    // TEMP:
     Node& operator=(const Node&) = default;
     Node& operator=(Node&&)      = default;
 
     Node()            = default;
     Node(const Node&) = default;
     Node(Node&&)      = default;
+    // Note:
+    // We suffer a lot if 'object_type' move-constructor is not marked 'noexcept', if that's the case
+    // 'Node' move-constructor doesn't get 'noexcept' either which means `std::vector<Node>` will copy
+    // nodes instead of moving when it grows. 'std::map' is NOT required to be noexcept by the standard
+    // but it is marked as such in both 'libc++' and 'libstdc++', 'VS' stdlib lacks behind in that regard.
+    // See noexcept status summary here: http://howardhinnant.github.io/container_summary.html
 
     // Converting ctor
     template <class T, std::enable_if_t<!std::is_same_v<std::decay_t<T>, Node> &&
@@ -623,7 +630,7 @@ using Null   = Node::null_type;
 // --- Lookup Tables ---
 // =====================
 
-constexpr uint8_t _u8(char value) { return static_cast<uint8_t>(value); }
+constexpr std::uint8_t _u8(char value) { return static_cast<std::uint8_t>(value); }
 
 constexpr std::size_t _number_of_char_values = 256;
 // always true since 'sizeof(char) == 1' is guaranteed by the standard
@@ -650,8 +657,7 @@ constexpr std::size_t _number_of_char_values = 256;
 constexpr std::array<char, _number_of_char_values> _lookup_serialized_escaped_chars = [] {
     std::array<char, _number_of_char_values> res{};
     // default-initialized chars get initialized to '\0',
-    // as far as I understand ('\0' == 0) is mandated by the standard,
-    // which is why we can use it inside an 'if' condition
+    // ('\0' == 0) is mandated by the standard, which is why we can use it inside an 'if' condition
     res[_u8('"')]  = '"';
     res[_u8('\\')] = '\\';
     // res['/']  = '/'; escaping forward slash in JSON is allowed, but redundant
@@ -683,7 +689,6 @@ constexpr std::array<bool, _number_of_char_values> _lookup_whitespace_chars = []
 }();
 
 // Lookup table used to get an appropriate char for the escaped char in a 2-char JSON escape sequence.
-// Allows us to avoid a chain of 8 if-else'es which ends up beings faster.
 constexpr std::array<char, _number_of_char_values> _lookup_parsed_escaped_chars = [] {
     std::array<char, _number_of_char_values> res{};
     res[_u8('"')]  = '"';
@@ -695,19 +700,6 @@ constexpr std::array<char, _number_of_char_values> _lookup_parsed_escaped_chars 
     res[_u8('r')]  = '\r';
     res[_u8('t')]  = '\t';
     return res;
-}();
-
-// Lookup table used to validate that JSON string has no unescaped charactes that should be escaped
-constexpr std::array<bool, _number_of_char_values> _lookup_rejected_control_chars = [] {
-    std::array<bool, _number_of_char_values> res{};
-    // Codepoints U+0000 to U+001F require an escape
-    // Some can be escaped with a 2-char sequence, others should be escaped as a unicode HEX
-    for (uint8_t c = 0; c <= 31; ++c) res[c] = true;
-    return res;
-
-    // Note:
-    // While C++ standard doesn't guarantee that chars 0-31 correspond to ASCII control characters,
-    // this is in fact guaranteed by the assumption of UTF-8 encoded string.
 }();
 
 // ==========================
@@ -836,7 +828,6 @@ struct _parser {
         // Note 4:
         // 'parent.emplace_hint(parent.end(), ...)' can drastically speed up parsing of sorted JSON object, however
         // since most JSONs in the wild aren't sorted we will resort to a more generic option of regular '.emplace()'
-
         parent.emplace(std::move(key), std::move(value));
 
         return cursor;
@@ -958,6 +949,29 @@ struct _parser {
                                  _pretty_error(cursor, this->chars));
     }
 
+    inline void parse_unicode_codepoint_from_hex(std::size_t cursor, std::string& string_value) {
+        using namespace std::string_literals;
+
+        if (cursor >= this->chars.size() + 4)
+            throw std::runtime_error("JSON string node reached the end of buffer while"s +
+                                     "parsing a 5-character escape sequence at pos "s + std::to_string(cursor) + "."s +
+                                     _pretty_error(cursor, this->chars));
+        // Standard library is absolutely HORRIBLE when it comes to Unicode support.
+        // Literally every single encoding function in <cuchar>/<string>/<codecvt> is a
+        // crime against common sense, API safety and performace, which is why we do this
+        // inefficient nonsense and pray that there's not gonna be a lot of escaped unicode
+        // in the data. This also adds another 2 #include's just by itself. Supports UTF-8.
+        const std::string hex(this->chars.data() + cursor + 1, 4);
+        // standard functions only support std::string or null-terminated char*,
+        // there's no way (that I'm aware of) to view into the data and parse it without making a copy,
+        // thankfully a string of 4 characters should always fit into the SSO buffer
+        const char32_t    unicode_char = std::stoul(hex, nullptr, 16);
+        if (!_unicode_codepoint_to_utf8(string_value, unicode_char))
+            throw std::runtime_error("JSON string node could not parse unicode codepoint {"s + hex +
+                                     "} while parsing an escape sequence at pos "s + std::to_string(cursor) + "."s +
+                                     _pretty_error(cursor, this->chars));
+    }
+
     std::pair<std::size_t, String> parse_string(std::size_t cursor) {
         using namespace std::string_literals;
 
@@ -975,8 +989,14 @@ struct _parser {
         for (std::size_t segment_start = cursor; cursor < this->chars.size(); ++cursor) {
             const char c = this->chars[cursor];
 
+            // Reached the end of the string
+            if (c == '"') {
+                string_value.append(this->chars.data() + segment_start, cursor - segment_start);
+                ++cursor; // move past the closing quote '"'
+                return {cursor, std::move(string_value)};
+            }
             // Handle escape sequences inside the string
-            if (c == '\\') {
+            else if (c == '\\') {
                 ++cursor; // move past the backslash '\'
 
                 string_value.append(this->chars.data() + segment_start, cursor - segment_start - 1);
@@ -994,24 +1014,7 @@ struct _parser {
                 }
                 // 6-character escape sequences (escaped unicode HEX codepoints)
                 else if (escaped_char == 'u') {
-                    if (cursor >= this->chars.size() + 4)
-                        throw std::runtime_error("JSON string node reached the end of buffer while"s +
-                                                 "parsing a 5-character escape sequence at pos "s +
-                                                 std::to_string(cursor) + "."s + _pretty_error(cursor, this->chars));
-
-                    // Standard library is absolutely HORRIBLE when it comes to Unicode support.
-                    // Literally every single encoding function in <cuchar>/<string>/<codecvt> is a
-                    // crime against common sense, API safety and performace, which is why we do this
-                    // inefficient nonsense and pray that there's not gonna be a lot of escaped unicode
-                    // in the data. This also adds another 2 #include's just by itself. Supports UTF-8.
-                    const std::string hex(this->chars.data() + cursor + 1, 4);
-                    // say hello to allocation, standard functions only support std::string or null-terminated char*,
-                    // there's no way (that I know of) to view into data and parse it without copying it
-                    const char32_t    unicode_char = std::stoul(hex, nullptr, 16);
-                    if (!_unicode_codepoint_to_utf8(string_value, unicode_char))
-                        throw std::runtime_error("JSON string node could not parse unicode codepoint {"s + hex +
-                                                 "} while parsing an escape sequence at pos "s +
-                                                 std::to_string(cursor) + "."s + _pretty_error(cursor, this->chars));
+                    parse_unicode_codepoint_from_hex(cursor, string_value);
                     cursor += 4; // move past first 'uXXX' symbols, last symbol will be covered by the loop '++cursor'
                 } else {
                     throw std::runtime_error("JSON string node encountered unexpected character {"s + escaped_char +
@@ -1026,19 +1029,12 @@ struct _parser {
                 segment_start = cursor + 1;
                 continue;
             }
-            // validation
-            else if (_lookup_rejected_control_chars[_u8(c)])
+            // Reject unescaped control characters (codepoints U+0000 to U+001F)
+            else if (_u8(c) <= 31)
                 throw std::runtime_error(
                     "JSON string node encountered unescaped ASCII control character character \\"s +
                     std::to_string(static_cast<int>(c)) + " at pos "s + std::to_string(cursor) + "."s +
                     _pretty_error(cursor, this->chars));
-
-            // Reached the end of the string
-            else if (c == '"') {
-                string_value.append(this->chars.data() + segment_start, cursor - segment_start);
-                ++cursor; // move past the closing quote '"'
-                return {cursor, std::move(string_value)};
-            }
         }
 
         throw std::runtime_error("JSON string node reached the end of buffer while parsing string contents." +
@@ -1326,17 +1322,17 @@ inline void _serialize_json_to_buffer(std::string& chars, const Node& node, Form
 
 [[nodiscard]] inline Node from_string(const std::string& chars) {
     _parser           parser(chars);
-    const std::size_t json_start   = parser.skip_nonsignificant_whitespace(0); // skip leading whitespace
-    auto [end_cursor, result_node] = parser.parse_node(json_start); // starts parsing recursively from the root node
-
+    const std::size_t json_start = parser.skip_nonsignificant_whitespace(0); // skip leading whitespace
+    auto [end_cursor, node]      = parser.parse_node(json_start); // starts parsing recursively from the root node
     // Check for invalid trailing sumbols
+
     using namespace std::string_literals;
     for (auto cursor = end_cursor; cursor < chars.size(); ++cursor)
         if (!_lookup_whitespace_chars[_u8(chars[cursor])])
             throw std::runtime_error("Invalid trailing symbols encountered after the root JSON node at pos "s +
                                      std::to_string(cursor) + "."s + _pretty_error(cursor, chars));
 
-    return result_node;
+    return std::move(node); // implicit tuple blocks copy elision, we have to move() manually
 }
 [[nodiscard]] inline Node from_file(const std::string& filepath) {
     const std::string chars = _read_file_to_string(filepath);
