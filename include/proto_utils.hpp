@@ -7273,6 +7273,7 @@ public:
         result_type splitmix32_state = _ensure_nonzero(seed); // RomuTrio shouln't be zero-initialized
         this->s[0]                   = _splitmix32(splitmix32_state);
         this->s[1]                   = _splitmix32(splitmix32_state);
+        this->s[2]                   = _splitmix32(splitmix32_state);
         // Like Xoshiro, Romu recommends using SplitMix32 to initialize its state
     }
 
@@ -7523,7 +7524,7 @@ public:
 // State:       8 bytes
 //
 // Generally overshadowed by newer PRNGs in quality & performance,
-// however it still quite good and seems to be among we can get at just 8 bytes of state.
+// however it still quite good and seems to be among the best we can get at just 8 bytes of state.
 //
 class Xorshift64Star {
 public:
@@ -7654,7 +7655,7 @@ public:
 
     constexpr void seed(result_type seed) {
         // Use some other PRNG to setup initial state
-        result_type splitmix32_state = seed; // just in case
+        result_type splitmix32_state = seed;
 
         for (auto& e : this->key) e = _splitmix32(splitmix32_state);
         for (auto& e : this->nonce) e = _splitmix32(splitmix32_state);

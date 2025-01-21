@@ -10,7 +10,7 @@ Implements several random bit generators seamlessly compatible with [&lt;random&
 
 - [32-bit Bob Jenkins Small Fast PRNG](https://burtleburtle.net/bob/rand/smallprng.html)
 
-- [64-bit Romu Dio Jr. PRNG](https://www.romu-random.org/)
+- [64-bit Romu Duo Jr. PRNG](https://www.romu-random.org/)
 
 - [64-bit Bob Jenkins Small Fast PRNG](https://burtleburtle.net/bob/rand/smallprng.html)
 
@@ -240,12 +240,12 @@ Returns $\alpha A + (1 - \alpha) B$, with random $0 < \alpha < 1$. Useful for ve
 
 ### Getting random values
 
-[ [Run this code](https://godbolt.org/#z:OYLghAFBqd5QCxAYwPYBMCmBRdBLAF1QCcAaPECAMzwBtMA7AQwFtMQByARg9KtQYEAysib0QXACx8BBAKoBnTAAUAHpwAMvAFYTStJg1DIApACYAQuYukl9ZATwDKjdAGFUtAK4sGe1wAyeAyYAHI%2BAEaYxCBmpAAOqAqETgwe3r56icmOAkEh4SxRMXF2mA6pQgRMxATpPn5ctpj2uQxVNQT5YZHRsbbVtfWZTQqDXcE9RX1mAJS2qF7EyOwc5gDMwcjeWADUJutuCAQE8QogAPQXxEwA7gB0wIQIXhFeSsuyjAT3aCwXABEWIRiHgLKhgOhDKgAG4XeLEVBEAgAT3iwWAAH0vI5aAoLiwmGNohctjtMPDEURsbiFPcEPF4gdsCYNABBVls4IEXaE4IQWb7ADsVnZu3Fu3eGN2zDYCniTBWkoItAOoo5YolNwY6FQLBAICUmHQmNuz0x2t1LExWBheBWArVnIluzG6ANaBxzpdEoObj9%2BzMZktmO5EA0pF2XA0GkFPvjLoOAMDZn2hwDlr1BpDYYjUZjcYTCb9AfMZhMAFY3Awy974yXDimQ7rXvQBUWO%2BKkym0/7G5n9SBm4sIm3C536%2BnG7WqzWg3WfQ23E3DCaW6PMBAALQVyMV8ed7tl3sZ1dZoerm0jts7vcHjtLlOV6u1zWTvvLsshiKoTzticPusybHo%2BA7ZpeP5/veAG%2BlOn7zrOr5skWj5fpeyAIKgeBKBAJgik0uxxLs6x4QC0GwcBQYnv2Z6DiGGFYTheEWARREkUKZGHnBT6IfOb6LtxaE6pitCTDUmJ/BEwRMG0EBmPckbrPcgpHlRoG0eBwmiSE4mSdJsnyYpynUfB5a8eW6zqqRnIcPMtCcBWvB%2BBwWikKgnD%2BpY1iuosyyYIG6w8KQBCaLZ8wANYgEKXD3NFQoAByBZI8VmAAbAAnNGu72RwkhOaFbmcLw5wRiFLm2aQcCwDAiAoHq6L0GQFAQH8DV9NshjAFwqUxnwdAENE5wQBEBVScwxAopwQVjTUKIAPIRNo5RlUFfxsIIc0MLQk3laQWBvMAbhiHiU28FghJGOIu34MQy14DCmDnLtmCqOUOKrK53ItAVokRDcE0eFgBUEKC%2BrcLwD3ED%2BSgApgF3ANpoDlfMVAGMACgAGp4JgtxzfEjCnTIggiGI7BSET8hKGoBW6E0BhGCg1jWPoeAROckDzKg8RtE9W5ukmpheZYXBCrsW5zWYvCwtEoJYOzArNK0qQuDqwyNKQgSTIUxRZEkKQCGrus5Kk3Ta30owtHdAgdEMngNHoZQVNb4ym70MSjOMhse50rvTO78wKL5KwSHZDn5bt7kcLsqjxalW6pZIuwdUYUapfcGjp7sEC4IQJABVwsy8GVWizPMCCYEwWAxArOV5aQ%2BoVhGzmuZHxUgKVoXzFVtWLKcOLkJQrV0NEoSsKsMdxwnSf08Aqfp%2BnvDGrnst6PwxOiOI5Nr5TKjqLttOkLcNzxKdoccI5pDN1LnBzTi8Q4rsqBUNHsfx4nyez9188aFnHgsG1xB86F2Cp3CKIBJBpwypIMwXBY4aArOlaK3V9CcDrg3JuBVW62HbiA5GYCzDxXuAQmBqV4oVhFusDQ8V0oQJQRwdY4cW5FVwSXM%2BktL6YOYcXMKpBIbJGcJIIAA%3D) ]
+[ [Run this code](https://godbolt.org/#z:OYLghAFBqd5QCxAYwPYBMCmBRdBLAF1QCcAaPECAMzwBtMA7AQwFtMQByARg9KtQYEAysib0QXACx8BBAKoBnTAAUAHpwAMvAFYTStJg1DIApACYAQuYukl9ZATwDKjdAGFUtAK4sGIMwBspK4AMngMmAByPgBGmMQgQQAOqAqETgwe3r7%2ByanpAmER0SxxCUF2mA4ZQgRMxARZPn6Btpj2jgK19QRFUbHxibZ1DU05rQojveH9pYMBAJS2qF7EyOwc5gDM4cjeWADUJltuCAQESQogAPTXxEwA7gB0wIQIXjFeSmuyjARPaBY1wAIixCMQ8BZUMB0IZUAA3a5JYioIgEACeSXCwAA%2Bl5HLQFNcWExJvFrrt9pgkSiiHiCQonggkkljtgTBoAIIcznhAgHEnhCALI4AdisXIOUoOX2xB2YbAUSSY6xlBFoxwl3Ml0vuDHQqBYIBASkw6BxDzeOL%2BKKS6OFmp50oOk3QxrQ%2BKdzulxzcvqOZjMevNfIgGlIBy4Gg0Iu9cedx2BAbMRxO/uDhuNwZxofDkejsfj8d9/vMZhMAFY3Awy164yWTsnswaPvRhUWO1LE8nU37GxmjSBmysYm3C5362nG7WqzXA3XvQ23E3DOaW6PMBAALQViMV8ed7tl3vp1eZoernHrts7vcHjtL5OV6u1nWTvvLsvZmKoTzticPlsSbHo%2BA5ZpeP5/veAE%2BlOn7zrOr6ckWj5fpeyAIKgeBKBAJjilwEZmBGWx4cC0GwcBgYnv2Z6DtmGFYTheEWARBxEQcJGimRh5wU%2BiHzm%2Bi68Wh%2Bo4rQMz1DigIxOETCdAwEBmE8xFPCKR5UaBtHgaJ4kRJJ0myfJinKRxqnUfB5b8eWWxaqRPIcEstCcBWvB%2BBwWikKgnB%2BpY1guisayYAGWw8KQBCaA5SwANYgKKXBPHFooABwhZISWBAAnFGu5ORwkiuRFnmcLwVzhuF7kOaQcCwDAiAoIaWL0GQFAQICjWDHshjAFwATRnwdAEPEVwQDEhUycwxDopwoXjfU6IAPIxNoVTlaFgJsII80MLQU0VaQWCfMAbhiIS028FgJJGOIe34MQK14PCmBXHtmCqFU%2BIbB5fLtIV4kxPck0eFghUEBCRrcLwj3ED%2BSjApgl3ALpoAVUsVAGMACgAGp4JgDzzUkjBnTIggiGI7BSMT8hKGohW6ARBhGCg1jWPoeAxFckBLKgSTyc9W6uompi%2BZYXCigcW7zWYvAIvEEJYBzwptB0GQuPqYx%2BARoQzCUZR6CkaTyerev5PJfQ64MBGVNUXRTEblvtPdNs9GbAwJJbtueM0eiTM72uuxISwKAF6wB/ozkFXtXkcAcqhJQEW4BJIBydUYkYBE8GgZwcEC4IQJDBVwCy8OVWgLEsCCYEwWAJIruX5aQRoVuGbkeVHJUgGVEVLNVdUrBc%2BLkJQbV0PEkSsBssfx4nycM8AacZxnvBmnnct6PwJOiOIFPr1TKjqHtdOkA89xJGdjnh6QLfS5w834kk%2BIHKgVAx3HCdJync89QvGjZx4LDtcQAuRcwpd2iiASQ6cAgZUkGYLgccNAVgynFHqYc8q8Ebs3QqbdbAdxASjMBZgkpPEIbAgISUKyiy2BoJK0Cgi5S2BHVuxU8Gl3PhwKWl8sHMJLpFUgUM0jOEkEAA%3D%3D%3D) ]
 
 ```cpp
 using namespace utl;
 
-random::seed_with_random_device();
+random::seed_with_entropy();
 std::cout
     << "rand_int(0, 100)                = " << random::rand_int(0, 100)                << "\n"
     << "rand_double()                   = " << random::rand_double()                   << "\n"
@@ -360,7 +360,7 @@ As a simplest showcase of its flaws, let's generate `10000` random points in a $
 
 What we just observed is called "failing the [spectral test](https://en.wikipedia.org/wiki/Spectral_test) at an extremely low dimension", and for RANDU that dimension is **3**. Such quality is clearly not something one would want in their Monte—Carlo simulation with "random" realizations.
 
-In fact, this quality is generic to all LCGs — any LCG with modulus $m$ used to generate points in $N$-dimensional space will result in no more that $(N! \times m)^{1/N}$ hyperplanes, with other LCG implementations it's just not as noticeable that once could see the planes visually.
+In fact, this quality is generic to all LCGs — any LCG with modulus $m$ used to generate points in $N$-dimensional space will result in no more that $(N! \times m)^{1/N}$ hyperplanes, with other LCG implementations it's just not as noticeable that one could see the planes visually.
 
 #### minstd_rand & rand()
 
