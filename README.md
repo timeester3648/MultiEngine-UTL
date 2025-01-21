@@ -79,17 +79,17 @@ While the library itself consists of a single header with no embedded dependenci
 
 ## Work in progress
 
-* Deprecating/refactoring following modules: `utl::voidstream`.
-* Finishing following modules: `utl::log`, `utl::mvl`.
-* Struct reflection in `utl::json` module;
-* `utl::font` module;
-* Directory selection for temp file creation in `utl::shell`;
-* `utl::bitflag` module with shortcuts for various enum bitflag operations;
-* `stre::centered()` stream modifier;
+* Deprecation/refactoring of following modules: `utl::voidstream`;
+* Small API improvements for `utl::log`;
+* Vector support for `utl::mvl`;
+* Matrix concat functions for `utl::mvl`;
+* Index span API for `utl::mvl`;
+* Binary operator refactors for `utl::mvl`;
+* Temp file creation improvements for `utl::shell`;
 * Coordinate transformations in `utl::math`;
 * More type traits in `utl::math`;
-* Potential `utl::async` module with threadpool implementation and parallel execution methods;
-* `log::stringify()` implementation for `std::stack` and `std::queue`.
+* `log::stringify()` implementation for stack-like and queue-like types;
+* Test coverage statistics.
 
 ## License
 
