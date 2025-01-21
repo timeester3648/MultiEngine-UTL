@@ -81,12 +81,14 @@ template <class Container, class Func> void for_loop(      Container& container,
 template <class Idx,       class Func> void for_loop( IndexRange<Idx> range,     Func&& func);
 
 // Reduction API
-template <class Iter,      class BinaryOp> auto reduce(     Range<Iter> range,     BinaryOp&& op)
-    -> typename Iter::value_type;
-template <class Container, class BinaryOp> auto reduce(const Container& container, BinaryOp&& op)
-    -> typename Container::value_type;
-template <class Container, class BinaryOp> auto reduce(      Container& container, BinaryOp&& op)
-    -> typename Container::value_type;
+template <std::size_t unroll = 1, class Iter,      class BinaryOp>
+auto reduce(     Range<Iter> range,     BinaryOp&& op) -> typename Iter::value_type;
+
+template <std::size_t unroll = 1, class Container, class BinaryOp>
+auto reduce(const Container& container, BinaryOp&& op) -> typename Container::value_type;
+
+template <std::size_t unroll = 1, class Container, class BinaryOp>
+auto reduce(      Container& container, BinaryOp&& op) -> typename Container::value_type;
 
 // Pre-defined binary operations
 template <class T> struct  sum { constexpr T operator()(const T& lhs, const T& rhs) const; }
@@ -295,23 +297,27 @@ Executes parallel `for` loop over an **index range** `range` where `func` is a c
 ### Reduction API
 
 ```cpp
-template <class Iter,      class BinaryOp> auto reduce(     Range<Iter> range,     BinaryOp&& op)
-    -> typename Iter::value_type;
-template <class Container, class BinaryOp> auto reduce(const Container& container, BinaryOp&& op)
-    -> typename Container::value_type;
-template <class Container, class BinaryOp> auto reduce(      Container& container, BinaryOp&& op)
-    -> typename Container::value_type;
+template <std::size_t unroll = 1, class Iter,      class BinaryOp>
+auto reduce(     Range<Iter> range,     BinaryOp&& op) -> typename Iter::value_type;
+
+template <std::size_t unroll = 1, class Container, class BinaryOp>
+auto reduce(const Container& container, BinaryOp&& op) -> typename Container::value_type;
+
+template <std::size_t unroll = 1, class Container, class BinaryOp>
+auto reduce(      Container& container, BinaryOp&& op) -> typename Container::value_type;
 ```
 
 Reduces range `range`  over the binary operation `op` in parallel.
 
 Overloads **(2)** and **(3)** construct range spanning `container.begin()` to `container.end()` automatically.
 
+`unroll` template parameter can be set to automatically unroll reduction loops with a given step, which oftentimes aids compiler with vectorization. By default, no loop unrolling takes place.
+
 **Note 1:** Binary operation can be anything with a signature `T(const T&, const T&)` or `T(T, T)`.
 
 **Note 2:** Be wary of passing binary operations as function pointers since that makes inlining more difficult. Lambdas and functor-classes don't experience the same issue, see [pre-defined binary operations](#pre-defined-binary-operations).
 
-**Note 3:** It is not unusual to see super-linear speedup since `parallel::reduce()` unrolls reduction loops for SIMD.
+**Note 3:** It is not unusual to see super-linear speedup with `unroll` set to `4`, `8`, `16` or `32`. Reduction loops are often difficult to vectorize otherwise due to reordering of float operations. Performance impact is hardware- and architecture- dependent.
 
 #### Pre-defined binary operations
 
