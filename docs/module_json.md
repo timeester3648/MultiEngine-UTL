@@ -250,19 +250,19 @@ Converting assignment & constructors. Tries to convert `T` to one of the possibl
 #### Serializing
 
 > ```cpp
-> std::string to_string(Format format = Format::PRETTY);
+> std::string to_string(Format format = Format::PRETTY) const;
 > ```
 
 Serializes JSON node to a string using a given `format`.
 
 > ```cpp
-> void to_file(const std::string& filepath, Format format = Format::PRETTY);
+> void to_file(const std::string& filepath, Format format = Format::PRETTY) const;
 > ```
 
 Serializes JSON node to the file at `filepath` using a given `format`.
 
 > ```cpp
-> template <class T> Node from_struct(const T& value);
+> template <class T> T to_struct() const;
 > ```
 
 Serializes JSON node to the structure / class object of type `T`.
@@ -330,7 +330,7 @@ Declaring this macro defines methods `Node::to_struct<struct_name>()` and `from_
 
 **Note 1:** Reflection supports nested classes, each class should be reflected with a macro and `to_struct()` / `from_struct()` will call each other recursively whenever appropriate. Containers of reflected classes are also supported with any level of nesting. See [examples](#structure-reflection).
 
-**Note 2:** Reflection does not impose any strict limitations on member variable types, it uses the same set of type traits as other methods to deduce appropriate conversions. It is expected however, that array-like member variable should support `.resize()` ([std::vector](https://en.cppreference.com/w/cpp/container/vector) and [std::list](https://en.cppreference.com/w/cpp/container/list) satisfy that) or provide an API similar to [std::array](https://en.cppreference.com/w/cpp/container/array). For object-like types it is expected that new elements can be inserted with `operator[]` (std::map](https://en.cppreference.com/w/cpp/container/map) and [std::unordered_map](https://en.cppreference.com/w/cpp/container/unordered_map) satisfy that).
+**Note 2:** Reflection does not impose any strict limitations on member variable types, it uses the same set of type traits as other methods to deduce appropriate conversions. It is expected however, that array-like member variables should support `.resize()` ([std::vector](https://en.cppreference.com/w/cpp/container/vector) and [std::list](https://en.cppreference.com/w/cpp/container/list) satisfy that) or provide an API similar to [std::array](https://en.cppreference.com/w/cpp/container/array). For object-like types it is expected that new elements can be inserted with `operator[]` [std::map](https://en.cppreference.com/w/cpp/container/map) and [std::unordered_map](https://en.cppreference.com/w/cpp/container/unordered_map) satisfy that).
 
 > ```cpp
 > template <class T> constexpr bool is_reflected_struct;
@@ -601,7 +601,7 @@ Output:
 ### Complex structure reflection
 
 > [!Note]
-> There are no particular limitations on what kind of nested structures can be reflected, as long as there is a logically sound path to converting one thing to another `utl::json` will figure out a way.
+> There are no particular limitations on what kinds of nested structures can be reflected, as long as there is a logically sound path to converting one thing to another `utl::json` will figure out a way.
 
 [ [Run this code](https://godbolt.org/#z:OYLghAFBqd5QCxAYwPYBMCmBRdBLAF1QCcAaPECAMzwBtMA7AQwFtMQByARg9KtQYEAysib0QXACx8BBAKoBnTAAUAHpwAMvAFYTStJg1DIApACYAQuYukl9ZATwDKjdAGFUtAK4sGIAKykrgAyeAyYAHI%2BAEaYxBIA7KQADqgKhE4MHt6%2BASlpGQKh4VEssfFcSXaYDplCBEzEBNk%2BfoHVtQL1jQTFkTFxibYNTS257SO9Yf1lg5UAlLaoXsTI7BzmAMxhyN5YANQmm24IBATJCiAA9FfETADuAHTAhAhe0V5Kq7KMBI9oLCuABEWIRiHgLKhgOhDKgAG5XZLEVBEAgAT2SYWAAH0vI5aAoriwmAoCHErjs9phEciiLj8QpHghkskjtgTBoAIIczk3fZCTAEfZeZL7BSoNj7AHJeiqfbhUmYdBigjELwOBQ80lqhz7ZSoMJCkwJKxc/bm/boZbRej7VSkfZoh0ALyOpu5CSBbp5WtV6qFABUSQBrQ4mnkWlXoEAgbVY/ZhZJ47HJJgEBDes0W0nR2Oq%2BPLc7J1PpzOcyNW962yP7RxsbG0PCgghl41ezbu306wMh0KksPuyM5mPE1nHYd58FGB1BhTBtn7UfY1BUbENOeajsRi189N4BQJg80cLb82nqMxuE1IjEI5uCdXhwkO/6w1shfE/OqZer1KGzeDjuVy1gg%2B6HvsYjivsx6YOe558g%2B17PuOBC5o%2BN53ohT63ihuajphqExnG056gagjvps7KUQuZIMOKxA/tio4KIxf6CAB8HAY83EgWB9zLLQyqQag%2ByxNB0w%2Bp6rZcnIAbBNiABSQgAPIRNiABK2AAGLBNgbgBhAr6CA69qOi68xlrJ8lKapGnabp%2BkQLOwYOomxZpggDqFkmBAph5Dp1pgDZNoQFlbjJcmKSpamaTpekGc5fYEA6S4rmuIYKClabgt%2BaVsQQChhZ2XKGouTBhBA8wDuenzxswbAKKmazCgQtDSeWFpoHRPZzkltYhsF/ZHEC1VZjW%2Bx8gAskwoorv1G7npGxqAeNS0mocZhmOuwbYlw5hmA6y0bWYbm%2BVwjwwi2m2HZt3nJudl37Q6lQaI8YYjW2pCLatR37dt2JmE9A7HadAMXWmQP7XdvlmODV0HfsXAABz%2BG9bbvd9Z6el9Y01lN2V4HKc2bCN%2BWarja0ratWMWMDGgOvT%2BwaJ9wNcAzDPve9OMddTNN089DMs0djOM1wnNtpjGO4xL4XcrjfLKI0Sj7DZETQciLAqt23ORruoEHsJlrWvQBsG1KCCYGmaL7PcTDW3NxEvFQaLxtq/pHiQlqYB8wAvEY54TmgeKHMcd77No4p%2BCAVAa9ibsOBA/2NqS8yPHSjuVa2Ulchwiy0Jw/i8H4HBaKQqCcG41jWGKyyrJgG2bDwpAEJoueLMGIAJOdXcJEjjeSEjZgAGwAJxcBogT5xwkhF63ZecLwlz0y3Je56QcCwDAiAoBKmL0GQFAQNKdCDLshjAFwQ8aPTNC0GSxCXBA0Rz9EYSNGinBN6/zDEGiynRNoa8n9eAAjYIIZSDBaAf1XqQLAPs3BiAJMA2BmBiRGHEDA/AxBrx4CvJcGBmBVA1DxOsUuhpMBT1Lo2aIdxf4eCwHPfMLBkFXmINENImAgSoPPo2IwrdFhUAMMABQAA1PAmB7jKWSIwZB/BBAiDEOwKQMhBCKBUOoGBug2YGD4aYSw1h9B4GiJcSAixUDJEcAIfBABaHMw09FWEsJUfY1jlJmF4PCOI4IsAmMqrYChODnAQFcGMPwbMQjTFKOUPQqR0iWKyJ4VoMSCjxL6FEuY/j7DxO6KMRJuQ2YdGyZMNJAwKjDB6KEvQpIeglNmBURY4oVhrAkHnAus8YHlw4HaJGQ9rFD0kFKHRwBEZD0eK9DQ%2BwIC4EIJ7LYXB5i8BXloeYiwLZMCwPEPxU8Z6kGYf4emxdS6dMXiAZe/D15bwgEgaG5BKDH33hEVg6xVA9L6QMs%2BRgRljLGbwJUMzvF6DkcIUQ4hlFArUWoOeWjSD3DuMkYBrSOCF1IIcjxnBlJ4h8vsOaLzen9MGefL54zJkeBYHvOIDd5mLP4e3EAkhRmj0kGYZGV9/Ajy7pffQnAdl7IOXPY5thTnNxpaQDuZgkaPHFcyoeKNKibA0EjEe9KuUcE2O0o5C9hWrxWSq9xKL%2BWaqWW3UgrD0jOEkEAA%3D%3D) ]
 

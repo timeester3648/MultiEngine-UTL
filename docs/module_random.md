@@ -4,7 +4,7 @@
 
 **random** module adds most of the sensible random functions one would need.
 
-Implements several random bit generators seamlessly compatible with [&lt;random&gt;](https://en.cppreference.com/w/cpp/header/random):
+It implements several random bit generators seamlessly compatible with [&lt;random&gt;](https://en.cppreference.com/w/cpp/header/random):
 
 - [32-bit Romu Trio PRNG](https://www.romu-random.org/)
 

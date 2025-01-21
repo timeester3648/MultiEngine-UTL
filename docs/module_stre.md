@@ -115,7 +115,7 @@ std::vector<std::string> split_by_delimiter(std::string_view str, std::string_vi
 
 Splits string `str` into a vector of `std::string` tokens based on `delimeter`.
 
-By default `keep_empty_tokens` is `false` and `""` is not considered to be a valid token — in case of leading / trailing / repeated delimiters, only non-empty tokens are going to be inserted into the resulting vector. Setting ``keep_empty_tokens` to `true` overrides this behavior and keeps all the empty tokens intact.
+By default `keep_empty_tokens` is `false` and `""` is not considered to be a valid token — in case of leading / trailing / repeated delimiters, only non-empty tokens are going to be inserted into the resulting vector. Setting `keep_empty_tokens` to `true` overrides this behavior and keeps all the empty tokens intact.
 
 ### Other utils
 

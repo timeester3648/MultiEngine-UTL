@@ -230,7 +230,7 @@ struct Range {
 
 A lightweight wrapper representing an **iterator range**.
 
-Constructor **(2)** create a range spanning `begin` to `end` and selects grain size automatically, which is **recommended in most cases**.
+Constructor **(2)** creates a range spanning `begin` to `end` and selects grain size automatically, which is **recommended in most cases**.
 
 Constructor **(3)** allows manual selection of `grain_size`.
 
@@ -249,7 +249,7 @@ struct IndexRange {
 
 A lightweight wrapper representing an **index range**.
 
-Constructor **(2)** create a range spanning `first` to `last` and selects grain size automatically, which is **recommended in most cases**.
+Constructor **(2)** creates a range spanning `first` to `last` and selects grain size automatically, which is **recommended in most cases**.
 
 Constructor **(3)** allows manual selection of `grain_size`.
 
@@ -426,7 +426,7 @@ assert( subrange_sum == (5'000'000 - 100) * 2 );
 
 While `utl::parallel` does not claim to provide superior performance to complex vendor-optimized libraries such as [OpenMP](https://en.wikipedia.org/wiki/OpenMP), [Intel TBB](https://github.com/uxlfoundation/oneTBB), [MPI](https://www.open-mpi.org) and etc., it provides a significant boost in both speed and convenience relative to the explicit use of [std::async](https://en.cppreference.com/w/cpp/thread/async) and [std::thread](https://en.cppreference.com/w/cpp/thread/thread) due to its ability to reuse threads and automatically distribute workload.
 
-Below are some of the [benchmarks](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/benchmarks/benchmark_parallel.cpp) comparing performance of different approaches on basic tasks using:
+Below are some of the [benchmarks](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/benchmarks/benchmark_parallel.cpp) comparing performance of different approaches on trivially parallelizable tasks:
 
 ```
 ====== BENCHMARKING ON: Parallel vector sum ======

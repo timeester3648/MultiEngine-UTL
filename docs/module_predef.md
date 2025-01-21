@@ -181,7 +181,7 @@ This is useful for conditional compilation based on available standard.
 
 `constexpr` string that evaluates to the name of the detected C++ standard. Possible values: `C++23`, `C++20`, `C++17`, `C++14`, `C++11`, `<unknown>`.
 
-**Note:** Considering that this is a C++17 library, the should be no feasible way to get values below `C++17`, however they are still provided for the sake of implementation completeness, shall the source code be copied directly.
+**Note:** Considering that this is a C++17 library, there should be no feasible way to get values below `C++17`, however they are still provided for the sake of implementation completeness, shall the source code be copied directly.
 
 ### Compilation mode detection
 
@@ -215,7 +215,7 @@ Hints (`MSVC`) or forces (`GCC`, `clang` and `ICX`) function inlining using comp
 
 Equivalent to [C++23 `[[assume(condition)]]`](https://en.cppreference.com/w/cpp/language/attributes/assume) that supports earlier standards using `MSVC` and `clang` built-ins.
 
-Invokes undefined behavior in statement `condition` evaluates to false, which provides compiler with additional optimization opportunities since implementations may assume that undefined behavior can never happen and the statement always holds.
+Invokes undefined behavior if statement `condition` evaluates to false, which provides compiler with additional optimization opportunities since implementations may assume that undefined behavior can never happen and the statement always holds.
 
 **Note**: Compiles to nothing if there is no suitable compiler support.
 
