@@ -33,9 +33,9 @@ Secondary design goals also include:
 | [**utl::mvl**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_mvl.md) | Flexible API for vector and matrix operations |
 | [**utl::parallel**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_parallel.md) | Thread pool, async tasks, parallel for, parallel reductions and etc. |
 | [**utl::predef**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_predef.md) | Detection of architectures, compilers, platforms and etc. |
-| [**utl::profiler**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_profiler.md) | Quick scope & expression profiling macros |
+| [**utl::profiler**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_profiler.md) | Scope & expression profiling macros |
 | [**utl::progressbar**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_progressbar.md) | Progress bars for CLI apps |
-| [**utl::random**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_random.md) | Sensible random functions |
+| [**utl::random**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_random.md) | PRNGs & random number generation |
 | [**utl::shell**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_shell.md) | Shell commands and temporary files |
 | [**utl::sleep**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_sleep.md) | Precise sleep implementations |
 | [**utl::stre**](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_stre.md) | Efficient implementations of common string utils |
@@ -88,7 +88,6 @@ While the library itself consists of a single header with no embedded dependenci
 * Temp file creation improvements for `utl::shell`;
 * Coordinate transformations in `utl::math`;
 * More type traits in `utl::math`;
-* `log::stringify()` implementation for stack-like and queue-like types;
 * Test coverage statistics.
 
 ## License
