@@ -1526,9 +1526,9 @@ void _assign_node_to_value_recursively(std::array<T, N>& value, const Node& node
 // naive either), a proper performance-oriented approach would use following things:
 //
 //    1. More 'constexpr' things to avoid having to constantly check styling conditions at runtime
-//   
+//
 //    2. A separate persistent thread to flush the buffer
-//   
+//
 //       Note: I did try using a stripped down version of 'utl::parallel::ThreadPool' to upload tasks
 //             for flushing the buffer, it generatly improves performance by ~30%, however I decided it
 //             is not worth the added complexity & cpu usage for that little gain
@@ -1537,7 +1537,7 @@ void _assign_node_to_value_recursively(std::array<T, N>& value, const Node& node
 //
 //    4. A centralized formatting & info querying facility so multiple sinks don't have to repeat
 //       formatting & querying logic.
-//   
+//
 //       Such facility would have to decide the bare minimum of work possible base on all existing
 //       sink options, perform the formatting, and then just distribute string view to actual sinks.
 //
@@ -1622,6 +1622,7 @@ utl_log_define_trait(_has_end, std::declval<T>().end());
 utl_log_define_trait(_has_input_it, std::next(std::declval<T>().begin()));
 utl_log_define_trait(_has_get, std::get<0>(std::declval<T>()));
 utl_log_define_trait(_has_tuple_size, std::tuple_size<T>::value);
+utl_log_define_trait(_has_container_type, std::declval<typename std::decay_t<T>::container_type>());
 utl_log_define_trait(_has_ostream_insert, std::declval<std::ostream>() << std::declval<T>());
 utl_log_define_trait(_is_pad_left, std::declval<std::decay_t<T>>().is_pad_left);
 utl_log_define_trait(_is_pad_right, std::declval<std::decay_t<T>>().is_pad_right);
@@ -1669,6 +1670,33 @@ constexpr int _max_int_digits = 2 + std::numeric_limits<T>::digits10;
 // +2 because 'digits10' returns last digit index rather than the number of digits
 // (aka 1 less than one would expect) and doesn't account for possible '-'.
 // Also note that ints use 'digits10' and not 'max_digits10' which is only valid for floats.
+
+// "Unwrapper" for container adaptors such as 'std::queue', 'std::priority_queue', 'std::stack'
+template <class Adaptor>
+const auto& _underlying_container_cref(const Adaptor& adaptor) {
+
+    struct Hack : private Adaptor {
+        using container_type = typename Adaptor::container_type;
+
+        static const container_type& get_container(const Adaptor& adp) {
+            return adp.*&Hack::c;
+            // An extremely hacky yet standard-compliant way of accessing protected member
+            // of a class without actually creating any instances of derived class.
+            //
+            // This is essentially 2 operators: '.*' and '&',
+            // '.*' takes an object on the left side, and a member pointer on the right side,
+            // and resolves the pointed-to member of the given object, this means
+            // 'object.*&Class::member' is essentially equivalent to 'object.member',
+            // except it reveals a "loophole" in protection semantics that allows us to interpret
+            // base class object as if it was derived class.
+            //
+            // Note that doing seemingly much more logical 'static_cast<Derived&>(object).member'
+            // is technically UB, even through most compilers will do the reasonable thing.
+        }
+    };
+
+    return Hack::get_container(adaptor);
+}
 
 // --- Alignment ---
 // -----------------
@@ -1768,6 +1796,11 @@ struct StringifierBase {
     static void append_tuple(std::string& buffer, const T& value) {
         self::_append_tuple_fwd(buffer, value);
     }
+    
+    template <class T>
+    static void append_adaptor(std::string& buffer, const T& value) {
+        derived::append(buffer, _underlying_container_cref(value));
+    }
 
     template <class T>
     static void append_printable(std::string& buffer, const T& value) {
@@ -1850,20 +1883,22 @@ private:
             derived::append_bool(buffer, value);
         // Char
         else if constexpr (std::is_same_v<T, char>) derived::append_string(buffer, value);
+        // 'std::string_view'-convertible (most strings and string-like types)
+        else if constexpr (std::is_convertible_v<T, std::string_view>) derived::append_string(buffer, value);
+        // 'std::string'-convertible (some "nastier" string-like types, mainly 'std::path')
+        else if constexpr (std::is_convertible_v<T, std::string>) derived::append_string(buffer, std::string(value));
         // Integral
         else if constexpr (std::is_integral_v<T>) derived::append_int(buffer, value);
         // Floating-point
         else if constexpr (std::is_floating_point_v<T>) derived::append_float(buffer, value);
         // Complex
         else if constexpr (_has_real_v<T> && _has_imag_v<T>) derived::append_complex(buffer, value);
-        // 'std::string_view'-convertible (most strings and string-like types)
-        else if constexpr (std::is_convertible_v<T, std::string_view>) derived::append_string(buffer, value);
-        // 'std::string'-convertible (some "nastier" string-like types, mainly 'std::path')
-        else if constexpr (std::is_convertible_v<T, std::string>) derived::append_string(buffer, std::string(value));
         // Array-like
         else if constexpr (_has_begin_v<T> && _has_end_v<T> && _has_input_it_v<T>) derived::append_array(buffer, value);
         // Tuple-like
         else if constexpr (_has_get_v<T> && _has_tuple_size_v<T>) derived::append_tuple(buffer, value);
+        // Container adaptor
+        else if constexpr (_has_container_type_v<T>) derived::append_adaptor(buffer, value);
         // 'std::ostream' printable
         else if constexpr (_has_ostream_insert_v<T>) derived::append_printable(buffer, value);
         // No valid stringification exists
@@ -2032,7 +2067,7 @@ private:
     Columns                                     columns;
     clock::time_point                           last_flushed;
     bool                                        print_header = true;
-    mutable std::mutex ostream_mutex;
+    mutable std::mutex                          ostream_mutex;
 
     friend struct _logger;
 
@@ -2135,11 +2170,11 @@ private:
         if (this->colors == Colors::ENABLE) buffer += _color_reset;
 
         this->ostream_ref().write(buffer.data(), buffer.size());
-        
+
         // 'std::ostream' isn't guaranteed to be thread-safe, even through many implementations seem to have
         // some thread-safety built into `std::cout` the same cannot be said about a generic 'std::ostream'
         std::lock_guard<std::mutex> ostream_lock(this->ostream_mutex);
-        
+
         // flush every message immediately
         if (this->flush_interval.count() == 0) {
             this->ostream_ref().flush();

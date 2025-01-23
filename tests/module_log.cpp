@@ -13,9 +13,12 @@
 #include <array>         // testing stringification
 #include <complex>       // testing stringification
 #include <cstdint>       // testing stringification
+#include <deque>         // testing stringification
 #include <filesystem>    // testing stringification
 #include <map>           // testing stringification
+#include <queue>         // testing stringification
 #include <set>           // testing stringification
+#include <stack>         // testing stringification
 #include <unordered_map> // testing stringification
 #include <unordered_set> // testing stringification
 #include <vector>        // testing stringification
@@ -51,6 +54,15 @@ TEST_CASE("Stringifier correctly handles bools") {
 }
 
 TEST_CASE("Stringifier correctly handles strings") {
+
+    struct StringViewConvertible {
+        operator std::string_view() const { return "<string_view>"; }
+    };
+
+    struct StringConvertible {
+        operator std::string() const { return "<string>"; }
+    };
+
     // Char
     CHECK(log::stringify('g') == "g");
 
@@ -58,9 +70,11 @@ TEST_CASE("Stringifier correctly handles strings") {
     CHECK(log::stringify("lorem ipsum") == "lorem ipsum");
     CHECK(log::stringify("lorem ipsum"s) == "lorem ipsum");
     CHECK(log::stringify("lorem ipsum"sv) == "lorem ipsum");
+    CHECK(log::stringify(StringViewConvertible{}) == "<string_view>");
 
     // String-convertible
     CHECK(log::stringify(fs::path("lorem/ipsum")) == "lorem/ipsum");
+    CHECK(log::stringify(StringConvertible{}) == "<string_view>");
 }
 
 TEST_CASE("Stringifier correctly handles integers") {
@@ -113,6 +127,28 @@ TEST_CASE("Stringifier correctly handles arrays") {
     CHECK(log::stringify(std::array{1, 2, 3}) == "{ 1, 2, 3 }");
     CHECK(log::stringify(std::vector{1, 2, 3}) == "{ 1, 2, 3 }");
     CHECK(log::stringify(std::set{1, 2, 3}) == "{ 1, 2, 3 }");
+    CHECK(log::stringify(std::deque{1, 2, 3}) == "{ 1, 2, 3 }");
+}
+
+TEST_CASE("Stringifier correctly container adaptors") {
+
+    class ContainerAdaptor {
+    public:
+        using container_type = std::tuple<std::string, std::string>;
+
+        ContainerAdaptor(container_type&& container) : c(container) {}
+
+    protected:
+        container_type c;
+    };
+
+    const auto dq = std::deque{1, 2, 3};
+    const auto tp = std::tuple{"lorem", "ipsum"};
+
+    CHECK(log::stringify(std::queue{dq}) == "{ 1, 2, 3 }");
+    CHECK(log::stringify(std::priority_queue{std::less<>{}, dq}) == "{ 1, 2, 3 }");
+    CHECK(log::stringify(std::stack{dq}) == "{ 1, 2, 3 }");
+    CHECK(log::stringify(ContainerAdaptor{tp}) == "< lorem, ipsum >");
 }
 
 TEST_CASE("Stringifier correctly handles tuples") {
@@ -218,12 +254,12 @@ TEST_CASE("Stringifier customization correctly overrides formatting of specific 
 
 TEST_CASE("Logger correctly formats deterministic columns") {
     std::ostringstream oss;
-    
+
     // Now is also a goot time to test sink setters
     auto& sink = log::add_ostream_sink(oss);
     // sink.set_colors(log::Colors::DISABLE);
-    
+
     const auto expected_output = "";
-    
+
     // CHECK(oss.str() == expected_output);
 }

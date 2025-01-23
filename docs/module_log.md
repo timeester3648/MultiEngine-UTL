@@ -418,6 +418,7 @@ template <class... Args> std::string operator()(Args&&... args);
                 template <class T> static void append_string(   std::string& buffer, const T& value);
                 template <class T> static void append_array(    std::string& buffer, const T& value);
                 template <class T> static void append_tuple(    std::string& buffer, const T& value);
+                template <class T> static void append_adaptor(  std::string& buffer, const T& value);
                 template <class T> static void append_printable(std::string& buffer, const T& value);
 ```
 
@@ -497,7 +498,8 @@ Most custom containers should be compatible with `log::Stringifier` (and by cons
 | `append_complex()`   | **5**    | `T` has `real()`, `imag()` methods                           |
 | `append_array()`     | **6**    | `T` has `begin()`, `end()` methods that return an incrementable iterator |
 | `append_tuple()`     | **7**    | `T` supports `std::get<>()` and `std::tuple_size()`          |
-| `append_printable()` | **8**    | `T` supports `std::ostream` output with `operator <<`        |
+| `append_adaptor()`   | **8**    | `T` has member type `container_type`                         |
+| `append_printable()` | **9**    | `T` supports `std::ostream` output with `operator <<`        |
 
 If none of this is the case, the easiest way would be to just declare an `std::ostream` output operator like this:
 
