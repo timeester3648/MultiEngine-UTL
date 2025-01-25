@@ -8,21 +8,21 @@
 //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-#include <algorithm>
-#include <initializer_list>
 #if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_MATH)
 #ifndef UTLHEADERGUARD_MATH
 #define UTLHEADERGUARD_MATH
 
 // _______________________ INCLUDES _______________________
 
-#include <cassert>     // assert()
-#include <cstddef>     // size_t
-#include <functional>  // function<>
-#include <type_traits> // enable_if_t<>, void_t<>, is_floating_point<>, is_arithmetic<>,
-                       // conditional_t<>, is_integral<>, true_type, false_type
-#include <utility>     // declval<>()
-#include <vector>      // vector<>
+#include <cassert>          // assert()
+#include <cstddef>          // size_t
+#include <functional>       // function<>
+#include <type_traits>      // enable_if_t<>, void_t<>, is_floating_point<>, is_arithmetic<>,
+                            // conditional_t<>, is_integral<>, true_type, false_type
+#include <algorithm>        // sort()
+#include <initializer_list> // initializer_list<>
+#include <utility>          // declval<>(), move()
+#include <vector>           // vector<>
 
 // ____________________ DEVELOPER DOCS ____________________
 
@@ -249,43 +249,42 @@ template <class FloatType, class FuncType, std::enable_if_t<std::is_floating_poi
 // class Range {
 //     Idx low;
 //     Idx high;
-    
+
 //     constexpr Range(Idx low, Idx high) : low(low), high(high) {}
-    
+
 //     [[nodiscard]] constexpr Idx front() const noexcept { return this->low; }
 //     [[nodiscard]] constexpr Idx back() const noexcept { return this->high; }
 //     [[nodiscard]] constexpr Idx size() const noexcept { return this->high - this->low; }
 //     [[nodiscard]] constexpr Idx operator[](Idx pos) const noexcept { return this->low + pos; }
-    
+
 //     // Iterator stuff
 // };
 
-template<class ArrayType>
+template <class ArrayType>
 bool is_permutation(const ArrayType& array) {
     std::vector<std::size_t> p(array.size()); // Note: "non-allocating range adapter" would fit like a glove here
     for (std::size_t i = 0; i < p.size(); ++i) p[i] = i;
-    
+
     return std::is_permutation(array.begin(), array.end(), p.begin()); // I'm surprised it exists in the standard
 }
 
-template<class ArrayType, class PermutationType = std::initializer_list<std::size_t>>
-void apply_permutation(ArrayType &vector, const PermutationType& permutation) {
+template <class ArrayType, class PermutationType = std::initializer_list<std::size_t>>
+void apply_permutation(ArrayType& vector, const PermutationType& permutation) {
     ArrayType res(vector.size());
-    
+
     typename ArrayType::size_type emplace_idx = 0;
     for (auto i : permutation) res[emplace_idx++] = std::move(vector[i]);
     vector = std::move(res);
 }
 
-template<class ArrayType, class Compare = std::less<>>
-std::vector<std::size_t> get_sorting_permutation(const ArrayType &array, Compare comp = Compare()) {
+template <class ArrayType, class Compare = std::less<>>
+std::vector<std::size_t> get_sorting_permutation(const ArrayType& array, Compare comp = Compare()) {
     std::vector<std::size_t> permutation(array.size());
     for (std::size_t i = 0; i < permutation.size(); ++i) permutation[i] = i;
-    
-    std::sort(permutation.begin(), permutation.end(), [&](const auto& lhs, const auto& rhs){
-        return comp(array[lhs], array[rhs]);
-    });
-    
+
+    std::sort(permutation.begin(), permutation.end(),
+              [&](const auto& lhs, const auto& rhs) { return comp(array[lhs], array[rhs]); });
+
     return permutation;
 }
 

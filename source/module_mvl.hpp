@@ -8,19 +8,19 @@
 //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-#include <string_view>
 #if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_MVL)
 #ifndef UTLHEADERGUARD_MVL
 #define UTLHEADERGUARD_MVL
 
 // _______________________ INCLUDES _______________________
 
-#include <algorithm> // swap(), find(), count(), is_sorted(), min_element(),
-                     // max_element(), sort(), stable_sort(), min(), max(), remove_if(), copy()
-#include <cassert>   // assert() // Note: Perhaps temporary
-#include <charconv>
+#include <algorithm>        // swap(), find(), count(), is_sorted(), min_element(),
+                            // max_element(), sort(), stable_sort(), min(), max(), remove_if(), copy()
+#include <cassert>          // assert() // Note: Perhaps temporary
+#include <charconv>         // to_chars()
 #include <cmath>            // isfinite()
 #include <cstddef>          // size_t, ptrdiff_t, nullptr_t
+#include <exception>        // exception
 #include <functional>       // reference_wrapper<>, multiplies<>
 #include <initializer_list> // initializer_list<>
 #include <iomanip>          // setw()
@@ -32,6 +32,7 @@
 #include <sstream>          // ostringstream
 #include <stdexcept>        // out_of_range, invalid_argument
 #include <string>           // string
+#include <string_view>      // string_view<>
 #include <type_traits>      // conditional_t<>, enable_if_t<>, void_t<>, true_type, false_type, remove_reference_t<>
 #include <utility>          // move()
 #include <vector>           // vector<>

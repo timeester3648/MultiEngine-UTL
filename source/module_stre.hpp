@@ -8,9 +8,6 @@
 //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-#include <exception>
-#include <stdexcept>
-#include <vector>
 #if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_STRE)
 #ifndef UTLHEADERGUARD_STRE
 #define UTLHEADERGUARD_STRE
@@ -20,14 +17,17 @@
 #include <algorithm>   // transform()
 #include <cctype>      // tolower(), toupper()
 #include <cstddef>     // size_t
+#include <exception>   // exception
 #include <iomanip>     // setfill(), setw()
 #include <ostream>     // ostream
 #include <sstream>     // ostringstream
+#include <stdexcept>   // invalid_argument
 #include <string>      // string
 #include <string_view> // string_view
 #include <tuple>       // tuple<>, get<>()
 #include <type_traits> // false_type, true_type, void_t<>, is_convertible<>, enable_if_t<>
 #include <utility>     // declval<>(), index_sequence<>
+#include <vector>      // vector<>
 
 // ____________________ DEVELOPER DOCS ____________________
 
@@ -298,9 +298,9 @@ template <class T>
 [[nodiscard]] inline std::size_t index_of_difference(std::string_view str_1, std::string_view str_2) {
     using namespace std::string_literals;
     if (str_1.size() != str_2.size())
-        throw std::logic_error("String {"s + std::string(str_1) + "} of size "s + std::to_string(str_1.size()) +
-                               " and {"s + std::string(str_2) + "} of size "s + std::to_string(str_2.size()) +
-                               " do not have a meaningful index of difference due to incompatible sizes."s);
+        throw std::invalid_argument("String {"s + std::string(str_1) + "} of size "s + std::to_string(str_1.size()) +
+                                    " and {"s + std::string(str_2) + "} of size "s + std::to_string(str_2.size()) +
+                                    " do not have a meaningful index of difference due to incompatible sizes."s);
     for (std::size_t i = 0; i < str_1.size(); ++i)
         if (str_1[i] != str_2[i]) return i;
     return str_1.size();

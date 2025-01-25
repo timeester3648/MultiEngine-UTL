@@ -1,5 +1,188 @@
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ DmitriBogdanov/prototyping_utils ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //
+// Module:        utl::enum_reflect
+// Documentation: https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_enum_reflect.md
+// Source repo:   https://github.com/DmitriBogdanov/prototyping_utils
+//
+// This project is licensed under the MIT License
+//
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+#if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_ENUM_REFLECT)
+#ifndef UTLHEADERGUARD_ENUM_REFLECT
+#define UTLHEADERGUARD_ENUM_REFLECT
+
+// _______________________ INCLUDES _______________________
+
+#include <array>       // array<>
+#include <cstddef>     // size_t
+#include <stdexcept>   // out_of_range
+#include <string>      // string
+#include <string_view> // string_view
+#include <type_traits> // underlying_type_t
+#include <utility>     // pair<>
+
+// ____________________ DEVELOPER DOCS ____________________
+
+// Reflection mechanism is based entirely around the map macro and a single struct with partial specialization for the
+// reflected enum. Map macro itself is quire non-trivial, but completely standard, a good explanation of how it works
+// can be found here: [https://github.com/swansontec/map-macro].
+//
+// Once we have a map macro all reflection is a matter of simply mapping __VA_ARGS__ into a few "metadata"
+// arrays which we will then traverse to perform string conversions.
+//
+// Partial specialization allows for a pretty concise implementation and provides nice error messages due to
+// static_assert on incorrect template arguments.
+//
+// An alternative frequently used way to do enum reflection is through constexpr parsing of strings returned by
+// compiler-specific '__PRETTY_FUNCTION__' and '__FUNCSIG__', it has a benefit of not requiring the reflection
+// macro however it hammers compile times and improses restrictions on enum values. Some issues such as binary
+// bloat and bitflag-enums can be worked around through proper implementation and some conditional metadata
+// templates, however such approach seems to be quite complex and unreliable (due to being compiler-specific),
+// better leave it to continuously supported libs like 'magic_enum'.
+
+// ____________________ IMPLEMENTATION ____________________
+
+namespace utl::enum_reflect {
+
+// =================
+// --- Map macro ---
+// =================
+
+#define utl_erfl_eval_0(...) __VA_ARGS__
+#define utl_erfl_eval_1(...) utl_erfl_eval_0(utl_erfl_eval_0(utl_erfl_eval_0(__VA_ARGS__)))
+#define utl_erfl_eval_2(...) utl_erfl_eval_1(utl_erfl_eval_1(utl_erfl_eval_1(__VA_ARGS__)))
+#define utl_erfl_eval_3(...) utl_erfl_eval_2(utl_erfl_eval_2(utl_erfl_eval_2(__VA_ARGS__)))
+#define utl_erfl_eval_4(...) utl_erfl_eval_3(utl_erfl_eval_3(utl_erfl_eval_3(__VA_ARGS__)))
+#define utl_erfl_eval(...) utl_erfl_eval_4(utl_erfl_eval_4(utl_erfl_eval_4(__VA_ARGS__)))
+
+#define utl_erfl_map_end(...)
+#define utl_erfl_map_out
+#define utl_erfl_map_comma ,
+
+#define utl_erfl_map_get_end_2() 0, utl_erfl_map_end
+#define utl_erfl_map_get_end_1(...) utl_erfl_map_get_end_2
+#define utl_erfl_map_get_end(...) utl_erfl_map_get_end_1
+#define utl_erfl_map_next_0(test, next, ...) next utl_erfl_map_out
+#define utl_erfl_map_next_1(test, next) utl_erfl_map_next_0(test, next, 0)
+#define utl_erfl_map_next(test, next) utl_erfl_map_next_1(utl_erfl_map_get_end test, next)
+
+#define utl_erfl_map_0(f, x, peek, ...) f(x) utl_erfl_map_next(peek, utl_erfl_map_1)(f, peek, __VA_ARGS__)
+#define utl_erfl_map_1(f, x, peek, ...) f(x) utl_erfl_map_next(peek, utl_erfl_map_0)(f, peek, __VA_ARGS__)
+
+#define utl_erfl_map_list_next_1(test, next) utl_erfl_map_next_0(test, utl_erfl_map_comma next, 0)
+#define utl_erfl_map_list_next(test, next) utl_erfl_map_list_next_1(utl_erfl_map_get_end test, next)
+
+#define utl_erfl_map_list_0(f, x, peek, ...)                                                                           \
+    f(x) utl_erfl_map_list_next(peek, utl_erfl_map_list_1)(f, peek, __VA_ARGS__)
+#define utl_erfl_map_list_1(f, x, peek, ...)                                                                           \
+    f(x) utl_erfl_map_list_next(peek, utl_erfl_map_list_0)(f, peek, __VA_ARGS__)
+
+// Applies the function macro 'f' to all '__VA_ARGS__'
+#define utl_erfl_map(f, ...) utl_erfl_eval(utl_erfl_map_1(f, __VA_ARGS__, ()()(), ()()(), ()()(), 0))
+
+// Applies the function macro 'f' to to all '__VA_ARGS__' and inserts commas between the results
+#define utl_erfl_map_list(f, ...) utl_erfl_eval(utl_erfl_map_list_1(f, __VA_ARGS__, ()()(), ()()(), ()()(), 0))
+
+// Note: 'erfl' is short for 'enum_reflect'
+
+// =======================
+// --- Enum reflection ---
+// =======================
+
+// --- Implementation ---
+// ----------------------
+
+template <class>
+constexpr bool _always_false_v = false;
+
+template <class E>
+struct _meta {
+    static_assert(_always_false_v<E>,
+                  "Provided enum does not have a defined reflection. Use 'UTL_ENUM_REFLECT' macro to define one.");
+    // makes instantiation of this template a compile-time error
+};
+
+// Helper macros for codegen
+#define utl_erfl_make_value(arg_) type::arg_
+#define utl_erfl_make_name(arg_) std::string_view(#arg_)
+#define utl_erfl_make_entry(arg_)                                                                                      \
+    std::pair { std::string_view(#arg_), type::arg_ }
+
+#define UTL_ENUM_REFLECT(enum_name_, ...)                                                                              \
+    template <>                                                                                                        \
+    struct utl::enum_reflect::_meta<enum_name_> {                                                                      \
+        using type            = enum_name_;                                                                            \
+        using underlying_type = std::underlying_type_t<type>;                                                          \
+                                                                                                                       \
+        constexpr static std::string_view type_name = #enum_name_;                                                     \
+                                                                                                                       \
+        constexpr static auto names   = std::array{utl_erfl_map_list(utl_erfl_make_name, __VA_ARGS__)};                \
+        constexpr static auto values  = std::array{utl_erfl_map_list(utl_erfl_make_value, __VA_ARGS__)};               \
+        constexpr static auto entries = std::array{utl_erfl_map_list(utl_erfl_make_entry, __VA_ARGS__)};               \
+                                                                                                                       \
+        constexpr static std::size_t size = std::tuple_size_v<decltype(_meta::values)>;                                \
+                                                                                                                       \
+        constexpr static std::string_view to_string(type val) {                                                        \
+            for (const auto& [name, value] : _meta::entries)                                                           \
+                if (val == value) return name;                                                                         \
+                                                                                                                       \
+            using namespace std::string_literals;                                                                      \
+            throw std::out_of_range("rfl::_meta<"s + std::string(_meta::type_name) + ">::to_string(): value "s +       \
+                                    std::to_string(static_cast<underlying_type>(val)) +                                \
+                                    " is not a part of enumeration."s);                                                \
+        }                                                                                                              \
+                                                                                                                       \
+        constexpr static type from_string(std::string_view str) {                                                      \
+            for (const auto& [name, value] : _meta::entries)                                                           \
+                if (str == name) return value;                                                                         \
+                                                                                                                       \
+            using namespace std::string_literals;                                                                      \
+            throw std::out_of_range("rfl::_meta<"s + std::string(_meta::type_name) + ">::from_string(): name \""s +    \
+                                    std::string(str) + "\" is not a part of enumeration."s);                           \
+        }                                                                                                              \
+    }
+
+// --- Public API ---
+// ------------------
+
+template <class E>
+constexpr auto type_name = _meta<E>::type_name;
+
+template <class E>
+constexpr auto names = _meta<E>::names;
+
+template <class E>
+constexpr auto values = _meta<E>::values;
+
+template <class E>
+constexpr auto entries = _meta<E>::entries;
+
+template <class E>
+constexpr auto size = _meta<E>::size;
+
+template <class E>
+constexpr auto to_string(E value) {
+    return _meta<E>::to_string(value);
+}
+
+template <class E>
+constexpr auto from_string(std::string_view str) {
+    return _meta<E>::from_string(str);
+}
+
+} // namespace utl::enum_reflect
+
+#endif
+#endif // module utl::enum_reflect
+
+
+
+
+
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ DmitriBogdanov/prototyping_utils ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+//
 // Module:        utl::json
 // Documentation: https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_json.md
 // Source repo:   https://github.com/DmitriBogdanov/prototyping_utils
@@ -8,7 +191,6 @@
 //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-#include <memory>
 #if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_JSON)
 #ifndef UTLHEADERGUARD_JSON
 #define UTLHEADERGUARD_JSON
@@ -21,6 +203,7 @@
 #include <codecvt>          // codecvt_utf8<>
 #include <cstddef>          // size_t
 #include <cuchar>           // size_t, char32_t, mbstate_t
+#include <exception>        // exception
 #include <fstream>          // ifstream, ofstream
 #include <initializer_list> // initializer_list<>
 #include <limits>           // numeric_limits<>::max_digits10, numeric_limits<>::max_exponent10
@@ -29,10 +212,11 @@
 #include <string>           // string, stoul()
 #include <string_view>      // string_view
 #include <system_error>     // errc()
-#include <type_traits> // enable_if_t<>, void_t, is_convertible_v<>, is_same_v<>, conjunction<>, disjunction<>, negation<>
-#include <utility>     // move(), declval<>()
-#include <variant>     // variant<>
-#include <vector>      // vector<>
+#include <type_traits>      // enable_if_t<>, void_t, is_convertible_v<>, is_same_v<>,
+                            // conjunction<>, disjunction<>, negation<>
+#include <utility>          // move(), declval<>()
+#include <variant>          // variant<>
+#include <vector>           // vector<>
 
 // ____________________ DEVELOPER DOCS ____________________
 
@@ -173,7 +357,7 @@ utl_json_define_trait(_has_mapped_type, std::declval<typename std::decay_t<T>::m
 // 'static_assert(_always_false_v<T)' on the the other hand doesn't,
 // which means we can use it to mark branches that should never compile.
 template <class>
-inline constexpr bool _always_false_v = false;
+constexpr bool _always_false_v = false;
 
 // --- MAP macro ---
 // -----------------
@@ -1483,7 +1667,6 @@ void _assign_node_to_value_recursively(std::array<T, N>& value, const Node& node
 //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-#include <tuple>
 #if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_LOG)
 #ifndef UTLHEADERGUARD_LOG
 #define UTLHEADERGUARD_LOG
@@ -1494,6 +1677,7 @@ void _assign_node_to_value_recursively(std::array<T, N>& value, const Node& node
 #include <charconv>      // to_chars()
 #include <chrono>        // steady_clock
 #include <cstddef>       // size_t
+#include <exception>     // exception
 #include <fstream>       // ofstream
 #include <iostream>      // cout
 #include <iterator>      // next()
@@ -1507,6 +1691,7 @@ void _assign_node_to_value_recursively(std::array<T, N>& value, const Node& node
 #include <string_view>   // string_view
 #include <system_error>  // errc()
 #include <thread>        // this_thread::get_id()
+#include <tuple>         // tuple_size<>
 #include <type_traits>   // is_integral_v<>, is_floating_point_v<>, is_same_v<>, is_convertible_to_v<>
 #include <unordered_map> // unordered_map<>
 #include <utility>       // forward<>()
@@ -1652,7 +1837,7 @@ utl_log_define_trait(_is_pad, std::declval<std::decay_t<T>>().is_pad);
 // ----------------------
 
 template <class>
-inline constexpr bool _always_false_v = false;
+constexpr bool _always_false_v = false;
 
 template <class T>
 constexpr int _log_10_ceil(T num) {
@@ -1796,7 +1981,7 @@ struct StringifierBase {
     static void append_tuple(std::string& buffer, const T& value) {
         self::_append_tuple_fwd(buffer, value);
     }
-    
+
     template <class T>
     static void append_adaptor(std::string& buffer, const T& value) {
         derived::append(buffer, _underlying_container_cref(value));
@@ -2366,21 +2551,21 @@ inline Sink& add_file_sink(const std::string& filename, OpenMode open_mode = Ope
 //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-#include <algorithm>
-#include <initializer_list>
 #if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_MATH)
 #ifndef UTLHEADERGUARD_MATH
 #define UTLHEADERGUARD_MATH
 
 // _______________________ INCLUDES _______________________
 
-#include <cassert>     // assert()
-#include <cstddef>     // size_t
-#include <functional>  // function<>
-#include <type_traits> // enable_if_t<>, void_t<>, is_floating_point<>, is_arithmetic<>,
-                       // conditional_t<>, is_integral<>, true_type, false_type
-#include <utility>     // declval<>()
-#include <vector>      // vector<>
+#include <cassert>          // assert()
+#include <cstddef>          // size_t
+#include <functional>       // function<>
+#include <type_traits>      // enable_if_t<>, void_t<>, is_floating_point<>, is_arithmetic<>,
+                            // conditional_t<>, is_integral<>, true_type, false_type
+#include <algorithm>        // sort()
+#include <initializer_list> // initializer_list<>
+#include <utility>          // declval<>(), move()
+#include <vector>           // vector<>
 
 // ____________________ DEVELOPER DOCS ____________________
 
@@ -2607,43 +2792,42 @@ template <class FloatType, class FuncType, std::enable_if_t<std::is_floating_poi
 // class Range {
 //     Idx low;
 //     Idx high;
-    
+
 //     constexpr Range(Idx low, Idx high) : low(low), high(high) {}
-    
+
 //     [[nodiscard]] constexpr Idx front() const noexcept { return this->low; }
 //     [[nodiscard]] constexpr Idx back() const noexcept { return this->high; }
 //     [[nodiscard]] constexpr Idx size() const noexcept { return this->high - this->low; }
 //     [[nodiscard]] constexpr Idx operator[](Idx pos) const noexcept { return this->low + pos; }
-    
+
 //     // Iterator stuff
 // };
 
-template<class ArrayType>
+template <class ArrayType>
 bool is_permutation(const ArrayType& array) {
     std::vector<std::size_t> p(array.size()); // Note: "non-allocating range adapter" would fit like a glove here
     for (std::size_t i = 0; i < p.size(); ++i) p[i] = i;
-    
+
     return std::is_permutation(array.begin(), array.end(), p.begin()); // I'm surprised it exists in the standard
 }
 
-template<class ArrayType, class PermutationType = std::initializer_list<std::size_t>>
-void apply_permutation(ArrayType &vector, const PermutationType& permutation) {
+template <class ArrayType, class PermutationType = std::initializer_list<std::size_t>>
+void apply_permutation(ArrayType& vector, const PermutationType& permutation) {
     ArrayType res(vector.size());
-    
+
     typename ArrayType::size_type emplace_idx = 0;
     for (auto i : permutation) res[emplace_idx++] = std::move(vector[i]);
     vector = std::move(res);
 }
 
-template<class ArrayType, class Compare = std::less<>>
-std::vector<std::size_t> get_sorting_permutation(const ArrayType &array, Compare comp = Compare()) {
+template <class ArrayType, class Compare = std::less<>>
+std::vector<std::size_t> get_sorting_permutation(const ArrayType& array, Compare comp = Compare()) {
     std::vector<std::size_t> permutation(array.size());
     for (std::size_t i = 0; i < permutation.size(); ++i) permutation[i] = i;
-    
-    std::sort(permutation.begin(), permutation.end(), [&](const auto& lhs, const auto& rhs){
-        return comp(array[lhs], array[rhs]);
-    });
-    
+
+    std::sort(permutation.begin(), permutation.end(),
+              [&](const auto& lhs, const auto& rhs) { return comp(array[lhs], array[rhs]); });
+
     return permutation;
 }
 
@@ -2710,19 +2894,19 @@ template <class IntType, std::enable_if_t<std::is_integral<IntType>::value, bool
 //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-#include <string_view>
 #if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_MVL)
 #ifndef UTLHEADERGUARD_MVL
 #define UTLHEADERGUARD_MVL
 
 // _______________________ INCLUDES _______________________
 
-#include <algorithm> // swap(), find(), count(), is_sorted(), min_element(),
-                     // max_element(), sort(), stable_sort(), min(), max(), remove_if(), copy()
-#include <cassert>   // assert() // Note: Perhaps temporary
-#include <charconv>
+#include <algorithm>        // swap(), find(), count(), is_sorted(), min_element(),
+                            // max_element(), sort(), stable_sort(), min(), max(), remove_if(), copy()
+#include <cassert>          // assert() // Note: Perhaps temporary
+#include <charconv>         // to_chars()
 #include <cmath>            // isfinite()
 #include <cstddef>          // size_t, ptrdiff_t, nullptr_t
+#include <exception>        // exception
 #include <functional>       // reference_wrapper<>, multiplies<>
 #include <initializer_list> // initializer_list<>
 #include <iomanip>          // setw()
@@ -2734,6 +2918,7 @@ template <class IntType, std::enable_if_t<std::is_integral<IntType>::value, bool
 #include <sstream>          // ostringstream
 #include <stdexcept>        // out_of_range, invalid_argument
 #include <string>           // string
+#include <string_view>      // string_view<>
 #include <type_traits>      // conditional_t<>, enable_if_t<>, void_t<>, true_type, false_type, remove_reference_t<>
 #include <utility>          // move()
 #include <vector>           // vector<>
@@ -6115,7 +6300,7 @@ constexpr bool debug =
 #endif
 
 // Force noinline
-#if defined (_MSC_VER)
+#if defined(_MSC_VER)
 #define UTL_PREDEF_FORCE_NOINLINE __declspec((noinline))
 #elif defined(__GNUC__) || defined(__clang__) || defined(__INTEL_COMPILER)
 #define UTL_PREDEF_FORCE_NOINLINE __attribute__((noinline))
@@ -6267,7 +6452,7 @@ __builtin_assume(__VA_ARGS__)
 //
 // This macro saves MASSIVE amount of boilerplate in some cases, making for a much more expressive "trait definitions".
 
-#define UTL_PREDEF_TYPE_TRAIT(trait_name_, ...)                                                                         \
+#define UTL_PREDEF_TYPE_TRAIT(trait_name_, ...)                                                                        \
     template <class T, class = void>                                                                                   \
     struct trait_name_ : std::false_type {};                                                                           \
                                                                                                                        \
@@ -6281,20 +6466,20 @@ __builtin_assume(__VA_ARGS__)
     using trait_name_##_enable_if = std::enable_if_t<trait_name_<T>::value, bool>
 
 // Shortcuts for different types of requirements
-#define UTL_PREDEF_TYPE_TRAIT_HAS_BINARY_OP(trait_name_, op_)                                                           \
+#define UTL_PREDEF_TYPE_TRAIT_HAS_BINARY_OP(trait_name_, op_)                                                          \
     UTL_PREDEF_TYPE_TRAIT(trait_name_, std::declval<std::decay_t<T>>() op_ std::declval<std::decay_t<T>>())
 
-#define UTL_PREDEF_TYPE_TRAIT_HAS_ASSIGNMENT_OP(trait_name_, op_)                                                       \
+#define UTL_PREDEF_TYPE_TRAIT_HAS_ASSIGNMENT_OP(trait_name_, op_)                                                      \
     UTL_PREDEF_TYPE_TRAIT(trait_name_, std::declval<std::decay_t<T>&>() op_ std::declval<std::decay_t<T>>())
 // for operators like '+=' lhs should be a reference
 
-#define UTL_PREDEF_TYPE_TRAIT_HAS_UNARY_OP(trait_name_, op_)                                                            \
+#define UTL_PREDEF_TYPE_TRAIT_HAS_UNARY_OP(trait_name_, op_)                                                           \
     UTL_PREDEF_TYPE_TRAIT(trait_name_, op_ std::declval<std::decay_t<T>>())
 
-#define UTL_PREDEF_TYPE_TRAIT_HAS_MEMBER(trait_name_, member_)                                                          \
+#define UTL_PREDEF_TYPE_TRAIT_HAS_MEMBER(trait_name_, member_)                                                         \
     UTL_PREDEF_TYPE_TRAIT(trait_name_, std::declval<std::decay_t<T>>().member_)
 
-#define UTL_PREDEF_TYPE_TRAIT_HAS_MEMBER_TYPE(trait_name_, member_)                                                     \
+#define UTL_PREDEF_TYPE_TRAIT_HAS_MEMBER_TYPE(trait_name_, member_)                                                    \
     UTL_PREDEF_TYPE_TRAIT(trait_name_, std::declval<typename std::decay_t<T>::member_>())
 
 // --- Enum with string conversion ---
@@ -6354,7 +6539,7 @@ inline void _split_enum_args(const char* va_args, std::string* strings, int coun
 
 #define UTL_PREDEF_IS_FUNCTION_DEFINED(function_name_, return_type_, ...)                                              \
     template <class ReturnType, class... ArgTypes>                                                                     \
-    class utl_is_function_defined_impl_##function_name_ {                                                             \
+    class utl_is_function_defined_impl_##function_name_ {                                                              \
     private:                                                                                                           \
         typedef char no[sizeof(ReturnType) + 1];                                                                       \
                                                                                                                        \
@@ -7101,14 +7286,14 @@ public:
 
 // _______________________ INCLUDES _______________________
 
+#include <array>            // array<>
+#include <chrono>           // high_resolution_clock
 #include <cstdint>          // uint64_t
 #include <initializer_list> // initializer_list<>
 #include <limits>           // numeric_limits<>::digits, numeric_limits<>::min(), numeric_limits<>::max()
+#include <mutex>            // mutex, lock_guard<>
 #include <random>           // random_device, std::uniform_int_distribution<>,
                             // std::uniform_real_distribution<>, generate_canonical<>
-#include <array>            // array<>
-#include <chrono>           // high_resolution_clock
-#include <mutex>            // mutex, lock_guard<>
 #include <type_traits>      // is_integral_v<>
 #include <utility>          // declval<>()
 
@@ -7935,7 +8120,7 @@ namespace utl::shell {
     std::string result(length, '0');
     for (std::size_t i = 0; i < length; ++i)
         result[i] = static_cast<char>(min_char + std::rand() % (max_char - min_char + 1));
-    // we don't really care about the quality of random here, and we already include <cstdlib>, 
+    // we don't really care about the quality of random here, and we already include <cstdlib>,
     // so rand() is fine, otherwise we'd have to include the entirety of <random> for this function
     return result;
 }
@@ -7958,7 +8143,7 @@ inline void erase_temp_file(const std::string& file) {
 inline std::string generate_temp_file() {
     // No '[[nodiscard]]' since the function could still be used to generate files without
     // actually accessing them (through the returned path) in the same program.
-    
+
     constexpr std::size_t MAX_ATTEMPTS = 500; // shouldn't realistically be encountered but still
     constexpr std::size_t NAME_LENGTH  = 30;
 
@@ -8108,7 +8293,7 @@ inline CommandResult run_command(const std::string& command) {
 // ____________________ IMPLEMENTATION ____________________
 
 namespace utl::sleep {
-    
+
 // =============================
 // --- Sleep Implementations ---
 // =============================
@@ -8176,9 +8361,6 @@ inline void system(double ms) { std::this_thread::sleep_for(_chrono_ns(static_ca
 //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-#include <exception>
-#include <stdexcept>
-#include <vector>
 #if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_STRE)
 #ifndef UTLHEADERGUARD_STRE
 #define UTLHEADERGUARD_STRE
@@ -8188,14 +8370,17 @@ inline void system(double ms) { std::this_thread::sleep_for(_chrono_ns(static_ca
 #include <algorithm>   // transform()
 #include <cctype>      // tolower(), toupper()
 #include <cstddef>     // size_t
+#include <exception>   // exception
 #include <iomanip>     // setfill(), setw()
 #include <ostream>     // ostream
 #include <sstream>     // ostringstream
+#include <stdexcept>   // invalid_argument
 #include <string>      // string
 #include <string_view> // string_view
 #include <tuple>       // tuple<>, get<>()
 #include <type_traits> // false_type, true_type, void_t<>, is_convertible<>, enable_if_t<>
 #include <utility>     // declval<>(), index_sequence<>
+#include <vector>      // vector<>
 
 // ____________________ DEVELOPER DOCS ____________________
 
@@ -8466,9 +8651,9 @@ template <class T>
 [[nodiscard]] inline std::size_t index_of_difference(std::string_view str_1, std::string_view str_2) {
     using namespace std::string_literals;
     if (str_1.size() != str_2.size())
-        throw std::logic_error("String {"s + std::string(str_1) + "} of size "s + std::to_string(str_1.size()) +
-                               " and {"s + std::string(str_2) + "} of size "s + std::to_string(str_2.size()) +
-                               " do not have a meaningful index of difference due to incompatible sizes."s);
+        throw std::invalid_argument("String {"s + std::string(str_1) + "} of size "s + std::to_string(str_1.size()) +
+                                    " and {"s + std::string(str_2) + "} of size "s + std::to_string(str_2.size()) +
+                                    " do not have a meaningful index of difference due to incompatible sizes."s);
     for (std::size_t i = 0; i < str_1.size(); ++i)
         if (str_1[i] != str_2[i]) return i;
     return str_1.size();
@@ -8478,6 +8663,232 @@ template <class T>
 
 #endif
 #endif // module utl::stre
+
+
+
+
+
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ DmitriBogdanov/prototyping_utils ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+//
+// Module:        utl::struct_reflect
+// Documentation: https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_struct_reflect.md
+// Source repo:   https://github.com/DmitriBogdanov/prototyping_utils
+//
+// This project is licensed under the MIT License
+//
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+#if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_STRUCT_REFLECT)
+#ifndef UTLHEADERGUARD_STRUCT_REFLECT
+#define UTLHEADERGUARD_STRUCT_REFLECT
+
+// _______________________ INCLUDES _______________________
+
+#include <array>       // array<>
+#include <cstddef>     // size_t
+#include <string_view> // string_view
+#include <tuple>       // tuple<>, tuple_size<>, apply<>(), get<>()
+#include <type_traits> // add_lvalue_reference_t<>, add_const_t<>, remove_reference_t<>, decay_t<>
+#include <utility>     // forward<>(), pair<>
+
+// ____________________ DEVELOPER DOCS ____________________
+
+// Reflection mechanism is based entirely around the map macro and a single struct with partial specialization for the
+// reflected enum. Map macro itself is quire non-trivial, but completely standard, a good explanation of how it works
+// can be found here: [https://github.com/swansontec/map-macro].
+//
+// Once we have a map macro all reflection is a matter of simply mapping __VA_ARGS__ into various
+// arrays and tuples, which allows us to work with structures in a generic tuple-like way.
+//
+// Partial specialization allows for a pretty concise implementation and provides nice error messages due to
+// static_assert on incorrect template arguments.
+//
+// An alternative frequently used way to do struct reflection is through generated code with structured binding &
+// hundreds of overloads. This has a benefit of producing nicer error messages on 'for_each()' however the
+// resulting implementation is downright abnorrent.
+
+// ____________________ IMPLEMENTATION ____________________
+
+namespace utl::struct_reflect {
+
+// =================
+// --- Map macro ---
+// =================
+
+#define utl_srfl_eval_0(...) __VA_ARGS__
+#define utl_srfl_eval_1(...) utl_srfl_eval_0(utl_srfl_eval_0(utl_srfl_eval_0(__VA_ARGS__)))
+#define utl_srfl_eval_2(...) utl_srfl_eval_1(utl_srfl_eval_1(utl_srfl_eval_1(__VA_ARGS__)))
+#define utl_srfl_eval_3(...) utl_srfl_eval_2(utl_srfl_eval_2(utl_srfl_eval_2(__VA_ARGS__)))
+#define utl_srfl_eval_4(...) utl_srfl_eval_3(utl_srfl_eval_3(utl_srfl_eval_3(__VA_ARGS__)))
+#define utl_srfl_eval(...) utl_srfl_eval_4(utl_srfl_eval_4(utl_srfl_eval_4(__VA_ARGS__)))
+
+#define utl_srfl_map_end(...)
+#define utl_srfl_map_out
+#define utl_srfl_map_comma ,
+
+#define utl_srfl_map_get_end_2() 0, utl_srfl_map_end
+#define utl_srfl_map_get_end_1(...) utl_srfl_map_get_end_2
+#define utl_srfl_map_get_end(...) utl_srfl_map_get_end_1
+#define utl_srfl_map_next_0(test, next, ...) next utl_srfl_map_out
+#define utl_srfl_map_next_1(test, next) utl_srfl_map_next_0(test, next, 0)
+#define utl_srfl_map_next(test, next) utl_srfl_map_next_1(utl_srfl_map_get_end test, next)
+
+#define utl_srfl_map_0(f, x, peek, ...) f(x) utl_srfl_map_next(peek, utl_srfl_map_1)(f, peek, __VA_ARGS__)
+#define utl_srfl_map_1(f, x, peek, ...) f(x) utl_srfl_map_next(peek, utl_srfl_map_0)(f, peek, __VA_ARGS__)
+
+#define utl_srfl_map_list_next_1(test, next) utl_srfl_map_next_0(test, utl_srfl_map_comma next, 0)
+#define utl_srfl_map_list_next(test, next) utl_srfl_map_list_next_1(utl_srfl_map_get_end test, next)
+
+#define utl_srfl_map_list_0(f, x, peek, ...)                                                                           \
+    f(x) utl_srfl_map_list_next(peek, utl_srfl_map_list_1)(f, peek, __VA_ARGS__)
+#define utl_srfl_map_list_1(f, x, peek, ...)                                                                           \
+    f(x) utl_srfl_map_list_next(peek, utl_srfl_map_list_0)(f, peek, __VA_ARGS__)
+
+// Applies the function macro 'f' to all '__VA_ARGS__'
+#define utl_srfl_map(f, ...) utl_srfl_eval(utl_srfl_map_1(f, __VA_ARGS__, ()()(), ()()(), ()()(), 0))
+
+// Applies the function macro 'f' to to all '__VA_ARGS__' and inserts commas between the results
+#define utl_srfl_map_list(f, ...) utl_srfl_eval(utl_srfl_map_list_1(f, __VA_ARGS__, ()()(), ()()(), ()()(), 0))
+
+// Note: 'srfl' is short for 'struct_reflect'
+
+// =========================
+// --- Struct reflection ---
+// =========================
+
+// --- Implementation ---
+// ----------------------
+
+template <class>
+inline constexpr bool _always_false_v = false;
+
+template <class E>
+struct _meta {
+    static_assert(_always_false_v<E>,
+                  "Provided struct does not have a defined reflection. Use 'UTL_STRUCT_REFLECT' macro to define one.");
+    // makes instantiation of this template a compile-time error
+};
+
+template <class Func, class Tuple>
+void tuple_for_each(Tuple&& tuple, Func&& func) {
+    std::apply([&func](auto&&... args) { (func(std::forward<decltype(args)>(args)), ...); },
+               std::forward<Tuple>(tuple));
+}
+
+// clang-format off
+#define utl_srfl_type_name(arg_) std::string_view
+#define utl_srfl_type_cref(arg_) std::add_lvalue_reference_t<std::add_const_t<std::remove_reference_t<decltype(type::arg_)>>>
+#define utl_srfl_type_ref(arg_) std::add_lvalue_reference_t<std::remove_reference_t<decltype(type::arg_)>>
+#define utl_srfl_type_centry(arg_) std::pair<utl_srfl_type_name(arg_), utl_srfl_type_cref(arg_)>
+#define utl_srfl_type_entry(arg_) std::pair<utl_srfl_type_name(arg_), utl_srfl_type_ref(arg_)>
+
+#define utl_srfl_make_name(arg_) utl_srfl_type_name(arg_)(#arg_)
+#define utl_srfl_make_cref(arg_) val.arg_
+#define utl_srfl_make_ref(arg_) val.arg_
+#define utl_srfl_make_centry(arg_) utl_srfl_type_centry(arg_){ utl_srfl_make_name(arg_), utl_srfl_make_cref(arg_) }
+#define utl_srfl_make_entry(arg_) utl_srfl_type_entry(arg_){ utl_srfl_make_name(arg_), utl_srfl_make_ref(arg_) }
+// clang-format on
+
+// Note: 'c' prefix means 'const'
+
+#define UTL_STRUCT_REFLECT(struct_name_, ...)                                                                          \
+    template <>                                                                                                        \
+    struct utl::struct_reflect::_meta<struct_name_> {                                                                  \
+        using type = struct_name_;                                                                                     \
+                                                                                                                       \
+        using fields_cref_type  = std::tuple<utl_srfl_map_list(utl_srfl_type_cref, __VA_ARGS__)>;                      \
+        using entries_cref_type = std::tuple<utl_srfl_map_list(utl_srfl_type_centry, __VA_ARGS__)>;                    \
+        using fields_ref_type   = std::tuple<utl_srfl_map_list(utl_srfl_type_ref, __VA_ARGS__)>;                       \
+        using entries_ref_type  = std::tuple<utl_srfl_map_list(utl_srfl_type_entry, __VA_ARGS__)>;                     \
+                                                                                                                       \
+        constexpr static std::string_view type_name = #struct_name_;                                                   \
+                                                                                                                       \
+        constexpr static auto names = std::array{utl_erfl_map_list(utl_erfl_make_name, __VA_ARGS__)};                  \
+                                                                                                                       \
+        constexpr static fields_cref_type const_field_view(const type& val) {                                          \
+            return {utl_srfl_map_list(utl_srfl_make_cref, __VA_ARGS__)};                                               \
+        }                                                                                                              \
+        constexpr static fields_ref_type field_view(type& val) {                                                       \
+            return {utl_srfl_map_list(utl_srfl_make_ref, __VA_ARGS__)};                                                \
+        }                                                                                                              \
+        constexpr static entries_cref_type const_entry_view(const type& val) {                                         \
+            return {utl_srfl_map_list(utl_srfl_make_centry, __VA_ARGS__)};                                             \
+        }                                                                                                              \
+        constexpr static entries_ref_type entry_view(type& val) {                                                      \
+            return {utl_srfl_map_list(utl_srfl_make_entry, __VA_ARGS__)};                                              \
+        }                                                                                                              \
+                                                                                                                       \
+        constexpr static std::size_t size = std::tuple_size_v<_meta::fields_cref_type>;                                \
+                                                                                                                       \
+        template <std::size_t I>                                                                                       \
+        constexpr static auto get(const type& val) {                                                                   \
+            return std::get<I>(_meta::const_field_view(val));                                                          \
+        }                                                                                                              \
+                                                                                                                       \
+        template <std::size_t I>                                                                                       \
+        constexpr static auto get(type& val) {                                                                         \
+            return std::get<I>(_meta::field_view(val));                                                                \
+        }                                                                                                              \
+                                                                                                                       \
+        template <class Func>                                                                                          \
+        constexpr static void for_each(const type& val, Func&& func) {                                                 \
+            tuple_for_each(_meta::const_field_view(val), std::forward<Func>(func));                                    \
+        }                                                                                                              \
+        template <class Func>                                                                                          \
+        constexpr static void for_each(type& val, Func&& func) {                                                       \
+            tuple_for_each(_meta::field_view(val), std::forward<Func>(func));                                          \
+        }                                                                                                              \
+    }
+
+// --- Public API ---
+// ------------------
+
+template <class S>
+constexpr auto type_name = _meta<S>::type_name;
+
+template <class S>
+constexpr auto names = _meta<S>::names;
+
+template <class S>
+constexpr auto const_field_view(const S& value) {
+    return _meta<S>::const_field_view(value);
+}
+
+template <class S>
+constexpr auto field_view(S& value) {
+    return _meta<S>::field_view(value);
+}
+
+template <class S>
+constexpr auto const_entry_view(const S& value) {
+    return _meta<S>::const_entry_view(value);
+}
+
+template <class S>
+constexpr auto entry_view(S& value) {
+    return _meta<S>::entry_view(value);
+}
+
+template <class S>
+constexpr auto size = _meta<S>::size;
+
+template <std::size_t I, class S>
+constexpr auto get(S&& value) {
+    using struct_type = typename std::decay_t<S>;
+    return _meta<struct_type>::template get<I>(value);
+}
+
+template <class S, class Func>
+constexpr auto for_each(S&& value, Func&& func) {
+    using struct_type = typename std::decay_t<S>;
+    return _meta<struct_type>::template for_each(value, func);
+}
+
+} // namespace utl::struct_reflect
+
+#endif
+#endif // module utl::struct_reflect
 
 
 

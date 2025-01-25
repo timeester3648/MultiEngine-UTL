@@ -8,7 +8,6 @@
 //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-#include <tuple>
 #if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_LOG)
 #ifndef UTLHEADERGUARD_LOG
 #define UTLHEADERGUARD_LOG
@@ -19,6 +18,7 @@
 #include <charconv>      // to_chars()
 #include <chrono>        // steady_clock
 #include <cstddef>       // size_t
+#include <exception>     // exception
 #include <fstream>       // ofstream
 #include <iostream>      // cout
 #include <iterator>      // next()
@@ -32,6 +32,7 @@
 #include <string_view>   // string_view
 #include <system_error>  // errc()
 #include <thread>        // this_thread::get_id()
+#include <tuple>         // tuple_size<>
 #include <type_traits>   // is_integral_v<>, is_floating_point_v<>, is_same_v<>, is_convertible_to_v<>
 #include <unordered_map> // unordered_map<>
 #include <utility>       // forward<>()
@@ -177,7 +178,7 @@ utl_log_define_trait(_is_pad, std::declval<std::decay_t<T>>().is_pad);
 // ----------------------
 
 template <class>
-inline constexpr bool _always_false_v = false;
+constexpr bool _always_false_v = false;
 
 template <class T>
 constexpr int _log_10_ceil(T num) {
@@ -321,7 +322,7 @@ struct StringifierBase {
     static void append_tuple(std::string& buffer, const T& value) {
         self::_append_tuple_fwd(buffer, value);
     }
-    
+
     template <class T>
     static void append_adaptor(std::string& buffer, const T& value) {
         derived::append(buffer, _underlying_container_cref(value));

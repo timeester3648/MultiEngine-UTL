@@ -8,7 +8,6 @@
 //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-#include <memory>
 #if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_JSON)
 #ifndef UTLHEADERGUARD_JSON
 #define UTLHEADERGUARD_JSON
@@ -21,6 +20,7 @@
 #include <codecvt>          // codecvt_utf8<>
 #include <cstddef>          // size_t
 #include <cuchar>           // size_t, char32_t, mbstate_t
+#include <exception>        // exception
 #include <fstream>          // ifstream, ofstream
 #include <initializer_list> // initializer_list<>
 #include <limits>           // numeric_limits<>::max_digits10, numeric_limits<>::max_exponent10
@@ -29,10 +29,11 @@
 #include <string>           // string, stoul()
 #include <string_view>      // string_view
 #include <system_error>     // errc()
-#include <type_traits> // enable_if_t<>, void_t, is_convertible_v<>, is_same_v<>, conjunction<>, disjunction<>, negation<>
-#include <utility>     // move(), declval<>()
-#include <variant>     // variant<>
-#include <vector>      // vector<>
+#include <type_traits>      // enable_if_t<>, void_t, is_convertible_v<>, is_same_v<>,
+                            // conjunction<>, disjunction<>, negation<>
+#include <utility>          // move(), declval<>()
+#include <variant>          // variant<>
+#include <vector>           // vector<>
 
 // ____________________ DEVELOPER DOCS ____________________
 
@@ -173,7 +174,7 @@ utl_json_define_trait(_has_mapped_type, std::declval<typename std::decay_t<T>::m
 // 'static_assert(_always_false_v<T)' on the the other hand doesn't,
 // which means we can use it to mark branches that should never compile.
 template <class>
-inline constexpr bool _always_false_v = false;
+constexpr bool _always_false_v = false;
 
 // --- MAP macro ---
 // -----------------

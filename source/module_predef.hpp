@@ -272,7 +272,7 @@ constexpr bool debug =
 #endif
 
 // Force noinline
-#if defined (_MSC_VER)
+#if defined(_MSC_VER)
 #define UTL_PREDEF_FORCE_NOINLINE __declspec((noinline))
 #elif defined(__GNUC__) || defined(__clang__) || defined(__INTEL_COMPILER)
 #define UTL_PREDEF_FORCE_NOINLINE __attribute__((noinline))
@@ -424,7 +424,7 @@ __builtin_assume(__VA_ARGS__)
 //
 // This macro saves MASSIVE amount of boilerplate in some cases, making for a much more expressive "trait definitions".
 
-#define UTL_PREDEF_TYPE_TRAIT(trait_name_, ...)                                                                         \
+#define UTL_PREDEF_TYPE_TRAIT(trait_name_, ...)                                                                        \
     template <class T, class = void>                                                                                   \
     struct trait_name_ : std::false_type {};                                                                           \
                                                                                                                        \
@@ -438,20 +438,20 @@ __builtin_assume(__VA_ARGS__)
     using trait_name_##_enable_if = std::enable_if_t<trait_name_<T>::value, bool>
 
 // Shortcuts for different types of requirements
-#define UTL_PREDEF_TYPE_TRAIT_HAS_BINARY_OP(trait_name_, op_)                                                           \
+#define UTL_PREDEF_TYPE_TRAIT_HAS_BINARY_OP(trait_name_, op_)                                                          \
     UTL_PREDEF_TYPE_TRAIT(trait_name_, std::declval<std::decay_t<T>>() op_ std::declval<std::decay_t<T>>())
 
-#define UTL_PREDEF_TYPE_TRAIT_HAS_ASSIGNMENT_OP(trait_name_, op_)                                                       \
+#define UTL_PREDEF_TYPE_TRAIT_HAS_ASSIGNMENT_OP(trait_name_, op_)                                                      \
     UTL_PREDEF_TYPE_TRAIT(trait_name_, std::declval<std::decay_t<T>&>() op_ std::declval<std::decay_t<T>>())
 // for operators like '+=' lhs should be a reference
 
-#define UTL_PREDEF_TYPE_TRAIT_HAS_UNARY_OP(trait_name_, op_)                                                            \
+#define UTL_PREDEF_TYPE_TRAIT_HAS_UNARY_OP(trait_name_, op_)                                                           \
     UTL_PREDEF_TYPE_TRAIT(trait_name_, op_ std::declval<std::decay_t<T>>())
 
-#define UTL_PREDEF_TYPE_TRAIT_HAS_MEMBER(trait_name_, member_)                                                          \
+#define UTL_PREDEF_TYPE_TRAIT_HAS_MEMBER(trait_name_, member_)                                                         \
     UTL_PREDEF_TYPE_TRAIT(trait_name_, std::declval<std::decay_t<T>>().member_)
 
-#define UTL_PREDEF_TYPE_TRAIT_HAS_MEMBER_TYPE(trait_name_, member_)                                                     \
+#define UTL_PREDEF_TYPE_TRAIT_HAS_MEMBER_TYPE(trait_name_, member_)                                                    \
     UTL_PREDEF_TYPE_TRAIT(trait_name_, std::declval<typename std::decay_t<T>::member_>())
 
 // --- Enum with string conversion ---
@@ -511,7 +511,7 @@ inline void _split_enum_args(const char* va_args, std::string* strings, int coun
 
 #define UTL_PREDEF_IS_FUNCTION_DEFINED(function_name_, return_type_, ...)                                              \
     template <class ReturnType, class... ArgTypes>                                                                     \
-    class utl_is_function_defined_impl_##function_name_ {                                                             \
+    class utl_is_function_defined_impl_##function_name_ {                                                              \
     private:                                                                                                           \
         typedef char no[sizeof(ReturnType) + 1];                                                                       \
                                                                                                                        \

@@ -14,14 +14,14 @@
 
 // _______________________ INCLUDES _______________________
 
+#include <array>            // array<>
+#include <chrono>           // high_resolution_clock
 #include <cstdint>          // uint64_t
 #include <initializer_list> // initializer_list<>
 #include <limits>           // numeric_limits<>::digits, numeric_limits<>::min(), numeric_limits<>::max()
+#include <mutex>            // mutex, lock_guard<>
 #include <random>           // random_device, std::uniform_int_distribution<>,
                             // std::uniform_real_distribution<>, generate_canonical<>
-#include <array>            // array<>
-#include <chrono>           // high_resolution_clock
-#include <mutex>            // mutex, lock_guard<>
 #include <type_traits>      // is_integral_v<>
 #include <utility>          // declval<>()
 

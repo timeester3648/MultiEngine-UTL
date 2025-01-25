@@ -70,7 +70,7 @@ namespace utl::shell {
     std::string result(length, '0');
     for (std::size_t i = 0; i < length; ++i)
         result[i] = static_cast<char>(min_char + std::rand() % (max_char - min_char + 1));
-    // we don't really care about the quality of random here, and we already include <cstdlib>, 
+    // we don't really care about the quality of random here, and we already include <cstdlib>,
     // so rand() is fine, otherwise we'd have to include the entirety of <random> for this function
     return result;
 }
@@ -93,7 +93,7 @@ inline void erase_temp_file(const std::string& file) {
 inline std::string generate_temp_file() {
     // No '[[nodiscard]]' since the function could still be used to generate files without
     // actually accessing them (through the returned path) in the same program.
-    
+
     constexpr std::size_t MAX_ATTEMPTS = 500; // shouldn't realistically be encountered but still
     constexpr std::size_t NAME_LENGTH  = 30;
 
