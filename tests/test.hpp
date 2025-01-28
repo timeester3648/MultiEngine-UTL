@@ -3,6 +3,10 @@
 #include <string_view>
 #include <limits>
 
+// Note:
+// This is a common include for all tests,
+// it exists purely to reduce boilerplate and shouldn't be included anywhere else.
+
 namespace fs = std::filesystem;
 
 using namespace std::string_literals;

@@ -21,6 +21,10 @@
 #define ANKERL_NANOBENCH_IMPLEMENT
 #include "thirdparty/nanobench.h"
 
+// Note:
+// This is a common include for all benchmarks,
+// it exists purely to reduce boilerplate and shouldn't be included anywhere else.
+
 #define REPEAT(repeats_) for (int count_ = 0; count_ < repeats_; ++count_)
 #define DO_NOT_OPTIMIZE_AWAY ankerl::nanobench::doNotOptimizeAway
 
@@ -66,6 +70,9 @@ constexpr int max_int = 1500;
 // PRNG & buffers
 inline random::generators::RomuTrio32 gen;
 inline std::vector<std::string>       pregen_strings;
+// we want random generation to be as fast as possible to reduce its impact on benchmarks that measure
+// overhead of calling something else, which is why we choose the fastest PRNG available and pregenerate
+// strings. Number generation is fast enough that we don't really get much benefit from pregeneration.
 
 // Datagen functions
 inline auto rand_bool() { return static_cast<bool>(std::uniform_int_distribution{0, 1}(gen)); }
