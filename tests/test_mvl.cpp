@@ -1,27 +1,34 @@
-// __________ TEST FRAMEWORK & LIBRARY  __________
+// _______________ TEST FRAMEWORK & MODULE  _______________
 
-#include <cstddef>
-#include <functional>
-#include <numeric>
-#include <pstl/glue_execution_defs.h> // TODO: What is that? How did it get here?
-#include <type_traits>
-#include <unordered_map>
-#include <vector>
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include "thirdparty/doctest.h"
 
+#include "test.hpp"
+
 #include "module_mvl.hpp"
 
-// ________________ TEST INCLUDES ________________
+// _______________________ INCLUDES _______________________
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <execution>
+#include <functional>
+#include <numeric>
 #include <stdexcept>
+#include <type_traits>
+#include <unordered_map>
+#include <vector>
 
-// _____________ TEST IMPLEMENTATION _____________
+// ____________________ DEVELOPER DOCS ____________________
 
-using namespace utl;
+// NOTE: DOCS
+
+// ____________________ IMPLEMENTATION ____________________
+
+// ====================
+// --- Test helpers ---
+// ====================
 
 // Helper macro for checking whole matrices against a "target" matrix
 template <typename T, mvl::Dimension dimension, mvl::Type type, mvl::Ownership ownership, mvl::Checking checking,
@@ -54,8 +61,13 @@ bool check_matrix_impl(const mvl::GenericTensor<T, dimension, type, ownership, c
 
 #define CHECK_MATRIX(...) CHECK(check_matrix_impl(__VA_ARGS__))
 
+// ====================
+// --- Matrix tests ---
+// ====================
 
-TEST_CASE("Sparse matrix basic functionality test") {
+// TODO: Restructure and cleanup one the API gets finalized
+
+TEST_CASE("Sparse matrix basic functionality works as expected") {
     // Build sparse matrix + insert some more
     mvl::SparseMatrix<int> mat(4, 4,
                                {
@@ -93,7 +105,7 @@ TEST_CASE("Sparse matrix basic functionality test") {
     CHECK(mat.sum() == 30 + 40 + 50);
 }
 
-TEST_CASE("Strided view sanity test") {
+TEST_CASE("Strided view passes basic sanity checks") {
     std::vector<int> vec = {1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3,
                             1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3};
 
@@ -131,8 +143,8 @@ TEST_CASE("Strided view sanity test") {
     CHECK(view_plus1.sum() == size * 2);
     CHECK(view_plus2.sum() == size * 3);
 
-    CHECK(view_plus2.true_for_any([&](const int& e, size_t i, size_t j) { return e == 3; }));
-    CHECK(view_plus2.true_for_all([&](const int& e, size_t i, size_t j) { return e != 2; }));
+    CHECK(view_plus2.true_for_any([&](const int& e, size_t, size_t) { return e == 3; }));
+    CHECK(view_plus2.true_for_all([&](const int& e, size_t, size_t) { return e != 2; }));
 
     CHECK(view_plus2.compare_contents(expected_2));
 
@@ -284,7 +296,6 @@ TEST_CASE("Matrix constructors & methods derived from storage::AbstractIndexable
         CHECK(matrix.back() == cref.back());
     }
 }
-
 
 TEST_CASE("Basic matrix methods behave as expected") {
 
@@ -460,7 +471,7 @@ TEST_CASE("Matrix views behave as expected") {
         // Try abusing function chains
         int sum = 1;
         CHECK(matrix.for_each([&](const int& element, std::size_t idx) { sum *= element * (idx + 1); })
-                  .for_each([&](const int& element, std::size_t idx) { sum -= element; })
+                  .for_each([&](const int& element, std::size_t) { sum -= element; })
                   .back() == 4);
         CHECK(sum == 566); // computed by hand
     }

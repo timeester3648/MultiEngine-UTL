@@ -3,6 +3,8 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include "thirdparty/doctest.h"
 
+#include "test.hpp"
+
 #include "module_stre.hpp"
 
 // _______________________ INCLUDES _______________________
@@ -15,16 +17,9 @@
 
 // ____________________ IMPLEMENTATION ____________________
 
-using namespace utl;
-
-template <class Func>
-bool check_if_throws(Func f) {
-    bool throws = false;
-    try {
-        f();
-    } catch (...) { throws = true; }
-    return throws;
-}
+// =======================================
+// --- Tets for "simple" functionality ---
+// =======================================
 
 TEST_CASE("Formatting utils perform as expected") {
 
@@ -92,6 +87,10 @@ TEST_CASE("Substring checks") {
     CHECK(stre::contains("Some \t\r\n rather 17 bizzare TeXt", " bizzare TeXt"));
     CHECK(!stre::contains("Some \t\r\n rather 17 bizzare TeXt", "15"));
 }
+
+// ========================================
+// --- Tets for "complex" functionality ---
+// ========================================
 
 TEST_CASE("Splitting string by delimiter (keep_empty_tokens = false)") {
     { // simplest case

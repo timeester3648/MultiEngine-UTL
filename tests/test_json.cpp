@@ -1,8 +1,9 @@
 // _______________ TEST FRAMEWORK & MODULE  _______________
 
-#include <unordered_map>
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include "thirdparty/doctest.h"
+
+#include "test.hpp"
 
 #include "module_json.hpp"
 
@@ -15,6 +16,7 @@
 #include <initializer_list> // testing JSON array conversion
 #include <list>             // testing JSON array conversion
 #include <set>              // testing JSON array conversion
+#include <unordered_map>    // testing JSON array conversion
 #include <vector>           // testing JSON array conversion
 
 // ____________________ DEVELOPER DOCS ____________________
@@ -23,23 +25,11 @@
 
 // ____________________ IMPLEMENTATION ____________________
 
-using namespace utl;
-namespace fs = std::filesystem;
-
-template <class Func>
-bool check_if_throws(Func f) {
-    bool throws = false;
-    try {
-        f();
-    } catch (...) { throws = true; }
-    return throws;
-}
-
 // ==================================
 // --- RFC-8259 conformance tests ---
 // ==================================
 
-TEST_CASE("JSON validation test suite (accept)") {
+TEST_CASE("Parser passes JSON validation test suite (accept valid)") {
     const fs::path test_suite_path = "tests/data/json_test_suite/should_accept/";
 
     std::cout << "Running test case from path: " << fs::current_path() << '\n' << std::flush;
@@ -53,7 +43,7 @@ TEST_CASE("JSON validation test suite (accept)") {
     }
 }
 
-TEST_CASE("JSON validation test suite (reject)") {
+TEST_CASE("Parser passes JSON validation test suite (reject invalid)") {
     const fs::path test_suite_path = "tests/data/json_test_suite/should_reject/";
 
     std::cout << "Running test case from path: " << fs::current_path() << '\n' << std::flush;
@@ -87,14 +77,14 @@ TEST_CASE("JSON validation test suite (reject)") {
 // --- Type conversion tests ---
 // =============================
 
-TEST_CASE_TEMPLATE("To-JSON-array conversions", T, //
-                   json::Array,                    //
-                   std::vector<int>,               //
-                   std::list<int>,                 //
-                   std::initializer_list<int>,     //
-                   std::deque<int>,                //
-                   std::forward_list<int>,         //
-                   std::set<int>                   //
+TEST_CASE_TEMPLATE("To-JSON-array conversions are handled correctly", T, //
+                   json::Array,                                          //
+                   std::vector<int>,                                     //
+                   std::list<int>,                                       //
+                   std::initializer_list<int>,                           //
+                   std::deque<int>,                                      //
+                   std::forward_list<int>,                               //
+                   std::set<int>                                         //
 ) {
     json::Node json;
     json["array"] = T{1, 2, 3};
@@ -107,7 +97,7 @@ TEST_CASE_TEMPLATE("To-JSON-array conversions", T, //
     for (auto it = arr.begin(); it != arr.end(); ++it) CHECK(it->get_number() == ++expected_value);
 }
 
-TEST_CASE("To-JSON-array conversions (multidimensional arrays)") {
+TEST_CASE("To-JSON-array conversions are handled correctly (for multidimensional arrays)") {
     json::Node json;
     json["array_1D"] = {1, 2, 3, 4, 5, 6, 7, 8, 9};
     json["array_2D"] = {
@@ -125,10 +115,10 @@ TEST_CASE("To-JSON-array conversions (multidimensional arrays)") {
     CHECK(json.at("array_3D").to_string(json::Format::MINIMIZED) == "[[[1,2],[3,4]],[[5,6],[7,8,9]]]");
 }
 
-TEST_CASE_TEMPLATE("To-JSON-object conversions", T,     //
-                   json::Object,                        //
-                   std::map<std::string, int>,          //
-                   std::unordered_map<std::string, int> //
+TEST_CASE_TEMPLATE("To-JSON-object conversions are handled correctly", T, //
+                   json::Object,                                          //
+                   std::map<std::string, int>,                            //
+                   std::unordered_map<std::string, int>                   //
 ) {
     json::Node json;
     json["object"] = T{
@@ -143,48 +133,48 @@ TEST_CASE_TEMPLATE("To-JSON-object conversions", T,     //
     CHECK(obj.at("key_2").get_number() == 2);
 }
 
-TEST_CASE_TEMPLATE("To-JSON-string conversions", T, //
-                   json::String,                    //
-                   std::string,                     //
-                   std::string_view                 //
+TEST_CASE_TEMPLATE("To-JSON-string conversionsare handled correctly", T, //
+                   json::String,                                         //
+                   std::string,                                          //
+                   std::string_view                                      //
 ) {
     json::Node json;
     json["string"] = T{"lorem ipsum"};
     CHECK(json.at("string").get_string() == "lorem ipsum");
 }
 
-TEST_CASE("To-JSON-string conversions (literals)") {
+TEST_CASE("To-JSON-string conversions are handled correctly (for literals)") {
     json::Node json;
     json["string"] = "lorem ipsum";
     CHECK(json.at("string").get_string() == "lorem ipsum");
 }
 
-TEST_CASE_TEMPLATE("To-JSON-number conversions", T, //
-                   json::Number,                    //
-                   float,                           //
-                   double,                          //
-                   int,                             //
-                   unsigned int,                    //
-                   std::size_t,                     //
-                   long double,                     //
-                   char                             //
+TEST_CASE_TEMPLATE("To-JSON-number conversions are handled correctly", T, //
+                   json::Number,                                          //
+                   float,                                                 //
+                   double,                                                //
+                   int,                                                   //
+                   unsigned int,                                          //
+                   std::size_t,                                           //
+                   long double,                                           //
+                   char                                                   //
 ) {
     json::Node json;
     json["number"] = T(2);
     CHECK(json.at("number").get_number() == 2);
 }
 
-TEST_CASE_TEMPLATE("To-JSON-bool conversions", T, //
-                   json::Bool,                    //
-                   bool                           //
+TEST_CASE_TEMPLATE("To-JSON-bool conversions are handled correctly", T, //
+                   json::Bool,                                          //
+                   bool                                                 //
 ) {
     json::Node json;
     json["bool"] = T(true);
     CHECK(json.at("bool").get_bool() == true);
 }
 
-TEST_CASE_TEMPLATE("To-JSON-null conversions", T, //
-                   json::Null                     //
+TEST_CASE_TEMPLATE("To-JSON-null conversions are handled correctly", T, //
+                   json::Null                                           //
 ) {
     json::Node json;
     json["null"] = T();
@@ -345,22 +335,22 @@ void check_json_against_struct(const json::Node& json, const NestedContainerConf
 
         const auto& array = val.get_array();
         for (std::size_t i = 0; i < array.size(); ++i) {
-            
+
             const auto& reflected_json_of_simple_cfg = array.at(i);
             check_json_against_struct(reflected_json_of_simple_cfg, cfg.map_of_subconfig_arrays.at(key).at(i));
         }
     }
-    
-    const auto &tensor_ext_1 = json.at("subconfig_tensor").get_array();
+
+    const auto& tensor_ext_1 = json.at("subconfig_tensor").get_array();
     for (std::size_t i = 0; i < tensor_ext_1.size(); ++i) {
-        
-        const auto &tensor_ext_2 = tensor_ext_1.at(i).get_array();
+
+        const auto& tensor_ext_2 = tensor_ext_1.at(i).get_array();
         for (std::size_t j = 0; j < tensor_ext_2.size(); ++j) {
-            
-            const auto &tensor_ext_3 = tensor_ext_2.at(j).get_array();
+
+            const auto& tensor_ext_3 = tensor_ext_2.at(j).get_array();
             for (std::size_t k = 0; k < tensor_ext_3.size(); ++k) {
-                
-                const auto &tensor_element = tensor_ext_3.at(k);
+
+                const auto& tensor_element = tensor_ext_3.at(k);
                 check_json_against_struct(tensor_element, cfg.subconfig_tensor.at(i).at(j).at(k));
             }
         }
@@ -370,7 +360,7 @@ void check_json_against_struct(const json::Node& json, const NestedContainerConf
 const NestedContainerConfig test_nested_container_cfg = {
     {{"subconfig_1", {test_simple_cfg, test_simple_cfg}},
      {"subconfig_2", {test_simple_cfg, test_simple_cfg, test_simple_cfg}}},
-    {{{ test_simple_cfg, test_simple_cfg }}}
+    {{{test_simple_cfg, test_simple_cfg}}}
 };
 
 UTL_JSON_REFLECT(NestedContainerConfig, map_of_subconfig_arrays, subconfig_tensor);
@@ -386,5 +376,5 @@ TEST_CASE("JSON struct reflection works for nested containers of reflected struc
     const auto reflected_cfg = reflected_json.to_struct<NestedContainerConfig>();
     CHECK(reflected_cfg == cfg);
 }
-// if map-of-arrays of structs and 3D tensor of reflected structs are properly reflected in 
+// if map-of-arrays of structs and 3D tensor of reflected structs are properly reflected in
 // another struct then it seems pretty safe to assume that everything else should be possible too

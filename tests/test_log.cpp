@@ -1,6 +1,5 @@
 // _______________ TEST FRAMEWORK & MODULE  _______________
 
-#include <sstream>
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include "thirdparty/doctest.h"
 
@@ -29,13 +28,11 @@
 
 // ____________________ IMPLEMENTATION ____________________
 
-using namespace utl;
-
 // =============================
 // --- Stringifier API tests ---
 // =============================
 
-TEST_CASE("Stringifier functor, static method and global function behave the same") {
+TEST_CASE("Stringifier functor, static methods and global functions behave the same") {
     const auto value           = std::make_tuple(true, 'a', 1, 0.5, std::array{1, 2});
     const auto expected_result = "< true, a, 1, 0.5, { 1, 2 } >";
 
@@ -74,7 +71,7 @@ TEST_CASE("Stringifier correctly handles strings") {
 
     // String-convertible
     CHECK(log::stringify(fs::path("lorem/ipsum")) == "lorem/ipsum");
-    CHECK(log::stringify(StringConvertible{}) == "<string_view>");
+    CHECK(log::stringify(StringConvertible{}) == "<string>");
 }
 
 TEST_CASE("Stringifier correctly handles integers") {
@@ -130,7 +127,7 @@ TEST_CASE("Stringifier correctly handles arrays") {
     CHECK(log::stringify(std::deque{1, 2, 3}) == "{ 1, 2, 3 }");
 }
 
-TEST_CASE("Stringifier correctly container adaptors") {
+TEST_CASE("Stringifier correctly handles container adaptors") {
 
     class ContainerAdaptor {
     public:
@@ -146,7 +143,7 @@ TEST_CASE("Stringifier correctly container adaptors") {
     const auto tp = std::tuple{"lorem", "ipsum"};
 
     CHECK(log::stringify(std::queue{dq}) == "{ 1, 2, 3 }");
-    CHECK(log::stringify(std::priority_queue{std::less<>{}, dq}) == "{ 1, 2, 3 }");
+    CHECK(log::stringify(std::priority_queue{dq.begin(), dq.end()}) == "{ 3, 2, 1 }");
     CHECK(log::stringify(std::stack{dq}) == "{ 1, 2, 3 }");
     CHECK(log::stringify(ContainerAdaptor{tp}) == "< lorem, ipsum >");
 }
@@ -158,7 +155,7 @@ TEST_CASE("Stringifier correctly handles tuples") {
 
 struct Printable {};
 
-std::ostream& operator<<(std::ostream& os, Printable value) { return os << "printable_value"; }
+std::ostream& operator<<(std::ostream& os, Printable) { return os << "printable_value"; }
 
 TEST_CASE("Stringifier correctly handles printables") { CHECK(log::stringify(Printable{}) == "printable_value"); }
 
@@ -252,14 +249,4 @@ TEST_CASE("Stringifier customization correctly overrides formatting of specific 
 // --- Logger formatting tests ---
 // ===============================
 
-TEST_CASE("Logger correctly formats deterministic columns") {
-    std::ostringstream oss;
-
-    // Now is also a goot time to test sink setters
-    auto& sink = log::add_ostream_sink(oss);
-    // sink.set_colors(log::Colors::DISABLE);
-
-    const auto expected_output = "";
-
-    // CHECK(oss.str() == expected_output);
-}
+// Is that even a sensible test?

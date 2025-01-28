@@ -1,24 +1,30 @@
-// __________ TEST FRAMEWORK & LIBRARY  __________
+// _______________ TEST FRAMEWORK & MODULE  _______________
 
-#include <functional>
-#include <random>
-#include <string>
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include "thirdparty/doctest.h"
 
+#include "test.hpp"
+
 #include "module_math.hpp"
 
-// ________________ TEST INCLUDES ________________
+// _______________________ INCLUDES _______________________
 
-#include <array>
-#include <functional>
-#include <string>
-#include <unordered_map>
-#include <vector>
+#include <array>         // type-trait tests
+#include <functional>    // type-trait tests
+#include <string>        // type-trait tests
+#include <string_view>   // type-trait tests
+#include <unordered_map> // type-trait tests
+#include <vector>        // type-trait tests
 
-// _____________ TEST IMPLEMENTATION _____________
+// ____________________ DEVELOPER DOCS ____________________
 
-using namespace utl;
+// NOTE: DOCS
+
+// ____________________ IMPLEMENTATION ____________________
+
+// ========================
+// --- Type-trait tests ---
+// ========================
 
 TEST_CASE_TEMPLATE("(math::is_sized<T> == true) for T = ", T, //
                    std::vector<double>,                       //
@@ -164,7 +170,11 @@ TEST_CASE_TEMPLATE("(math::is_function_with_signature<T, double(const int&)> == 
     CHECK(math::is_function_with_signature<T, double(const int&)>::value == false);
 }
 
-TEST_CASE("Basic math functions") {
+// ==================================
+// --- Basic math functions tests ---
+// ==================================
+
+TEST_CASE("Basic math functions work as expected") {
     constexpr double eps = 1e-6; // epsilon used for double comparison, 1e-6 ~ 1e-4% allowed error
 
     // Standard math functions (integer case should be exact, no floating point conversion involved)
@@ -237,17 +247,21 @@ TEST_CASE("Basic math functions") {
     CHECK(math::ternary_bitselect(false, 9) == 0);
 }
 
+// =========================
+// --- Permutation tests ---
+// =========================
+
 TEST_CASE("Permutations work as expected") {
     CHECK(math::get_sorting_permutation(std::vector<double>{0.5, 2.4, 1.5}) == std::vector<std::size_t>{0, 2, 1});
     CHECK(math::get_sorting_permutation(std::vector<double>{0.5, 1.5, 2.4}) == std::vector<std::size_t>{0, 1, 2});
     CHECK(math::get_sorting_permutation(std::vector<double>{2.4, 1.5, 0.5}) == std::vector<std::size_t>{2, 1, 0});
-    
+
     CHECK(math::is_permutation(std::vector{1, 2, 5, 4, 3, 0}));
     CHECK(math::is_permutation(std::vector{0, 1, 2, 3}));
     CHECK(!math::is_permutation(std::vector{0, 0, 1, 2, 3}));
     CHECK(!math::is_permutation(std::vector{1, 2, 3}));
     CHECK(!math::is_permutation(std::vector{0, 1, 5, 6}));
-    
+
     std::vector<double> vals = {2., 4., 6., 8.};
     math::apply_permutation(vals, {3, 2, 1, 0});
     CHECK(vals == std::vector<double>{8., 6., 4., 2.});

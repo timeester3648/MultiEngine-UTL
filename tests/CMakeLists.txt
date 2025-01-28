@@ -5,6 +5,8 @@ enable_testing()
 # Note: Adding '--force-colors' to 'add_test()' allows doctest coloring in terminal but messes up CTest logs formatting
 macro(add_utl_test filename)
     add_executable(${filename} ${filename}.cpp)
+    target_compile_features(${filename} PRIVATE cxx_std_17)
+    target_compile_options(${filename} PRIVATE -O2 -Wall -Wextra -Wpedantic -Werror -fmax-errors=0)
     add_test(
         NAME ${filename}
         COMMAND ${CMAKE_CURRENT_BINARY_DIR}/${filename} --no-intro --no-path-filenames --force-colors
@@ -15,9 +17,9 @@ macro(add_utl_test filename)
 endmacro()
 
 # Tests
-add_utl_test(module_json)
-add_utl_test(module_log)
-add_utl_test(module_math)
-add_utl_test(module_mvl)
-add_utl_test(module_random)
-add_utl_test(module_stre)
+add_utl_test(test_json)
+add_utl_test(test_log)
+add_utl_test(test_math)
+add_utl_test(test_mvl)
+add_utl_test(test_random)
+add_utl_test(test_stre)
