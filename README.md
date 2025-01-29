@@ -2,11 +2,13 @@
 [<img src ="docs/images/icon_license_mit.svg">](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/LICENSE.md)
 [<img src ="docs/images/icon_header_only.svg">](https://en.wikipedia.org/wiki/Header-only)
 
-# Prototyping utils
+# UTL
 
-This is a collection of various utilities that aim to provide a set of concise "helpers" that allow prototyping with minimal boilerplate. Most of the following modules were created during my work in gamedev, HPC and math research projects.
+**UTL** is a collection of small self-contained libraries that aim to provide a set of concise utilities aimed at prototyping with minimal boilerplate. Most of the modules were created during my work in gamedev and math research projects.
 
-For the ease of integration, this library is distributed in a form of a **single header**, which can be found [here](https://github.com/DmitriBogdanov/prototyping_utils/blob/master/include/proto_utils.hpp).
+For the ease of integration, this library is distributed in a form of a **single header**, which can be found [here](https://github.com/DmitriBogdanov/UTL/blob/master/include/UTL.hpp).
+
+All modules can also be downloaded [individually]().
 
 ## Design goals
 

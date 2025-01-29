@@ -5,7 +5,7 @@
 
 #include "test.hpp"
 
-#include "module_stre.hpp"
+#include "UTL/stre.hpp"
 
 // _______________________ INCLUDES _______________________
 
