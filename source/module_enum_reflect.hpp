@@ -19,7 +19,7 @@
 #include <stdexcept>   // out_of_range
 #include <string>      // string
 #include <string_view> // string_view
-#include <type_traits> // underlying_type_t
+#include <type_traits> // underlying_type_t<>, enable_if_t<>, is_enum_v<>
 #include <utility>     // pair<>
 
 // ____________________ DEVELOPER DOCS ____________________
@@ -162,13 +162,20 @@ template <class E>
 constexpr auto size = _meta<E>::size;
 
 template <class E>
-constexpr auto to_string(E value) {
+[[nodiscard]] constexpr auto to_string(E value) {
     return _meta<E>::to_string(value);
 }
 
 template <class E>
-constexpr auto from_string(std::string_view str) {
+[[nodiscard]] constexpr auto from_string(std::string_view str) {
     return _meta<E>::from_string(str);
+}
+
+template<class E, std::enable_if_t<std::is_enum_v<E>, bool> = true>
+[[nodiscard]] constexpr auto to_underlying(E value) noexcept {
+    return static_cast<std::underlying_type_t<E>>(value);
+    // doesn't really require reflection, but might as well have it here,
+    // in C++23 gets replaced by builtin 'std::to_underlying'
 }
 
 } // namespace utl::enum_reflect
