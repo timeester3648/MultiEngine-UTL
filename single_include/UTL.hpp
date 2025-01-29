@@ -1,8 +1,8 @@
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ DmitriBogdanov/prototyping_utils ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ DmitriBogdanov/UTL ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //
 // Module:        utl::enum_reflect
-// Documentation: https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_enum_reflect.md
-// Source repo:   https://github.com/DmitriBogdanov/prototyping_utils
+// Documentation: https://github.com/DmitriBogdanov/UTL/blob/master/docs/module_enum_reflect.md
+// Source repo:   https://github.com/DmitriBogdanov/UTL
 //
 // This project is licensed under the MIT License
 //
@@ -188,11 +188,11 @@ template<class E, std::enable_if_t<std::is_enum_v<E>, bool> = true>
 
 
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ DmitriBogdanov/prototyping_utils ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ DmitriBogdanov/UTL ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //
 // Module:        utl::json
-// Documentation: https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_json.md
-// Source repo:   https://github.com/DmitriBogdanov/prototyping_utils
+// Documentation: https://github.com/DmitriBogdanov/UTL/blob/master/docs/module_json.md
+// Source repo:   https://github.com/DmitriBogdanov/UTL
 //
 // This project is licensed under the MIT License
 //
@@ -1664,11 +1664,11 @@ void _assign_node_to_value_recursively(std::array<T, N>& value, const Node& node
 
 
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ DmitriBogdanov/prototyping_utils ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ DmitriBogdanov/UTL ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //
 // Module:        utl::log
-// Documentation: https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_log.md
-// Source repo:   https://github.com/DmitriBogdanov/prototyping_utils
+// Documentation: https://github.com/DmitriBogdanov/UTL/blob/master/docs/module_log.md
+// Source repo:   https://github.com/DmitriBogdanov/UTL
 //
 // This project is licensed under the MIT License
 //
@@ -1764,7 +1764,7 @@ inline std::size_t _get_thread_index(const std::thread::id id) {
 
     static std::mutex                                       mutex;
     static std::unordered_map<std::thread::id, std::size_t> thread_ids;
-    std::lock_guard<std::mutex>                             lock(mutex);
+    const std::lock_guard                                   lock(mutex);
 
     const auto it = thread_ids.find(id);
     if (it == thread_ids.end()) return thread_ids[id] = next_index++;
@@ -2159,19 +2159,24 @@ template <class... Args>
 
 template <class... Args>
 void print(Args&&... args) {
-    std::cout << Stringifier::stringify(std::forward<Args>(args)...);
+    const auto                        res = Stringifier::stringify(std::forward<Args>(args)...);
+    static std::mutex                 mutex;
+    const std::lock_guard<std::mutex> lock(mutex);
+    std::cout << res << std::flush;
+    // print in a thread-safe way and instantly flush every message, this is much slower that buffering
+    // (which regular logging methods do), but for generic console output this is a more robust way
 }
 
 template <class... Args>
 void println(Args&&... args) {
-    std::cout << Stringifier::stringify(std::forward<Args>(args)...) << '\n';
+    print(std::forward<Args>(args)..., '\n');
 }
 
 // ===============
 // --- Options ---
 // ===============
 
-enum class Verbosity { ERR = 1, WARN = 2, INFO = 3, TRACE = 4 };
+enum class Verbosity { ERR = 1, WARN = 2, INFO = 3, DEBUG = 4, TRACE = 5 };
 
 enum class OpenMode { REWRITE, APPEND };
 
@@ -2234,15 +2239,57 @@ constexpr std::string_view _col_rd_message  = "\n";
 // --- ANSI Colors ---
 // -------------------
 
-constexpr std::string_view _color_heading = "\033[36;1m"; // bold cyan
-constexpr std::string_view _color_reset   = "\033[0m";
+namespace color {
 
-constexpr std::string_view _color_trace = "\033[90m";   // gray
-constexpr std::string_view _color_info  = "\033[37m";   // white
-constexpr std::string_view _color_warn  = "\033[33m";   // yellow
-constexpr std::string_view _color_err   = "\033[31;1m"; // bold red
+constexpr std::string_view black          = "\033[30m";
+constexpr std::string_view red            = "\033[31m";
+constexpr std::string_view green          = "\033[32m";
+constexpr std::string_view yellow         = "\033[33m";
+constexpr std::string_view blue           = "\033[34m";
+constexpr std::string_view magenta        = "\033[35m";
+constexpr std::string_view cyan           = "\033[36m";
+constexpr std::string_view white          = "\033[37m";
+constexpr std::string_view bright_black   = "\033[90m"; // also known as "gray"
+constexpr std::string_view bright_red     = "\033[91m";
+constexpr std::string_view bright_green   = "\033[92m";
+constexpr std::string_view bright_yellow  = "\033[93m";
+constexpr std::string_view bright_blue    = "\033[94m";
+constexpr std::string_view bright_magenta = "\033[95m";
+constexpr std::string_view bright_cyan    = "\033[96m";
+constexpr std::string_view bright_white   = "\033[97m";
 
-// MARK:
+constexpr std::string_view bold_black          = "\033[30;1m";
+constexpr std::string_view bold_red            = "\033[31;1m";
+constexpr std::string_view bold_green          = "\033[32;1m";
+constexpr std::string_view bold_yellow         = "\033[33;1m";
+constexpr std::string_view bold_blue           = "\033[34;1m";
+constexpr std::string_view bold_magenta        = "\033[35;1m";
+constexpr std::string_view bold_cyan           = "\033[36;1m";
+constexpr std::string_view bold_white          = "\033[37;1m";
+constexpr std::string_view bold_bright_black   = "\033[90;1m";
+constexpr std::string_view bold_bright_red     = "\033[91;1m";
+constexpr std::string_view bold_bright_green   = "\033[92;1m";
+constexpr std::string_view bold_bright_yellow  = "\033[93;1m";
+constexpr std::string_view bold_bright_blue    = "\033[94;1m";
+constexpr std::string_view bold_bright_magenta = "\033[95;1m";
+constexpr std::string_view bold_bright_cyan    = "\033[96;1m";
+constexpr std::string_view bold_bright_white   = "\033[97;1m";
+
+constexpr std::string_view reset = "\033[0m";
+
+// logger itself only uses a few of those colors, but since we do it this way might as well provide
+// the whole spectrum so users can color 'cout' and 'log::println()' statements too
+
+} // namespace color
+
+constexpr std::string_view _color_heading = color::bold_cyan;
+constexpr std::string_view _color_reset   = color::reset;
+
+constexpr std::string_view _color_trace = color::bright_black;
+constexpr std::string_view _color_debug = color::green;
+constexpr std::string_view _color_info  = color::white;
+constexpr std::string_view _color_warn  = color::yellow;
+constexpr std::string_view _color_err   = color::bold_red;
 
 // ==================
 // --- Sink class ---
@@ -2325,23 +2372,15 @@ private:
         buffer.clear();
 
         // Print log header on the first call
-        if (this->print_header) {
-            this->print_header = false;
-
-            if (this->colors == Colors::ENABLE) buffer += _color_heading;
-            if (this->columns.datetime)
-                append_stringified(buffer, _col_ld_datetime, PadRight{"date       time", _col_w_datetime},
-                                   _col_rd_datetime);
-            if (this->columns.uptime)
-                append_stringified(buffer, _col_ld_uptime, PadRight{"uptime", _col_w_uptime}, _col_rd_uptime);
-            if (this->columns.thread)
-                append_stringified(buffer, _col_ld_thread, PadRight{"thread", _col_w_thread}, _col_rd_thread);
-            if (this->columns.callsite)
-                append_stringified(buffer, _col_ld_callsite, PadRight{"callsite", _col_w_callsite}, _col_rd_callsite);
-            if (this->columns.level)
-                append_stringified(buffer, _col_ld_level, PadRight{"level", _col_w_level}, _col_rd_level);
-            if (this->columns.message) append_stringified(buffer, _col_ld_message, "message", _col_rd_message);
-            if (this->colors == Colors::ENABLE) buffer += _color_reset;
+        {
+            static std::mutex     header_mutex;
+            const std::lock_guard lock(header_mutex);
+            if (this->print_header) {
+                this->print_header = false;
+                this->format_header(buffer);
+            }
+            // no need to lock the buffer, other threads can't reach buffer
+            // output code while they're stuck waiting for the header to print
         }
 
         // Format columns one-by-one
@@ -2349,6 +2388,7 @@ private:
             case Verbosity::ERR: buffer += _color_err; break;
             case Verbosity::WARN: buffer += _color_warn; break;
             case Verbosity::INFO: buffer += _color_info; break;
+            case Verbosity::DEBUG: buffer += _color_debug; break;
             case Verbosity::TRACE: buffer += _color_trace; break;
             }
 
@@ -2361,11 +2401,11 @@ private:
 
         if (this->colors == Colors::ENABLE) buffer += _color_reset;
 
-        this->ostream_ref().write(buffer.data(), buffer.size());
-
         // 'std::ostream' isn't guaranteed to be thread-safe, even through many implementations seem to have
         // some thread-safety built into `std::cout` the same cannot be said about a generic 'std::ostream'
-        std::lock_guard<std::mutex> ostream_lock(this->ostream_mutex);
+        const std::lock_guard ostream_lock(this->ostream_mutex);
+
+        this->ostream_ref().write(buffer.data(), buffer.size());
 
         // flush every message immediately
         if (this->flush_interval.count() == 0) {
@@ -2376,6 +2416,23 @@ private:
             this->last_flushed = now;
             this->ostream_ref().flush();
         }
+    }
+
+    void format_header(std::string& buffer) {
+        if (this->colors == Colors::ENABLE) buffer += _color_heading;
+        if (this->columns.datetime)
+            append_stringified(buffer, _col_ld_datetime, PadRight{"date       time", _col_w_datetime},
+                               _col_rd_datetime);
+        if (this->columns.uptime)
+            append_stringified(buffer, _col_ld_uptime, PadRight{"uptime", _col_w_uptime}, _col_rd_uptime);
+        if (this->columns.thread)
+            append_stringified(buffer, _col_ld_thread, PadRight{"thread", _col_w_thread}, _col_rd_thread);
+        if (this->columns.callsite)
+            append_stringified(buffer, _col_ld_callsite, PadRight{"callsite", _col_w_callsite}, _col_rd_callsite);
+        if (this->columns.level)
+            append_stringified(buffer, _col_ld_level, PadRight{"level", _col_w_level}, _col_rd_level);
+        if (this->columns.message) append_stringified(buffer, _col_ld_message, "message", _col_rd_message);
+        if (this->colors == Colors::ENABLE) buffer += _color_reset;
     }
 
     void format_column_datetime(std::string& buffer) {
@@ -2451,6 +2508,7 @@ private:
         case Verbosity::ERR: buffer += "  ERR"; break;
         case Verbosity::WARN: buffer += " WARN"; break;
         case Verbosity::INFO: buffer += " INFO"; break;
+        case Verbosity::DEBUG: buffer += "DEBUG"; break;
         case Verbosity::TRACE: buffer += "TRACE"; break;
         }
         buffer += _col_rd_level;
@@ -2522,6 +2580,9 @@ inline Sink& add_file_sink(const std::string& filename, OpenMode open_mode = Ope
 #define UTL_LOG_INFO(...)                                                                                              \
     utl::log::_logger::instance().push_message({__FILE__, __LINE__}, {utl::log::Verbosity::INFO}, __VA_ARGS__)
 
+#define UTL_LOG_DEBUG(...)                                                                                             \
+    utl::log::_logger::instance().push_message({__FILE__, __LINE__}, {utl::log::Verbosity::DEBUG}, __VA_ARGS__)
+
 #define UTL_LOG_TRACE(...)                                                                                             \
     utl::log::_logger::instance().push_message({__FILE__, __LINE__}, {utl::log::Verbosity::TRACE}, __VA_ARGS__)
 
@@ -2529,11 +2590,13 @@ inline Sink& add_file_sink(const std::string& filename, OpenMode open_mode = Ope
 #define UTL_LOG_DERR(...) UTL_LOG_ERR(__VA_ARGS__)
 #define UTL_LOG_DWARN(...) UTL_LOG_WARN(__VA_ARGS__)
 #define UTL_LOG_DINFO(...) UTL_LOG_INFO(__VA_ARGS__)
+#define UTL_LOG_DDEBUG(...) UTL_LOG_DEBUG(__VA_ARGS__)
 #define UTL_LOG_DTRACE(...) UTL_LOG_TRACE(__VA_ARGS__)
 #else
 #define UTL_LOG_DERR(...)
 #define UTL_LOG_DWARN(...)
 #define UTL_LOG_DINFO(...)
+#define UTL_LOG_DDEBUG(...)
 #define UTL_LOG_DTRACE(...)
 #endif
 
@@ -2548,11 +2611,11 @@ inline Sink& add_file_sink(const std::string& filename, OpenMode open_mode = Ope
 
 
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ DmitriBogdanov/prototyping_utils ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ DmitriBogdanov/UTL ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //
 // Module:        utl::math
-// Documentation: https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_math.md
-// Source repo:   https://github.com/DmitriBogdanov/prototyping_utils
+// Documentation: https://github.com/DmitriBogdanov/UTL/blob/master/docs/module_math.md
+// Source repo:   https://github.com/DmitriBogdanov/UTL
 //
 // This project is licensed under the MIT License
 //
@@ -2891,11 +2954,11 @@ template <class IntType, std::enable_if_t<std::is_integral<IntType>::value, bool
 
 
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ DmitriBogdanov/prototyping_utils ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ DmitriBogdanov/UTL ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //
 // Module:        utl::mvl
-// Documentation: https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_mvl.md
-// Source repo:   https://github.com/DmitriBogdanov/prototyping_utils
+// Documentation: https://github.com/DmitriBogdanov/UTL/blob/master/docs/module_mvl.md
+// Source repo:   https://github.com/DmitriBogdanov/UTL
 //
 // This project is licensed under the MIT License
 //
@@ -5502,11 +5565,11 @@ return_type operator*(const L& left, const R& right) {
 
 
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ DmitriBogdanov/prototyping_utils ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ DmitriBogdanov/UTL ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //
 // Module:        utl::parallel
-// Documentation: https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_parallel.md
-// Source repo:   https://github.com/DmitriBogdanov/prototyping_utils
+// Documentation: https://github.com/DmitriBogdanov/UTL/blob/master/docs/module_parallel.md
+// Source repo:   https://github.com/DmitriBogdanov/UTL
 //
 // This project is licensed under the MIT License
 //
@@ -6033,11 +6096,11 @@ struct max {
 
 
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ DmitriBogdanov/prototyping_utils ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ DmitriBogdanov/UTL ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //
 // Module:        utl::predef
-// Documentation: https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_predef.md
-// Source repo:   https://github.com/DmitriBogdanov/prototyping_utils
+// Documentation: https://github.com/DmitriBogdanov/UTL/blob/master/docs/module_predef.md
+// Source repo:   https://github.com/DmitriBogdanov/UTL
 //
 // This project is licensed under the MIT License
 //
@@ -6616,11 +6679,11 @@ inline void _split_enum_args(const char* va_args, std::string* strings, int coun
 
 
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ DmitriBogdanov/prototyping_utils ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ DmitriBogdanov/UTL ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //
 // Module:        utl::profiler
-// Documentation: https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_profiler.md
-// Source repo:   https://github.com/DmitriBogdanov/prototyping_utils
+// Documentation: https://github.com/DmitriBogdanov/UTL/blob/master/docs/module_profiler.md
+// Source repo:   https://github.com/DmitriBogdanov/UTL
 //
 // This project is licensed under the MIT License
 //
@@ -7065,11 +7128,11 @@ inline void _utl_profiler_atexit() {
 
 
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ DmitriBogdanov/prototyping_utils ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ DmitriBogdanov/UTL ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //
 // Module:        utl::progressbar
-// Documentation: https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_progressbar.md
-// Source repo:   https://github.com/DmitriBogdanov/prototyping_utils
+// Documentation: https://github.com/DmitriBogdanov/UTL/blob/master/docs/module_progressbar.md
+// Source repo:   https://github.com/DmitriBogdanov/UTL
 //
 // This project is licensed under the MIT License
 //
@@ -7277,11 +7340,11 @@ public:
 
 
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ DmitriBogdanov/prototyping_utils ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ DmitriBogdanov/UTL ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //
 // Module:        utl::random
-// Documentation: https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_random.md
-// Source repo:   https://github.com/DmitriBogdanov/prototyping_utils
+// Documentation: https://github.com/DmitriBogdanov/UTL/blob/master/docs/module_random.md
+// Source repo:   https://github.com/DmitriBogdanov/UTL
 //
 // This project is licensed under the MIT License
 //
@@ -8055,11 +8118,11 @@ T rand_linear_combination(const T& A, const T& B) { // random linear combination
 
 
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ DmitriBogdanov/prototyping_utils ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ DmitriBogdanov/UTL ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //
 // Module:        utl::shell
-// Documentation: https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_shell.md
-// Source repo:   https://github.com/DmitriBogdanov/prototyping_utils
+// Documentation: https://github.com/DmitriBogdanov/UTL/blob/master/docs/module_shell.md
+// Source repo:   https://github.com/DmitriBogdanov/UTL
 //
 // This project is licensed under the MIT License
 //
@@ -8261,11 +8324,11 @@ inline CommandResult run_command(const std::string& command) {
 
 
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ DmitriBogdanov/prototyping_utils ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ DmitriBogdanov/UTL ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //
 // Module:        utl::sleep
-// Documentation: https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_sleep.md
-// Source repo:   https://github.com/DmitriBogdanov/prototyping_utils
+// Documentation: https://github.com/DmitriBogdanov/UTL/blob/master/docs/module_sleep.md
+// Source repo:   https://github.com/DmitriBogdanov/UTL
 //
 // This project is licensed under the MIT License
 //
@@ -8358,11 +8421,11 @@ inline void system(double ms) { std::this_thread::sleep_for(_chrono_ns(static_ca
 
 
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ DmitriBogdanov/prototyping_utils ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ DmitriBogdanov/UTL ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //
 // Module:        utl::stre
-// Documentation: https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_stre.md
-// Source repo:   https://github.com/DmitriBogdanov/prototyping_utils
+// Documentation: https://github.com/DmitriBogdanov/UTL/blob/master/docs/module_stre.md
+// Source repo:   https://github.com/DmitriBogdanov/UTL
 //
 // This project is licensed under the MIT License
 //
@@ -8676,11 +8739,11 @@ template <class T>
 
 
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ DmitriBogdanov/prototyping_utils ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ DmitriBogdanov/UTL ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //
 // Module:        utl::struct_reflect
-// Documentation: https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_struct_reflect.md
-// Source repo:   https://github.com/DmitriBogdanov/prototyping_utils
+// Documentation: https://github.com/DmitriBogdanov/UTL/blob/master/docs/module_struct_reflect.md
+// Source repo:   https://github.com/DmitriBogdanov/UTL
 //
 // This project is licensed under the MIT License
 //
@@ -8902,11 +8965,11 @@ constexpr auto for_each(S&& value, Func&& func) {
 
 
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ DmitriBogdanov/prototyping_utils ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ DmitriBogdanov/UTL ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //
 // Module:        utl::table
-// Documentation: https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_table.md
-// Source repo:   https://github.com/DmitriBogdanov/prototyping_utils
+// Documentation: https://github.com/DmitriBogdanov/UTL/blob/master/docs/module_table.md
+// Source repo:   https://github.com/DmitriBogdanov/UTL
 //
 // This project is licensed under the MIT License
 //
@@ -9116,11 +9179,11 @@ inline void hline() {
 
 
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ DmitriBogdanov/prototyping_utils ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ DmitriBogdanov/UTL ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //
 // Module:        utl::timer
-// Documentation: https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_timer.md
-// Source repo:   https://github.com/DmitriBogdanov/prototyping_utils
+// Documentation: https://github.com/DmitriBogdanov/UTL/blob/master/docs/module_timer.md
+// Source repo:   https://github.com/DmitriBogdanov/UTL
 //
 // This project is licensed under the MIT License
 //
@@ -9300,11 +9363,11 @@ auto _available_localtime_impl(TimeMoment time_moment, TimeType timer)
 
 
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ DmitriBogdanov/prototyping_utils ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ DmitriBogdanov/UTL ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //
 // Module:        utl::voidstream
-// Documentation: https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_voidstream.md
-// Source repo:   https://github.com/DmitriBogdanov/prototyping_utils
+// Documentation: https://github.com/DmitriBogdanov/UTL/blob/master/docs/module_voidstream.md
+// Source repo:   https://github.com/DmitriBogdanov/UTL
 //
 // This project is licensed under the MIT License
 //

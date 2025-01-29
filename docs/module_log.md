@@ -162,6 +162,8 @@ Stringifies all `args...` and prints the result to `std::cout`.
 
 `println()` also starts a new line at the end.
 
+**Note:** `print`-functions are thread-safe and flush their output instantly.
+
 ### Logging options
 
 ```cpp
@@ -175,7 +177,8 @@ Enumeration that determines verbosity level of the logger sink. Sinks will only 
 | `ERR`           | **1**    | 🔴 **Bold red** |
 | `WARN`          | **2**    | 🟡 Yellow       |
 | `INFO`          | **3**    | ⚪ White        |
-| `TRACE`         | **4**    | ⚫ Gray         |
+| `DEBUG`         | **4**    | 🟢 Green        |
+| `TRACE`         | **5**    | ⚫ Gray         |
 
 **Note 1:** "Logging style" column applies only of sink colors are set to`Colors::ENABLE`.
 
