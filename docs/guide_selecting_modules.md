@@ -1,6 +1,6 @@
 # Selecting only specific UTL modules
 
-[<- back to README.md](https://github.com/DmitriBogdanov/prototyping_utils/tree/master)
+[<- back to README.md](https://github.com/DmitriBogdanov/UTL/tree/master)
 
 Specific modules can be selected to restrict accessible functionality and reduce the amount of included standard headers.
 

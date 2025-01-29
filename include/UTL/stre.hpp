@@ -1,8 +1,8 @@
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ DmitriBogdanov/prototyping_utils ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ DmitriBogdanov/UTL ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //
 // Module:        utl::stre
-// Documentation: https://github.com/DmitriBogdanov/prototyping_utils/blob/master/docs/module_stre.md
-// Source repo:   https://github.com/DmitriBogdanov/prototyping_utils
+// Documentation: https://github.com/DmitriBogdanov/UTL/blob/master/docs/module_stre.md
+// Source repo:   https://github.com/DmitriBogdanov/UTL
 //
 // This project is licensed under the MIT License
 //

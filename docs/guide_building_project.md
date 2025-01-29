@@ -1,12 +1,12 @@
 # Building tests & examples
 
-[<- back to README.md](https://github.com/DmitriBogdanov/prototyping_utils/tree/master)
+[<- back to README.md](https://github.com/DmitriBogdanov/UTL/tree/master)
 
 This project uses [CMake](https://cmake.org) build system.
 
-Unit testing for modules is implemented using [doctest](https://github.com/doctest/doctest) together with **CMake** testing facilities (see [CTest](https://cmake.org/cmake/help/latest/manual/ctest.1.html)). All tests can be found in [`tests/`](https://github.com/DmitriBogdanov/prototyping_utils/tree/master/tests) split by per-module basis.
+Unit testing for modules is implemented using [doctest](https://github.com/doctest/doctest) together with **CMake** testing facilities (see [CTest](https://cmake.org/cmake/help/latest/manual/ctest.1.html)). All tests can be found in [`tests/`](https://github.com/DmitriBogdanov/UTL/tree/master/tests) split by per-module basis.
 
-Benchmarks are implemented using the [nanobench](https://github.com/martinus/nanobench) functionality and can be found in [`benchmarks/`](https://github.com/DmitriBogdanov/prototyping_utils/tree/master/benchmarks) split by per-module basis.
+Benchmarks are implemented using the [nanobench](https://github.com/martinus/nanobench) functionality and can be found in [`benchmarks/`](https://github.com/DmitriBogdanov/UTL/tree/master/benchmarks) split by per-module basis.
 
 All tests and benchmarks compile with `-Wall -Wextra -Wpedantic -Werror` flags.
 
@@ -15,8 +15,8 @@ All tests and benchmarks compile with `-Wall -Wextra -Wpedantic -Werror` flags.
 Clone the repo:
 
 ```bash
-git clone https://github.com/DmitriBogdanov/prototyping_utils.git &&
-cd "prototyping_utils/"
+git clone https://github.com/DmitriBogdanov/UTL.git &&
+cd "UTL/"
 ```
 
 Configure & build the project:
@@ -57,8 +57,8 @@ target_compile_options(run PRIVATE -O2 -Wall -Wextra -Wpedantic -Werror)
 Clone the repo:
 
 ```bash
-git clone https://github.com/DmitriBogdanov/prototyping_utils.git &&
-cd "prototyping_utils/"
+git clone https://github.com/DmitriBogdanov/UTL.git &&
+cd "UTL/"
 ```
 
 Configure **CMake**:
