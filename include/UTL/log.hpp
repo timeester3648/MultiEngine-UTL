@@ -254,6 +254,8 @@ struct Pad {
     constexpr static bool is_pad = true;
 }; // pads value on both sides (aka center alignment)
 
+constexpr std::string_view indent = "    ";
+
 // --- Stringifier ---
 // -------------------
 

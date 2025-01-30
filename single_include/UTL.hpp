@@ -1920,6 +1920,8 @@ struct Pad {
     constexpr static bool is_pad = true;
 }; // pads value on both sides (aka center alignment)
 
+constexpr std::string_view indent = "    ";
+
 // --- Stringifier ---
 // -------------------
 
@@ -8840,12 +8842,6 @@ struct _meta {
     // makes instantiation of this template a compile-time error
 };
 
-template <class Func, class Tuple>
-void tuple_for_each(Tuple&& tuple, Func&& func) {
-    std::apply([&func](auto&&... args) { (func(std::forward<decltype(args)>(args)), ...); },
-               std::forward<Tuple>(tuple));
-}
-
 // clang-format off
 #define utl_srfl_type_name(arg_) std::string_view
 #define utl_srfl_type_cref(arg_) std::add_lvalue_reference_t<std::add_const_t<std::remove_reference_t<decltype(type::arg_)>>>
@@ -8858,6 +8854,9 @@ void tuple_for_each(Tuple&& tuple, Func&& func) {
 #define utl_srfl_make_ref(arg_) val.arg_
 #define utl_srfl_make_centry(arg_) utl_srfl_type_centry(arg_){ utl_srfl_make_name(arg_), utl_srfl_make_cref(arg_) }
 #define utl_srfl_make_entry(arg_) utl_srfl_type_entry(arg_){ utl_srfl_make_name(arg_), utl_srfl_make_ref(arg_) }
+
+#define utl_srfl_call_unary_func(arg_) func(std::forward<S>(val).arg_);
+#define utl_srfl_call_binary_func(arg_) func(std::forward<S1>(val_1).arg_, std::forward<S2>(val_2).arg_);
 // clang-format on
 
 // Note: 'c' prefix means 'const'
@@ -8901,13 +8900,14 @@ void tuple_for_each(Tuple&& tuple, Func&& func) {
             return std::get<I>(_meta::field_view(val));                                                                \
         }                                                                                                              \
                                                                                                                        \
-        template <class Func>                                                                                          \
-        constexpr static void for_each(const type& val, Func&& func) {                                                 \
-            tuple_for_each(_meta::const_field_view(val), std::forward<Func>(func));                                    \
+        template <class S, class Func>                                                                                 \
+        constexpr static void for_each(S&& val, Func&& func) {                                                         \
+            utl_srfl_map(utl_srfl_call_unary_func, __VA_ARGS__)                                                        \
         }                                                                                                              \
-        template <class Func>                                                                                          \
-        constexpr static void for_each(type& val, Func&& func) {                                                       \
-            tuple_for_each(_meta::field_view(val), std::forward<Func>(func));                                          \
+                                                                                                                       \
+        template <class S1, class S2, class Func>                                                                      \
+        constexpr static void for_each(S1&& val_1, S2&& val_2, Func&& func) {                                          \
+            utl_srfl_map(utl_srfl_call_binary_func, __VA_ARGS__)                                                       \
         }                                                                                                              \
     }
 
@@ -8921,7 +8921,7 @@ template <class S>
 constexpr auto names = _meta<S>::names;
 
 template <class S>
-constexpr auto const_field_view(const S& value) {
+constexpr auto field_view(const S& value) {
     return _meta<S>::const_field_view(value);
 }
 
@@ -8931,7 +8931,7 @@ constexpr auto field_view(S& value) {
 }
 
 template <class S>
-constexpr auto const_entry_view(const S& value) {
+constexpr auto entry_view(const S& value) {
     return _meta<S>::const_entry_view(value);
 }
 
@@ -8953,6 +8953,46 @@ template <class S, class Func>
 constexpr auto for_each(S&& value, Func&& func) {
     using struct_type = typename std::decay_t<S>;
     return _meta<struct_type>::template for_each(value, func);
+}
+
+template <class S1, class S2, class Func>
+constexpr auto for_each(S1&& value_1, S2&& value_2, Func&& func) {
+    using struct_type_1 = typename std::decay_t<S1>;
+    using struct_type_2 = typename std::decay_t<S2>;
+    static_assert(std::is_same_v<struct_type_1, struct_type_2>,
+                  "Called 'struct_reflect::for_each(s1, s2, func)' with incompatible argument types.");
+    return _meta<struct_type_1>::template for_each(value_1, value_2, func);
+}
+
+// --- Misc utils ---
+// ------------------
+
+// Struct reflection provides its own 'for_each()' with no tuple magic, this function is useful
+// in case user want to operate on tuples rather than structs using similar API, sort of a "bonus utility"
+// that simply doesn't have any better module to be a part of
+template <class T, class Func>
+void tuple_for_each(T&& tuple, Func&& func) {
+    std::apply([&func](auto&&... args) { (func(std::forward<decltype(args)>(args)), ...); }, std::forward<T>(tuple));
+}
+
+// For a pair of tuple 'std::apply' trick doesn't cut it, gotta do the standard thing
+// with recursion over the index sequence. This looks kinda horrible
+template <class T1, class T2, class Func, std::size_t... Idx>
+static void _tuple_for_each_impl(T1&& tuple_1, T2&& tuple_2, Func&& func, std::index_sequence<Idx...>) {
+    (func(std::get<Idx>(std::forward<T1>(tuple_1)), std::get<Idx>(std::forward<T2>(tuple_2))), ...);
+    // fold expression '( f(args), ... )' invokes 'f(args)' for all indeces in the index sequence
+}
+
+template <template <class...> class T1, template <class...> class T2, class Func, class... Args>
+static void _tuple_for_each_fwd(T1<Args...>&& tuple_1, T2<Args...>&& tuple_2, Func&& func) {
+    _tuple_for_each_impl(std::forward<T1<Args...>>(tuple_1), std::forward<T2<Args...>>(tuple_2), std::forward<Func>(func),
+                         std::index_sequence_for<Args...>{});
+    // forward argument while deducing properly sized index sequence
+}
+
+template <class T1, class T2, class Func>
+void tuple_for_each(T1&& tuple_1, T2&& tuple_2, Func&& func) {
+    _tuple_for_each_fwd(std::forward<T1>(tuple_1), std::forward<T2>(tuple_2), std::forward<Func>(func));
 }
 
 } // namespace utl::struct_reflect
