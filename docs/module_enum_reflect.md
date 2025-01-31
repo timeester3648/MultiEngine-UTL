@@ -1,10 +1,11 @@
-# utl::rfl
+# utl::enum_reflect
 
 [<- back to README.md](https://github.com/DmitriBogdanov/UTL/tree/master)
 
-<div dir="rtl">[Implementation header ->](../include/UTL/module_enum_reflect.hpp)</div>
-
 **enum_reflect** is a lean `enum` reflection library based around the [map-macro](https://github.com/swansontec/map-macro).
+
+> [!Note]
+> Implementation header can be found [here](../include/UTL/module_enum_reflect.hpp).
 
 ## Definitions
 
