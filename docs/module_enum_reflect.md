@@ -5,7 +5,7 @@
 **enum_reflect** is a lean `enum` reflection library based around the [map-macro](https://github.com/swansontec/map-macro).
 
 > [!Note]
-> Implementation header can be found [here](../include/UTL/module_enum_reflect.hpp).
+> Implementation header can be found [here](../include/UTL/enum_reflect.hpp).
 
 ## Definitions
 
