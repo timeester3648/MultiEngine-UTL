@@ -1,6 +1,6 @@
 # utl::enum_reflect
 
-[<- back to README.md](https://github.com/DmitriBogdanov/UTL/tree/master)
+[<- back to README.md](..)
 
 **enum_reflect** is a lean `enum` reflection library based around the [map-macro](https://github.com/swansontec/map-macro).
 
