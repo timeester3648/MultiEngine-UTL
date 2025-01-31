@@ -29,6 +29,7 @@ Secondary design goals also include:
 
 | Module | Short description |
 | - | - |
+| [**utl::enum_reflect**](https://github.com/DmitriBogdanov/UTL/blob/master/docs/module_enum_reflect.md) | Enum reflection |
 | [**utl::json**](https://github.com/DmitriBogdanov/UTL/blob/master/docs/module_json.md) | JSON parsing and serializing |
 | [**utl::log**](https://github.com/DmitriBogdanov/UTL/blob/master/docs/module_log.md) | Logging library |
 | [**utl::math**](https://github.com/DmitriBogdanov/UTL/blob/master/docs/module_math.md) | Math-related utilities |

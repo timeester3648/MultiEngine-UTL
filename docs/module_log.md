@@ -416,6 +416,7 @@ template <class... Args> std::string operator()(Args&&... args);
                 // Calls one of ->
                 template <class T> static void append_bool(     std::string& buffer, const T& value);
                 template <class T> static void append_int(      std::string& buffer, const T& value);
+                template <class T> static void append_enum(     std::string& buffer, const T& value);
                 template <class T> static void append_float(    std::string& buffer, const T& value);
                 template <class T> static void append_complex(  std::string& buffer, const T& value);
                 template <class T> static void append_string(   std::string& buffer, const T& value);
@@ -495,14 +496,15 @@ Most custom containers should be compatible with `log::Stringifier` (and by cons
 | Group                | Priority | Criteria                                                     |
 | -------------------- | -------- | ------------------------------------------------------------ |
 | `append_bool()`      | **1**    | `T` is `bool`                                                |
-| `append_string()`    | **2**    | `T` is `char` or convertible to `std::string` or `std::string_view` |
+| `append_string()`    | **2**    | `T` is `char` or convertible to `std::string` / `std::string_view` |
 | `append_int()`       | **3**    | `T` is integral                                              |
-| `append_float()`     | **4**    | `T` is floating point                                        |
-| `append_complex()`   | **5**    | `T` has `real()`, `imag()` methods                           |
-| `append_array()`     | **6**    | `T` has `begin()`, `end()` methods that return an incrementable iterator |
-| `append_tuple()`     | **7**    | `T` supports `std::get<>()` and `std::tuple_size()`          |
-| `append_adaptor()`   | **8**    | `T` has member type `container_type`                         |
-| `append_printable()` | **9**    | `T` supports `std::ostream` output with `operator <<`        |
+| `append_enum()`      | **4**    | `T` is enumeration                                           |
+| `append_float()`     | **5**    | `T` is floating point                                        |
+| `append_complex()`   | **6**    | `T` has `real()`, `imag()` methods                           |
+| `append_array()`     | **7**    | `T` has `begin()`, `end()` methods that return an incrementable iterator |
+| `append_tuple()`     | **8**    | `T` supports `std::get<>()` and `std::tuple_size()`          |
+| `append_adaptor()`   | **9**    | `T` has member type `container_type`                         |
+| `append_printable()` | **10**   | `T` supports `std::ostream` output with `operator <<`        |
 
 If none of this is the case, the easiest way would be to just declare an `std::ostream` output operator like this:
 
