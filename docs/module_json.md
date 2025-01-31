@@ -703,7 +703,7 @@ Output:
 
 ## Tests
 
-`utl::json` parsing was [tested](../tests/module_json.cpp) using the standard [RFC-8259](https://datatracker.ietf.org/doc/html/rfc8259) compliance [testing suite](https://github.com/nst/JSONTestSuite/) with following metrics:
+`utl::json` parsing was [tested](../tests/test_json.cpp) using the standard [RFC-8259](https://datatracker.ietf.org/doc/html/rfc8259) compliance [testing suite](https://github.com/nst/JSONTestSuite/) with following metrics:
 
 | Metric | Compliance | Note |
 | - | - | - |

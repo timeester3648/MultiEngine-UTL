@@ -1,14 +1,14 @@
 [<img src ="docs/images/icon_cpp_std_17.svg">](https://en.wikipedia.org/wiki/C%2B%2B#Standardization)
-[<img src ="docs/images/icon_license_mit.svg">](https://github.com/DmitriBogdanov/UTL/blob/master/LICENSE.md)
+[<img src ="docs/images/icon_license_mit.svg">](./LICENSE.md)
 [<img src ="docs/images/icon_header_only.svg">](https://en.wikipedia.org/wiki/Header-only)
 
 # UTL
 
 **UTL** is a collection of small self-contained libraries that aim to provide a set of concise utilities aimed at prototyping with minimal boilerplate. Most of the modules were created during my work in gamedev and math research projects.
 
-For the ease of integration, this library is distributed in a form of a **single header**, which can be found [here](https://github.com/DmitriBogdanov/UTL/blob/master/single_include/UTL.hpp).
+For the ease of integration, this library is distributed in a form of a **single header**, which can be found [here](./single_include/UTL.hpp).
 
-All modules can also be downloaded [individually](https://github.com/DmitriBogdanov/UTL/tree/master/include/UTL).
+All modules can also be downloaded [individually](./include/UTL).
 
 ## Design goals
 
@@ -29,29 +29,29 @@ Secondary design goals also include:
 
 | Module | Short description |
 | - | - |
-| [**utl::enum_reflect**](https://github.com/DmitriBogdanov/UTL/blob/master/docs/module_enum_reflect.md) | Enum reflection |
-| [**utl::json**](https://github.com/DmitriBogdanov/UTL/blob/master/docs/module_json.md) | JSON parsing and serializing |
-| [**utl::log**](https://github.com/DmitriBogdanov/UTL/blob/master/docs/module_log.md) | Logging library |
-| [**utl::math**](https://github.com/DmitriBogdanov/UTL/blob/master/docs/module_math.md) | Math-related utilities |
-| [**utl::mvl**](https://github.com/DmitriBogdanov/UTL/blob/master/docs/module_mvl.md) | Flexible API for vector and matrix operations |
-| [**utl::parallel**](https://github.com/DmitriBogdanov/UTL/blob/master/docs/module_parallel.md) | Thread pool, async tasks, parallel for, parallel reductions and etc. |
-| [**utl::predef**](https://github.com/DmitriBogdanov/UTL/blob/master/docs/module_predef.md) | Detection of architectures, compilers, platforms and etc. |
-| [**utl::profiler**](https://github.com/DmitriBogdanov/UTL/blob/master/docs/module_profiler.md) | Scope & expression profiling macros |
-| [**utl::progressbar**](https://github.com/DmitriBogdanov/UTL/blob/master/docs/module_progressbar.md) | Progress bars for CLI apps |
-| [**utl::random**](https://github.com/DmitriBogdanov/UTL/blob/master/docs/module_random.md) | PRNGs & random number generation |
-| [**utl::shell**](https://github.com/DmitriBogdanov/UTL/blob/master/docs/module_shell.md) | Shell commands and temporary files |
-| [**utl::sleep**](https://github.com/DmitriBogdanov/UTL/blob/master/docs/module_sleep.md) | Precise sleep implementations |
-| [**utl::stre**](https://github.com/DmitriBogdanov/UTL/blob/master/docs/module_stre.md) | Efficient implementations of common string utils |
-| [**utl::table**](https://github.com/DmitriBogdanov/UTL/blob/master/docs/module_table.md) | ASCII table rendering tools |
-| [**utl::timer**](https://github.com/DmitriBogdanov/UTL/blob/master/docs/module_timer.md) | Timing methods |
+| [**utl::enum_reflect**](./docs/module_enum_reflect.md) | Enum reflection |
+| [**utl::json**](./docs/module_json.md) | JSON parsing and serializing |
+| [**utl::log**](./docs/module_log.md) | Logging library |
+| [**utl::math**](./docs/module_math.md) | Math-related utilities |
+| [**utl::mvl**](./docs/module_mvl.md) | Flexible API for vector and matrix operations |
+| [**utl::parallel**](./docs/module_parallel.md) | Thread pool, async tasks, parallel for, parallel reductions and etc. |
+| [**utl::predef**](./docs/module_predef.md) | Detection of architectures, compilers, platforms and etc. |
+| [**utl::profiler**](./docs/module_profiler.md) | Scope & expression profiling macros |
+| [**utl::progressbar**](./docs/module_progressbar.md) | Progress bars for CLI apps |
+| [**utl::random**](./docs/module_random.md) | PRNGs & random number generation |
+| [**utl::shell**](./docs/module_shell.md) | Shell commands and temporary files |
+| [**utl::sleep**](./docs/module_sleep.md) | Precise sleep implementations |
+| [**utl::stre**](./docs/module_stre.md) | Efficient implementations of common string utils |
+| [**utl::table**](./docs/module_table.md) | ASCII table rendering tools |
+| [**utl::timer**](./docs/module_timer.md) | Timing methods |
 
 ## See also
 
-* [How to include only specific modules](https://github.com/DmitriBogdanov/UTL/blob/master/docs/guide_selecting_modules.md)
+* [How to include only specific modules](./docs/guide_selecting_modules.md)
 
-* [Names reserved for implementation](https://github.com/DmitriBogdanov/UTL/blob/master/docs/guide_reserved_names.md)
+* [Names reserved for implementation](./docs/guide_reserved_names.md)
 
-* [Building tests & examples](https://github.com/DmitriBogdanov/UTL/blob/master/docs/guide_building_project.md)
+* [Building tests & examples](./docs/guide_building_project.md)
 
 
 
@@ -95,4 +95,4 @@ While the library itself consists of a single header with no embedded dependenci
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE.md](https://github.com/DmitriBogdanov/UTL/blob/master/LICENSE.md) for details.
+This project is licensed under the MIT License - see the [LICENSE.md](./LICENSE.md) for details.
