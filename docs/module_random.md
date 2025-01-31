@@ -1,6 +1,6 @@
 # utl::random
 
-[<- back to README.md](https://github.com/DmitriBogdanov/UTL/tree/master)
+[<- back to README.md](..)
 
 **random** module adds most of the sensible random functions one would need.
 
@@ -314,7 +314,7 @@ Thankfully, `<random>` design is quite flexible and fully abstracts the concept 
 > `C` function [rand()](https://en.cppreference.com/w/c/numeric/random/rand) is implementation-defined, but in virtually all existing implementation it uses an old [LCG](https://en.wikipedia.org/wiki/Linear_congruential_generator) engine similar to `std::minstd_rand`. It is generally an extremely low-quality way of generating random and faces a host of additional issues on platforms with low `RAND_MAX`, which includes Windows where `RAND_MAX` is equal `32767` (less than **2 bytes** of information, an almost ridiculous value, really).
 
 > [!Important]
-> Performance ratings are **relative to the commonly used  `std::minstd_rand` / `rand()`**. Particular number may differ depending on the hardware and compilation settings, however general trends tend to stay the same. Benchmarks can be found [here](https://github.com/DmitriBogdanov/UTL/blob/master/benchmarks/benchmark_random.cpp).
+> Performance ratings are **relative to the commonly used  `std::minstd_rand` / `rand()`**. Particular number may differ depending on the hardware and compilation settings, however general trends tend to stay the same. Benchmarks can be found [here](../benchmarks/benchmark_random.cpp).
 
 Random quality ratings are as follows:
 

@@ -1,6 +1,6 @@
 # utl::predef
 
-[<- back to README.md](https://github.com/DmitriBogdanov/UTL/tree/master)
+[<- back to README.md](..)
 
 **predef** module contains macros and constant expressions for detecting compilation details, while also providing several helper macros for codegen.
 

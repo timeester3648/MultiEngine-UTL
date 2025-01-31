@@ -1,6 +1,6 @@
 # utl::log
 
-[<- back to README.md](https://github.com/DmitriBogdanov/UTL/tree/master)
+[<- back to README.md](..)
 
 **log** module aims to provide simple logging facilities for prototyping and small projects.
 

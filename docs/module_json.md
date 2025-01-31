@@ -1,6 +1,6 @@
 # utl::json
 
-[<- back to README.md](https://github.com/DmitriBogdanov/UTL/tree/master)
+[<- back to README.md](..)
 
 **json** module aims to provide an intuitive JSON manipulation API similar to [nlohmann_json](https://github.com/nlohmann/json) while being a bit more lightweight and explicit about the underlying type conversions. The few key features & differences are:
 
@@ -703,7 +703,7 @@ Output:
 
 ## Tests
 
-`utl::json` parsing was [tested](https://github.com/DmitriBogdanov/UTL/blob/master/tests/module_json.cpp) using the standard [RFC-8259](https://datatracker.ietf.org/doc/html/rfc8259) compliance [testing suite](https://github.com/nst/JSONTestSuite/) with following metrics:
+`utl::json` parsing was [tested](../tests/module_json.cpp) using the standard [RFC-8259](https://datatracker.ietf.org/doc/html/rfc8259) compliance [testing suite](https://github.com/nst/JSONTestSuite/) with following metrics:
 
 | Metric | Compliance | Note |
 | - | - | - |
@@ -714,7 +714,7 @@ Parsing and serialization also satisfies [C++ `<charconv>`](https://en.cpprefere
 
 ## Benchmarks
 
-[Benchmarks](https://github.com/DmitriBogdanov/UTL/blob/master/benchmarks/benchmark_json.cpp) for parsing and serializing of minimized JSON data corresponding to various entries in the [test suite](https://github.com/DmitriBogdanov/UTL/tree/master/benchmarks/data). 
+[Benchmarks](../benchmarks/benchmark_json.cpp) for parsing and serializing of minimized JSON data corresponding to various entries in the [test suite](../benchmarks/data). 
 
 ```
 ====== BENCHMARKING ON DATA: `strings.json` ======

@@ -1,6 +1,6 @@
 # utl::shell
 
-[<- back to README.md](https://github.com/DmitriBogdanov/UTL/tree/master)
+[<- back to README.md](..)
 
 **shell** contains convenience functions for command line and system related operations.
 

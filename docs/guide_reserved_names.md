@@ -1,6 +1,6 @@
 # Names reserved by UTL implementation
 
-[<- back to README.md](https://github.com/DmitriBogdanov/UTL/tree/master)
+[<- back to README.md](..)
 
 Due to the header-only nature of the library, all internal identifiers can be accessed from outside.
 

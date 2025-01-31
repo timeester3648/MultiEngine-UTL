@@ -1,6 +1,6 @@
 # utl::progressbar
 
-[<- back to README.md](https://github.com/DmitriBogdanov/UTL/tree/master)
+[<- back to README.md](..)
 
 **progressbar** adds configurable progress bars for CLI apps.
 

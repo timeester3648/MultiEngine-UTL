@@ -1,6 +1,6 @@
 # utl::sleep
 
-[<- back to README.md](https://github.com/DmitriBogdanov/UTL/tree/master)
+[<- back to README.md](..)
 
 **sleep** implements 3 variations of sleep() function with a goal of providing improved precision.
 

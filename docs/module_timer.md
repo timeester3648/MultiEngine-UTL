@@ -1,6 +1,6 @@
 # utl::timer
 
-[<- back to README.md](https://github.com/DmitriBogdanov/UTL/tree/master)
+[<- back to README.md](..)
 
 **timer** contains a number of methods for time measurement. Intended mainly for measuring code execution time without [std::chrono](https://en.cppreference.com/w/cpp/chrono) boilerplate. Outputs time as a string, prints formatted local time and date.
 

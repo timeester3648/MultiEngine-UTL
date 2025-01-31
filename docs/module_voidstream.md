@@ -1,6 +1,6 @@
 # utl::voidstream
 
-[<- back to README.md](https://github.com/DmitriBogdanov/UTL/tree/master)
+[<- back to README.md](..)
 
 **voidstream** is specification of [std::ostream](https://en.cppreference.com/w/cpp/io/basic_ostream) that does nothing. This paradoxically inert class can be passed to API's that use streams to silence their output, avoiding the boilerplate of getting and then discarding undesirable output.
 

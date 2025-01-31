@@ -1,6 +1,6 @@
 # Selecting only specific UTL modules
 
-[<- back to README.md](https://github.com/DmitriBogdanov/UTL/tree/master)
+[<- back to README.md](..)
 
 Specific modules can be selected to restrict accessible functionality and reduce the amount of included standard headers.
 
@@ -83,4 +83,4 @@ int main(int argc, char **argv) {
 
 ## Including modules directly
 
-Individual modules can also be grabbed directly from [`source/`](https://github.com/DmitriBogdanov/prototyping_utils/tree/master/source). In this case they can be included directly and no other action is needed.
+Individual modules can also be grabbed directly from [`include/UTL/`](../include/UTL/). In this case they can be included directly and no other action is needed.

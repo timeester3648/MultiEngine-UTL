@@ -1,6 +1,6 @@
 # utl::stre
 
-[<- back to README.md](https://github.com/DmitriBogdanov/UTL/tree/master)
+[<- back to README.md](..)
 
 **stre** (aka **STR**ing **E**xpansions) module contains efficient implementations of most commonly used string utility-functions.
 
