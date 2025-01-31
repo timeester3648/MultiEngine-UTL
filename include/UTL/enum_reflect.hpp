@@ -21,6 +21,7 @@
 #include <string_view> // string_view
 #include <type_traits> // underlying_type_t<>, enable_if_t<>, is_enum_v<>
 #include <utility>     // pair<>
+#include <tuple>       // tuple_size_v<>
 
 // ____________________ DEVELOPER DOCS ____________________
 
@@ -113,34 +114,12 @@ struct _meta {
     template <>                                                                                                        \
     struct utl::enum_reflect::_meta<enum_name_> {                                                                      \
         using type            = enum_name_;                                                                            \
-        using underlying_type = std::underlying_type_t<type>;                                                          \
                                                                                                                        \
         constexpr static std::string_view type_name = #enum_name_;                                                     \
                                                                                                                        \
         constexpr static auto names   = std::array{utl_erfl_map_list(utl_erfl_make_name, __VA_ARGS__)};                \
         constexpr static auto values  = std::array{utl_erfl_map_list(utl_erfl_make_value, __VA_ARGS__)};               \
         constexpr static auto entries = std::array{utl_erfl_map_list(utl_erfl_make_entry, __VA_ARGS__)};               \
-                                                                                                                       \
-        constexpr static std::size_t size = std::tuple_size_v<decltype(_meta::values)>;                                \
-                                                                                                                       \
-        constexpr static std::string_view to_string(type val) {                                                        \
-            for (const auto& [name, value] : _meta::entries)                                                           \
-                if (val == value) return name;                                                                         \
-                                                                                                                       \
-            using namespace std::string_literals;                                                                      \
-            throw std::out_of_range("rfl::_meta<"s + std::string(_meta::type_name) + ">::to_string(): value "s +       \
-                                    std::to_string(static_cast<underlying_type>(val)) +                                \
-                                    " is not a part of enumeration."s);                                                \
-        }                                                                                                              \
-                                                                                                                       \
-        constexpr static type from_string(std::string_view str) {                                                      \
-            for (const auto& [name, value] : _meta::entries)                                                           \
-                if (str == name) return value;                                                                         \
-                                                                                                                       \
-            using namespace std::string_literals;                                                                      \
-            throw std::out_of_range("rfl::_meta<"s + std::string(_meta::type_name) + ">::from_string(): name \""s +    \
-                                    std::string(str) + "\" is not a part of enumeration."s);                           \
-        }                                                                                                              \
     }
 
 // --- Public API ---
@@ -159,23 +138,38 @@ template <class E>
 constexpr auto entries = _meta<E>::entries;
 
 template <class E>
-constexpr auto size = _meta<E>::size;
+constexpr auto size = std::tuple_size_v<decltype(values<E>)>;
 
-template <class E>
-[[nodiscard]] constexpr auto to_string(E value) {
-    return _meta<E>::to_string(value);
-}
-
-template <class E>
-[[nodiscard]] constexpr auto from_string(std::string_view str) {
-    return _meta<E>::from_string(str);
-}
-
-template<class E, std::enable_if_t<std::is_enum_v<E>, bool> = true>
+template <class E, std::enable_if_t<std::is_enum_v<E>, bool> = true>
 [[nodiscard]] constexpr auto to_underlying(E value) noexcept {
     return static_cast<std::underlying_type_t<E>>(value);
     // doesn't really require reflection, but might as well have it here,
     // in C++23 gets replaced by builtin 'std::to_underlying'
+}
+
+template <class E>
+[[nodiscard]] constexpr bool is_valid(E value) noexcept {
+    for (const auto& e : values<E>)
+        if (value == e) return true;
+    return false;
+}
+
+template <class E>
+[[nodiscard]] constexpr std::string_view to_string(E val) {
+    for (const auto& [name, value] : entries<E>)
+        if (val == value) return name;
+
+    throw std::out_of_range("enum_reflect::to_string<" + std::string(type_name<E>) + ">(): value " +
+                            std::to_string(to_underlying(val)) + " is not a part of enumeration.");
+}
+
+template <class E>
+[[nodiscard]] constexpr E from_string(std::string_view str) {
+    for (const auto& [name, value] : entries<E>)
+        if (str == name) return value;
+
+    throw std::out_of_range("enum_reflect::from_string<" + std::string(type_name<E>) + ">(): name \"" +
+                            std::string(str) + "\" is not a part of enumeration.");
 }
 
 } // namespace utl::enum_reflect

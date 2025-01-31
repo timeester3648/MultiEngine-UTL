@@ -285,6 +285,11 @@ struct StringifierBase {
             throw std::runtime_error("Stringifier encountered std::to_chars() error while serializing an integer.");
         buffer.append(stbuff.data(), number_end_ptr - stbuff.data());
     }
+    
+    template <class T>
+    static void append_enum(std::string& buffer, const T& value) {
+        derived::append_int(buffer, static_cast<std::underlying_type_t<T>>(value));
+    }
 
     template <class T>
     static void append_float(std::string& buffer, const T& value) {
@@ -417,6 +422,8 @@ private:
         else if constexpr (std::is_convertible_v<T, std::string>) derived::append_string(buffer, std::string(value));
         // Integral
         else if constexpr (std::is_integral_v<T>) derived::append_int(buffer, value);
+        // Enum
+        else if constexpr (std::is_enum_v<T>) derived::append_enum(buffer, value);
         // Floating-point
         else if constexpr (std::is_floating_point_v<T>) derived::append_float(buffer, value);
         // Complex
