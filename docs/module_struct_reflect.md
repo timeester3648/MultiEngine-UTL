@@ -187,6 +187,13 @@ static_assert( struct_reflect::names<Quaternion>[0] == "r" );
 static_assert( struct_reflect::names<Quaternion>[1] == "i" );
 static_assert( struct_reflect::names<Quaternion>[2] == "j" );
 static_assert( struct_reflect::names<Quaternion>[3] == "k" );
+
+constexpr Quaternion q = { 5., 6., 7., 8. };
+
+static_assert( struct_reflect::get<0>(q) == 5. );
+static_assert( struct_reflect::get<1>(q) == 6. );
+static_assert( struct_reflect::get<2>(q) == 7. );
+static_assert( struct_reflect::get<3>(q) == 8. );
 ```
 
 ### Field & entry views
@@ -214,11 +221,6 @@ static_assert( std::get<2>(struct_reflect::entry_view(q)).first  == "j" );
 static_assert( std::get<2>(struct_reflect::entry_view(q)).second == 7.  );
 static_assert( std::get<3>(struct_reflect::entry_view(q)).first  == "k" );
 static_assert( std::get<3>(struct_reflect::entry_view(q)).second == 8.  );
-
-static_assert( struct_reflect::get<0>(q) == 5. );
-static_assert( struct_reflect::get<1>(q) == 6. );
-static_assert( struct_reflect::get<2>(q) == 7. );
-static_assert( struct_reflect::get<3>(q) == 8. );
 ```
 
 ### Using reflection to define binary operations
@@ -240,9 +242,7 @@ constexpr Quaternion operator+(const Quaternion& lhs, const Quaternion &rhs) noe
 
 // Define binary operation with predicates (member-wise equality)
 constexpr bool operator==(const Quaternion& lhs, const Quaternion &rhs) noexcept {
-    bool res = true;
-    utl::struct_reflect::true_for_all(lhs, rhs, [&](const auto& l, const auto& r){ return l == r; });
-    return res;
+    return utl::struct_reflect::true_for_all(lhs, rhs, [&](const auto& l, const auto& r){ return l == r; });
 }
 
 // Test operations
