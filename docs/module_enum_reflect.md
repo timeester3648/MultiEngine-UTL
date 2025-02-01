@@ -33,12 +33,18 @@ template <class E> constexpr E                from_string(std::string_view str);
 ### Macros
 
 > ```cpp
+> #define UTL_ENUM_REFLECT(enum_name, ...)
+> ```
+
+Registers reflection for the `enum` / `enum class` type `enum_name` with elements `...`.
+
+### Reflection
+
+> ```cpp
 > template <class E> constexpr std::string_view type_name;
 > ```
 
 Evaluates to stringified name of `E` enum.
-
-### Reflection
 
 > ```cpp
 > template <class E> constexpr std::size_t size;
