@@ -42,6 +42,7 @@ Secondary design goals also include:
 | [**utl::shell**](./docs/module_shell.md) | Shell commands and temporary files |
 | [**utl::sleep**](./docs/module_sleep.md) | Precise sleep implementations |
 | [**utl::stre**](./docs/module_stre.md) | Efficient implementations of common string utils |
+| [**utl::struct_reflect**](./docs/module_struct_reflect.md) | Struct reflection |
 | [**utl::table**](./docs/module_table.md) | ASCII table rendering tools |
 | [**utl::timer**](./docs/module_timer.md) | Timing methods |
 
