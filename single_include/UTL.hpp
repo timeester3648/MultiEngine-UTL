@@ -8867,12 +8867,12 @@ struct _meta {
         constexpr static auto names = std::array{utl_erfl_map_list(utl_erfl_make_name, __VA_ARGS__)};                  \
                                                                                                                        \
         template <class S>                                                                                             \
-        constexpr static auto field_view(S&& val) {                                                                    \
+        constexpr static auto field_view(S&& val) noexcept {                                                           \
             return std::forward_as_tuple(utl_srfl_map_list(utl_srfl_fwd_value, __VA_ARGS__));                          \
         }                                                                                                              \
                                                                                                                        \
         template <class S>                                                                                             \
-        constexpr static auto entry_view(S&& val) {                                                                    \
+        constexpr static auto entry_view(S&& val) noexcept {                                                           \
             return std::make_tuple(utl_srfl_map_list(utl_srfl_fwd_entry, __VA_ARGS__));                                \
         }                                                                                                              \
                                                                                                                        \
@@ -8909,13 +8909,13 @@ template <class S>
 constexpr auto names = _meta<S>::names;
 
 template <class S>
-constexpr auto field_view(S&& value) {
+constexpr auto field_view(S&& value) noexcept {
     using struct_type = typename std::decay_t<S>;
     return _meta<struct_type>::field_view(std::forward<S>(value));
 }
 
 template <class S>
-constexpr auto entry_view(S&& value) {
+constexpr auto entry_view(S&& value) noexcept {
     using struct_type = typename std::decay_t<S>;
     return _meta<struct_type>::entry_view(std::forward<S>(value));
 }
@@ -8924,7 +8924,7 @@ template <class S>
 constexpr auto size = std::tuple_size_v<decltype(names<S>)>;
 
 template <std::size_t I, class S>
-constexpr auto get(S&& value) {
+constexpr auto get(S&& value) noexcept {
     using struct_type = typename std::decay_t<S>;
     return std::get<I>(_meta<struct_type>::field_view(std::forward<S>(value)));
 }
