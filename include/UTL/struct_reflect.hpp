@@ -89,6 +89,12 @@ namespace utl::struct_reflect {
 // --- Implementation ---
 // ----------------------
 
+template <class T1, class T2>
+constexpr std::pair<T1, T2&&> _make_entry(T1&& a, T2&& b) noexcept {
+    return std::pair<T1, T2&&>(std::forward<T1>(a), std::forward<T2>(b));
+    // helper function used to create < name, reference-to-field > entries
+}
+
 template <class>
 inline constexpr bool _always_false_v = false;
 
@@ -99,62 +105,31 @@ struct _meta {
     // makes instantiation of this template a compile-time error
 };
 
-// clang-format off
-#define utl_srfl_type_name(arg_) std::string_view
-#define utl_srfl_type_cref(arg_) std::add_lvalue_reference_t<std::add_const_t<std::remove_reference_t<decltype(type::arg_)>>>
-#define utl_srfl_type_ref(arg_) std::add_lvalue_reference_t<std::remove_reference_t<decltype(type::arg_)>>
-#define utl_srfl_type_centry(arg_) std::pair<utl_srfl_type_name(arg_), utl_srfl_type_cref(arg_)>
-#define utl_srfl_type_entry(arg_) std::pair<utl_srfl_type_name(arg_), utl_srfl_type_ref(arg_)>
-
-#define utl_srfl_make_name(arg_) utl_srfl_type_name(arg_)(#arg_)
-#define utl_srfl_make_cref(arg_) val.arg_
-#define utl_srfl_make_ref(arg_) val.arg_
-#define utl_srfl_make_centry(arg_) utl_srfl_type_centry(arg_){ utl_srfl_make_name(arg_), utl_srfl_make_cref(arg_) }
-#define utl_srfl_make_entry(arg_) utl_srfl_type_entry(arg_){ utl_srfl_make_name(arg_), utl_srfl_make_ref(arg_) }
+// Helper macros for codegen
+#define utl_srfl_make_name(arg_) std::string_view(#arg_)
+#define utl_srfl_fwd_value(arg_) std::forward<S>(val).arg_
+#define utl_srfl_fwd_entry(arg_) _make_entry(std::string_view(#arg_), std::forward<S>(val).arg_)
 
 #define utl_srfl_call_unary_func(arg_) func(std::forward<S>(val).arg_);
 #define utl_srfl_call_binary_func(arg_) func(std::forward<S1>(val_1).arg_, std::forward<S2>(val_2).arg_);
-// clang-format on
-
-// Note: 'c' prefix means 'const'
+#define utl_srfl_and_unary_predicate(arg_) &&func(val.arg_)
+#define utl_srfl_and_binary_predicate(arg_) &&func(val_1.arg_, val_2.arg_)
 
 #define UTL_STRUCT_REFLECT(struct_name_, ...)                                                                          \
     template <>                                                                                                        \
     struct utl::struct_reflect::_meta<struct_name_> {                                                                  \
-        using type = struct_name_;                                                                                     \
-                                                                                                                       \
-        using fields_cref_type  = std::tuple<utl_srfl_map_list(utl_srfl_type_cref, __VA_ARGS__)>;                      \
-        using entries_cref_type = std::tuple<utl_srfl_map_list(utl_srfl_type_centry, __VA_ARGS__)>;                    \
-        using fields_ref_type   = std::tuple<utl_srfl_map_list(utl_srfl_type_ref, __VA_ARGS__)>;                       \
-        using entries_ref_type  = std::tuple<utl_srfl_map_list(utl_srfl_type_entry, __VA_ARGS__)>;                     \
-                                                                                                                       \
         constexpr static std::string_view type_name = #struct_name_;                                                   \
                                                                                                                        \
         constexpr static auto names = std::array{utl_erfl_map_list(utl_erfl_make_name, __VA_ARGS__)};                  \
                                                                                                                        \
-        constexpr static fields_cref_type const_field_view(const type& val) {                                          \
-            return {utl_srfl_map_list(utl_srfl_make_cref, __VA_ARGS__)};                                               \
-        }                                                                                                              \
-        constexpr static fields_ref_type field_view(type& val) {                                                       \
-            return {utl_srfl_map_list(utl_srfl_make_ref, __VA_ARGS__)};                                                \
-        }                                                                                                              \
-        constexpr static entries_cref_type const_entry_view(const type& val) {                                         \
-            return {utl_srfl_map_list(utl_srfl_make_centry, __VA_ARGS__)};                                             \
-        }                                                                                                              \
-        constexpr static entries_ref_type entry_view(type& val) {                                                      \
-            return {utl_srfl_map_list(utl_srfl_make_entry, __VA_ARGS__)};                                              \
+        template <class S>                                                                                             \
+        constexpr static auto field_view(S&& val) {                                                                    \
+            return std::forward_as_tuple(utl_srfl_map_list(utl_srfl_fwd_value, __VA_ARGS__));                          \
         }                                                                                                              \
                                                                                                                        \
-        constexpr static std::size_t size = std::tuple_size_v<_meta::fields_cref_type>;                                \
-                                                                                                                       \
-        template <std::size_t I>                                                                                       \
-        constexpr static auto get(const type& val) {                                                                   \
-            return std::get<I>(_meta::const_field_view(val));                                                          \
-        }                                                                                                              \
-                                                                                                                       \
-        template <std::size_t I>                                                                                       \
-        constexpr static auto get(type& val) {                                                                         \
-            return std::get<I>(_meta::field_view(val));                                                                \
+        template <class S>                                                                                             \
+        constexpr static auto entry_view(S&& val) {                                                                    \
+            return std::make_tuple(utl_srfl_map_list(utl_srfl_fwd_entry, __VA_ARGS__));                                \
         }                                                                                                              \
                                                                                                                        \
         template <class S, class Func>                                                                                 \
@@ -166,7 +141,19 @@ struct _meta {
         constexpr static void for_each(S1&& val_1, S2&& val_2, Func&& func) {                                          \
             utl_srfl_map(utl_srfl_call_binary_func, __VA_ARGS__)                                                       \
         }                                                                                                              \
+                                                                                                                       \
+        template <class S, class Func>                                                                                 \
+        constexpr static bool true_for_all(const S& val, Func&& func) {                                                \
+            return true utl_srfl_map(utl_srfl_and_unary_predicate, __VA_ARGS__);                                       \
+        }                                                                                                              \
+                                                                                                                       \
+        template <class S1, class S2, class Func>                                                                      \
+        constexpr static bool true_for_all(const S1& val_1, const S2& val_2, Func&& func) {                            \
+            return true utl_srfl_map(utl_srfl_and_binary_predicate, __VA_ARGS__);                                      \
+        }                                                                                                              \
     }
+
+// Note: 'true' in front of a generated predicate chain handles the redundant '&&' at the beginning
 
 // --- Public API ---
 // ------------------
@@ -178,47 +165,56 @@ template <class S>
 constexpr auto names = _meta<S>::names;
 
 template <class S>
-constexpr auto field_view(const S& value) {
-    return _meta<S>::const_field_view(value);
+constexpr auto field_view(S&& value) {
+    using struct_type = typename std::decay_t<S>;
+    return _meta<struct_type>::field_view(std::forward<S>(value));
 }
 
 template <class S>
-constexpr auto field_view(S& value) {
-    return _meta<S>::field_view(value);
+constexpr auto entry_view(S&& value) {
+    using struct_type = typename std::decay_t<S>;
+    return _meta<struct_type>::entry_view(std::forward<S>(value));
 }
 
 template <class S>
-constexpr auto entry_view(const S& value) {
-    return _meta<S>::const_entry_view(value);
-}
-
-template <class S>
-constexpr auto entry_view(S& value) {
-    return _meta<S>::entry_view(value);
-}
-
-template <class S>
-constexpr auto size = _meta<S>::size;
+constexpr auto size = std::tuple_size_v<decltype(names<S>)>;
 
 template <std::size_t I, class S>
 constexpr auto get(S&& value) {
     using struct_type = typename std::decay_t<S>;
-    return _meta<struct_type>::template get<I>(value);
+    return std::get<I>(_meta<struct_type>::field_view(std::forward<S>(value)));
 }
 
 template <class S, class Func>
-constexpr auto for_each(S&& value, Func&& func) {
+constexpr void for_each(S&& value, Func&& func) {
     using struct_type = typename std::decay_t<S>;
-    return _meta<struct_type>::template for_each(value, func);
+    _meta<struct_type>::for_each(std::forward<S>(value), std::forward<Func>(func));
 }
 
 template <class S1, class S2, class Func>
-constexpr auto for_each(S1&& value_1, S2&& value_2, Func&& func) {
+constexpr void for_each(S1&& value_1, S2&& value_2, Func&& func) {
     using struct_type_1 = typename std::decay_t<S1>;
     using struct_type_2 = typename std::decay_t<S2>;
     static_assert(std::is_same_v<struct_type_1, struct_type_2>,
                   "Called 'struct_reflect::for_each(s1, s2, func)' with incompatible argument types.");
-    return _meta<struct_type_1>::template for_each(value_1, value_2, func);
+    _meta<struct_type_1>::for_each(std::forward<S1>(value_1), std::forward<S2>(value_2), std::forward<Func>(func));
+}
+
+// Predicate checks cannot be efficiently implemented in terms of 'for_each()'
+// we use a separate implementation with short-circuiting
+template <class S, class Func>
+constexpr bool true_for_all(const S& value, Func&& func) {
+    using struct_type = typename std::decay_t<S>;
+    return _meta<struct_type>::true_for_all(value, std::forward<Func>(func));
+}
+
+template <class S1, class S2, class Func>
+constexpr bool true_for_all(const S1& value_1, const S2& value_2, Func&& func) {
+    using struct_type_1 = typename std::decay_t<S1>;
+    using struct_type_2 = typename std::decay_t<S2>;
+    static_assert(std::is_same_v<struct_type_1, struct_type_2>,
+                  "Called 'struct_reflect::for_each(s1, s2, func)' with incompatible argument types.");
+    return _meta<struct_type_1>::true_for_all(value_1, value_2, std::forward<Func>(func));
 }
 
 // --- Misc utils ---
@@ -228,28 +224,26 @@ constexpr auto for_each(S1&& value_1, S2&& value_2, Func&& func) {
 // in case user want to operate on tuples rather than structs using similar API, sort of a "bonus utility"
 // that simply doesn't have any better module to be a part of
 template <class T, class Func>
-void tuple_for_each(T&& tuple, Func&& func) {
+constexpr void tuple_for_each(T&& tuple, Func&& func) {
     std::apply([&func](auto&&... args) { (func(std::forward<decltype(args)>(args)), ...); }, std::forward<T>(tuple));
 }
 
 // For a pair of tuple 'std::apply' trick doesn't cut it, gotta do the standard thing
-// with recursion over the index sequence. This looks kinda horrible
+// with recursion over the index sequence. This looks a little horrible, but no too much
 template <class T1, class T2, class Func, std::size_t... Idx>
-static void _tuple_for_each_impl(T1&& tuple_1, T2&& tuple_2, Func&& func, std::index_sequence<Idx...>) {
+constexpr void _tuple_for_each_impl(T1&& tuple_1, T2&& tuple_2, Func&& func, std::index_sequence<Idx...>) {
     (func(std::get<Idx>(std::forward<T1>(tuple_1)), std::get<Idx>(std::forward<T2>(tuple_2))), ...);
     // fold expression '( f(args), ... )' invokes 'f(args)' for all indeces in the index sequence
 }
 
-template <template <class...> class T1, template <class...> class T2, class Func, class... Args>
-static void _tuple_for_each_fwd(T1<Args...>&& tuple_1, T2<Args...>&& tuple_2, Func&& func) {
-    _tuple_for_each_impl(std::forward<T1<Args...>>(tuple_1), std::forward<T2<Args...>>(tuple_2), std::forward<Func>(func),
-                         std::index_sequence_for<Args...>{});
-    // forward argument while deducing properly sized index sequence
-}
-
 template <class T1, class T2, class Func>
-void tuple_for_each(T1&& tuple_1, T2&& tuple_2, Func&& func) {
-    _tuple_for_each_fwd(std::forward<T1>(tuple_1), std::forward<T2>(tuple_2), std::forward<Func>(func));
+constexpr void tuple_for_each(T1&& tuple_1, T2&& tuple_2, Func&& func) {
+    constexpr std::size_t tuple_size_1 = std::tuple_size_v<std::decay_t<T1>>;
+    constexpr std::size_t tuple_size_2 = std::tuple_size_v<std::decay_t<T2>>;
+    static_assert(tuple_size_1 == tuple_size_2,
+                  "Called 'struct_reflect::tuple_for_each(t1, t2, func)' with incompatible tuple sizes.");
+    _tuple_for_each_impl(std::forward<T1>(tuple_1), std::forward<T2>(tuple_2), std::forward<Func>(func),
+                         std::make_index_sequence<tuple_size_1>{});
 }
 
 } // namespace utl::struct_reflect
