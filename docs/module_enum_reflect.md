@@ -30,11 +30,15 @@ template <class E> constexpr E                from_string(std::string_view str);
 
 ## Methods
 
+### Macros
+
 > ```cpp
 > template <class E> constexpr std::string_view type_name;
 > ```
 
 Evaluates to stringified name of `E` enum.
+
+### Reflection
 
 > ```cpp
 > template <class E> constexpr std::size_t size;
@@ -94,18 +98,17 @@ Throws [`std::out_of_range`](https://en.cppreference.com/w/cpp/error/out_of_rang
 
 ### Reflecting an enum
 
-[ [Run this code](https://godbolt.org/#z:OYLghAFBqd5QCxAYwPYBMCmBRdBLAF1QCcAaPECAMzwBtMA7AQwFtMQByARg9KtQYEAysib0QXACx8BBAKoBnTAAUAHpwAMvAFYTStJg1DIApACYAQuYukl9ZATwDKjdAGFUtAK4sGe1wAyeAyYAHI%2BAEaYxCDSAA6oCoRODB7evnoJSY4CQSHhLFEx0naYDilCBEzEBGk%2Bfly2mPY5DJXVBHlhkdGxtlU1dRmNCgOdwd2FvZIAlLaoXsTI7BzmAMzByN5YANQma24IBARxCiAA9OfETADuAHTAhAheEV5KS7KMBHdoLOcAIixCMQ8BZUMB0IZUAA3c5yAAqAXOLCYo2i5ySRnoAH1NttMHDEXcEHE4vtsCYNABBSlUxg%2BHZbVEKHZCPC7EwAdgsOwC2AAYvC9mt/jsALSNHYAJQAkgBxAASQv2osloQA8qFsMLRRo9pz/vsrNTaZdpZhHmjiDtiJgqC0UrSEQFsdhQnIALLYqUCvlueEQNlYUi8gXwkOyxXhnYarUzI202nBAg7FHBCAzfXGqk7XM7N7BYA7ZhsBRxJjLfMEWgJk3UvM7M2KTA2u0OgS0hsFozF1iYMsVlteau1mn1vOjJiOZDY5nRAgQHb0ljY232soEEAgAgATzimGxJcw%2BzcQePa21KpVezMZjP5jMO3ja2znYnVWns4U7wXS4YPlXNsNy3JIAC9z1Pdlz0vEVrzWJ9RzfXNJ0/OcakXZdAPXBwtyPBQT3vC8TAAVgsDQSNFK8RRvMw%2BUFB9c2fbMGxQvAZzQ39MLXFpcL7fCDkIilSK4CidWvB9IyVBimKQnZWPY795ww/8V244CQDwgioPJEiLDMUSqMo29YwpW9GMQ8dkI/Nivx/ZSALUnCQGhMQvH7LSsB00jyOIyjYOos8tzooUEJfWT5NspS/wcoCnJc7x3IE7SiOEgz/NFQKQEkoUZMsuTrIUuzotU2LN2c1zEsgzyUr0tLDQCqCtxM8ywrrHN3ynGyOPskrsLKr4QUqwTdJ8/47hoYhRlzQyaOChiG1C5iOtQxT0OKrCeJAAa8CG5KhIsETfPGvBJpTMTqIk%2BUpLMhtcvaqzOsKqKuNKrdtt26r9v0o6Jqm86jLMEz5tu0cWIKyK1pevq3sEQb%2BKq6CRoou4lDQBh0H%2B1lGpAYKWqWh6VqKqHNve%2BHhtSo7UYEDGZsy7LFvC8HuvWxz%2Bthnayb23TvrGqn0cxzLmoZtqwceiHOJUjb1LwBRsXi9lA207kJS5f5MxmghiDcvHGbF5niel2X5fQRXPO5HYRINdX0p2TXteF%2B78r11aJZi6GQBluWxAV%2B9zfIq3MbtlsHdFwnnsl1mt0943TePc39IDmaqDEJQHd1sPIYj17t1QbEvHR6JaB3QtY6CsMn0xiUQ%2BWrqXZ6qWnKIPOC%2BIIuS7pq74Wt%2BrRQt6uCdroms/dpv86wVvi6MUuQGa7vrx2PU7vTwfw7dzam9GEEp8y3G54u285puu7Q5XzO1/UjfNfb7Hsr3gHsuk0Ga6es/evX3PN%2BvrAms1bU75ooGR8LKOwivrYem0qDEFQCuT%2BRgPLQQgA%2BQ%2Bj5/473Lv3J2GdXZv3UpA6B2JYHAHgeSRBt4H63lQTfTuGDQF1xZtnPBMCr5wKSp9UhgNf7SQFtjIWS8DS0g4HMWgnBiK8D8BwLQpBUCcDcNYawckFhLBbOsHgpBNwSMEXMAA1iAAAbMRO4axOQAA5iIAE4NAaBMWsMwxizHGP0JwSQYjNC8GkRwXgZwNBqNcXMOAsAYCIBQNAuIdBojkEoL8UJ9AYhMiMFwXRli%2BB0AINEM4EAIiuNIBEYI1QdycFUTk5gxAdzqgiNoYC3BeC/DYIIdUDAi5ZKwK8YAbgxC0DOFU0gWAURYhWJI/AtpyjQn7FkzAqgyjDn6bwZMzQsm0DwBEa4JSPDfw0WokELACm8BGcQCIiRMD/EwL04ACyjC%2BL4AYYACgABqO0bjqn3OI1R/BBAiDEOwKQMhBDNjUFk3QjQDDnNMJYaw%2BhFlnEgHMVAcRWidLFKMdAKoQVWEsFwTk4p1RmDcbskEWBIUZiaO2PwEBXBDAaKQQIEwChFEyIkZIAhyV0uyCkLoNLegjGaBuCoYwmWcuJe0GobKegxBGLyzw9Q9CTiFdSkVEg5gKEUcseVjiOCiNIOIyR7idiqGMbosUujJCMiBUWBJdwNDmp2BAXAhASA3jWFwGYvB1FaBmHMBAmAmDj0oEIpxvAtnEW8ZqtxnBPEgG8S6wRpB/FBIWCcYcESIBRLCcQUIfZOC6v1Ya41hhTW6PNea3gmB8BEDxXoV5whRDiC%2BRW356h1kAtIDca4cRtm%2BrVS49Z7j1TDjiMOHYqAqA6r1Qao1cS80Fr1BADwLBonRHtY651vjtGxHzbosxkgzBcD1RocxnIuAJNVc40gAag1ZPcWGiNy7SA6LWJIO4uit2SA0GYsxW7dH7o0GYaQwiOBrE7Vq0NPiNFutVdijV56gORtA7spIzhJBAA%3D%3D%3D) ]
+[ [Run this code](https://godbolt.org/#z:OYLghAFBqd5QCxAYwPYBMCmBRdBLAF1QCcAaPECAMzwBtMA7AQwFtMQByARg9KtQYEAysib0QXACx8BBAKoBnTAAUAHpwAMvAFYTStJg1DIApACYAQuYukl9ZATwDKjdAGFUtAK4sGe1wAyeAyYAHI%2BAEaYxCAA7KQADqgKhE4MHt6%2BekkpjgJBIeEsUTHxdpgOaUIETMQEGT5%2BXLaY9nkM1bUEBWGR0XG2NXUNWc0KQ93BvcX9sQCUtqhexMjsHOYAzMHI3lgA1CYbbggEBAkKIAD0l8RMAO4AdMCECF4RXkorsowED2gslwAIixCMQ8BZUMB0IZUAA3S5yAAqAUuLCY42ilxSRnoAH1trtMAjkQ8EAkEodsCYNABBak0657ABKmGeGOIe0YPgOZgAbHtiJgqG00vSuSw9jt0Qo9kI8PsTLELHsAtgAGKIg4bQF7AC0zWZAEkAOIACU1hx1BtCAHlQtgtTqNAdYoDDlZafSkQFcdhQnIALK4pnq1VuREQOVYUgq9WImNMk3mmO2%2B1zd30%2BnBAh7NHBCBzF0eml7Ut7RmIzDjAVCkUCellvYfYLAPbMNgKBJMVZNgi0DO0xvNoxt1hVrs98boEAgcZgoy42F4TB3XG0QjRMQKAd0wdl8ZMRzIXHS6IECCchg%2BXGC4UVAgzggATwSmFx7cwhzcUc/GwdlstHkzB/cwzD2dMNmLBt9xqI8TwUT5z0va9bzaGcUgAL1/b95V/f9tUAjZwJ3aDSwPODTzqC9xRvWt7xnD9tyOEC/xMABWCwNHYnUAO1IDVQ1UDSwg4tG3IvBj0opCaNQ%2BiQEYr8WKpDiuG4x1ANAxMzURISRNIvZxMkhCz2oq8WFou8HAYscmJwrBKXYiwzDU3ieLMMxUypdzhJIvcyNgiT4MQ0yULoqyQFhMQvCrRTcIcjiuLYniCL4n8ZwEzViMg/TDKCkzkPM2Twsi7wYuYuLWJUlyUp1NKQC080stEmDD0CqSQsKsKHwiqKyrsvDHOcpL1NS3CZ08nzss9PyDICozgoKiy0JAH4wT6pTHMSnURp1KcZy7PBiEVZV%2BLjUCFFhGM6oy0tFR1PSZty9rFqK7rVuXWyNqq4adtm6cQAOo6lSAhqdPci6rrG%2BqkwtV0mpyua8qol6upnd71oq5SnLU369oBphDuO273M887LtlKGJpde7fJLFqKOM5GZNRkA8AURcxHlSM4qVfU7sLVy9gIYhosm5r/Na%2Bb8uZyzurZjn13Qbn7OB1TXQFmqhZFzAxYRyWkeksylrk%2BWSq5kDga49XfuF0X4cexHnpl5bTc5pWLeVZzrcFqgtx1h7dzpiWGYW525KIXEvAYLBiFoJ8W2V9gQBujW3T4/V7aD2b9ado3XsfVBI%2Bj6I44TurQdTwC9i4TOxMdxnDdC2WC6LmPS6MRPxrtB1K74vZnQDvWQ%2BlvOWYjucy6hlPftAjKhNr%2Bm2objrjfC8fhcnrAZwrmf3NB3SdzrnPl5R5uQHX%2BdgE7kAJt7tyPO7%2BfB4d4/Q9Hs%2BqGIVBzInoxYvsv8EBZ5nW8nfCmW9k5xl1i/YeTN37LU/t/XEv9gD/zwkAveMNQJgPLjDBewcl5vybggr%2BP8N5/3KgA7AGCH72l0r9OqVNB6unpBwBYtBOBsV4H4DgWhSCoE4G4aw1gDJLBWDrTYPBSAPl4WwhYABrEAvI2IPA2LEAAHGxAAnBoDQGiNhmHUVo9R%2BhOCSG4ZoXgAiOC8AuBoaRliFhwFgDARAKBv4JDoNEcglB/iePoDEKURguC8l0XwOgBBogXAgBESxpAIjBFqE%2BTgUiEnMGIE%2BG0ERtD0W4Lwf4bBBA2gYHHOJWB3jADcGIWgFw8mkCwGiHEaw%2BH4EFJUWEVY4mYFUBULwkS4nZlaHE9cERbgZI8FvWR0iwQsBSbwDpxAIjJEwICTAjTgDriMI4vgBhgAKAAGrLjuDaV8PCpH8EECIMQ7ApAyEEIoFQ6gpm6GaAYLZphLDWH0HgCIFxIALFQAkdotTdRTktB8qwlguCxD1DaMwViFlgiwH8gsLQ6x%2BAgK4EYTRSCBCmEUEo2RkipAENioluQ0g9AJf0MYrR7xVAmGS2l6LOh1CpX0GIYxGWeEaHoA8bL8UcokAsBQYjVjCtMRwLhpAeF8OsXsVQ6jeS6l5JISUbzWwhIeBobVewIC4EICQHkGwuBzF4DIrQcwFgIEwEwGOlB2FmN4LMti9jZVWM4LYkA9iLVsNIM4txSwzh9J8RAPxXjiChDHJwRVyrVXqsMJq3k2rtW8EwPgIgSK9AXOEKIcQtyc0PLUHEl5pA7i3ASHMx1UqLFTOsTaPpCQ%2Bl7FQFQBVSqVVqqCUmlNzoIAeBYP46IxrTXmscQokAkhk28i0ZIMwXAlUaG0bELgITJXmNIC6t1cTrFep9eO0giiNiSAeLyedkgNBaK0fO3kK6NBmGkBwjgGxa1ys9Q42RVrJXwplTu99vqv0LJSM4SQQA%3D%3D%3D) ]
 
 ```cpp
+// Register enum & reflection
 enum class Side { LEFT = -1, RIGHT = 1, NONE = 0 };
 
-// Register reflection
 UTL_ENUM_REFLECT(Side, LEFT, RIGHT, NONE);
 
-// ...
-
-// Use reflection
+// Test reflection
 using namespace utl;
+using namespace std::string_view_literals;
 
 static_assert( enum_reflect::type_name<Side> == "Side" );
 
@@ -119,12 +122,9 @@ static_assert( enum_reflect::values<Side>[0] == Side::LEFT  );
 static_assert( enum_reflect::values<Side>[1] == Side::RIGHT );
 static_assert( enum_reflect::values<Side>[2] == Side::NONE  );
 
-static_assert( enum_reflect::entries<Side>[0].first  == "LEFT"      );
-static_assert( enum_reflect::entries<Side>[1].first  == "RIGHT"     );
-static_assert( enum_reflect::entries<Side>[2].first  == "NONE"      );
-static_assert( enum_reflect::entries<Side>[0].second == Side::LEFT  );
-static_assert( enum_reflect::entries<Side>[1].second == Side::RIGHT );
-static_assert( enum_reflect::entries<Side>[2].second == Side::NONE  );
+static_assert( enum_reflect::entries<Side>[0]  == std::pair{  "LEFT"sv, Side::LEFT  } );
+static_assert( enum_reflect::entries<Side>[1]  == std::pair{ "RIGHT"sv, Side::RIGHT } );
+static_assert( enum_reflect::entries<Side>[2]  == std::pair{  "NONE"sv, Side::NONE  } );
 
 static_assert( enum_reflect::is_valid(Side{-1}) == true  );
 static_assert( enum_reflect::is_valid(Side{ 1}) == true  );
