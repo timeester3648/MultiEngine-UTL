@@ -8,6 +8,9 @@
 //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+#include <mutex>
+#include <stdexcept>
+#include <type_traits>
 #if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_SHELL)
 #ifndef UTLHEADERGUARD_SHELL
 #define UTLHEADERGUARD_SHELL
@@ -16,7 +19,7 @@
 
 #include <cstddef>       // size_t
 #include <cstdlib>       // atexit(), system(), rand()
-#include <filesystem>    // filesystem::remove(), filesystem::path, filesystem::exists()
+#include <filesystem>    // fs::remove(), fs::path, fs::exists(), fs::temp_directory_path()
 #include <fstream>       // ofstream, ifstream
 #include <sstream>       // ostringstream
 #include <string>        // string
@@ -71,7 +74,11 @@ namespace utl::shell {
     for (std::size_t i = 0; i < length; ++i)
         result[i] = static_cast<char>(min_char + std::rand() % (max_char - min_char + 1));
     // we don't really care about the quality of random here, and we already include <cstdlib>,
-    // so rand() is fine, otherwise we'd have to include the entirety of <random> for this function
+    // so rand() is fine, otherwise we'd have to include the entirety of <random> for this function.
+    // There's also a whole buch of issues caused by questionable design <random>, (such as
+    // 'std::uniform_int_distribution' not supporting 'char') for generating random strings properly
+    // (aka faster and thread-safe) there is a much better option in 'utl::random::rand_string()'.
+    // Note that using remainder formula for int distribution is also biased, but here it doesn't matter.
     return result;
 }
 
@@ -94,8 +101,9 @@ inline std::string generate_temp_file() {
     // No '[[nodiscard]]' since the function could still be used to generate files without
     // actually accessing them (through the returned path) in the same program.
 
-    constexpr std::size_t MAX_ATTEMPTS = 500; // shouldn't realistically be encountered but still
-    constexpr std::size_t NAME_LENGTH  = 30;
+    constexpr auto        filename_prefix = "utl___";
+    constexpr std::size_t max_attempts    = 500; // shouldn't realistically be encountered, but still
+    constexpr std::size_t name_length     = 30;
 
     // Register std::atexit() if not already registered
     if (!_temp_files_cleanup_registered) {
@@ -104,22 +112,25 @@ inline std::string generate_temp_file() {
     }
 
     // Try creating files until unique name is found
-    for (std::size_t i = 0; i < MAX_ATTEMPTS; ++i) {
-        const std::filesystem::path temp_path(random_ascii_string(NAME_LENGTH) + ".txt");
+    for (std::size_t i = 0; i < max_attempts; ++i) {
+        const std::filesystem::path temp_directory = std::filesystem::temp_directory_path();
+        const std::string           temp_filename  = filename_prefix + random_ascii_string(name_length) + ".txt";
+        const std::filesystem::path temp_path      = temp_directory / temp_filename;
 
         if (std::filesystem::exists(temp_path)) continue;
 
-        const std::ofstream temp_file(temp_path);
+        const std::ofstream os(temp_path);
 
-        if (temp_file.good()) {
-            _temp_files.insert(temp_path.string());
-            return temp_path.string();
-        } else {
-            return std::string();
-        }
+        if (!os)
+            throw std::runtime_error("shell::generate_temp_file(): Could open created temporary file `" +
+                                     temp_path.string() + "`");
+
+        _temp_files.insert(temp_path.string());
+        return temp_path.string();
     }
 
-    return std::string();
+    throw std::runtime_error("shell::generate_temp_file(): Could no create a unique temporary file in " +
+                             std::to_string(max_attempts) + " attempts.");
 }
 
 // ===================

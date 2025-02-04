@@ -5607,6 +5607,33 @@ return_type operator*(const L& left, const R& right) {
 
 namespace utl::parallel {
 
+// =======================
+// --- Mutex-protected ---
+// =======================
+
+template <class T, class Mutex = std::mutex>
+class MutexProtected {
+    T             value;
+    mutable Mutex mutex;
+
+public:
+    MutexProtected() = default;
+    MutexProtected(const T& value) : value(value), mutex() {}
+    MutexProtected(T&& value) : value(std::move(value)), mutex() {}
+
+    template <class Func>
+    decltype(auto) apply(Func&& func) const {
+        const std::lock_guard lock(this->mutex);
+        return std::forward<Func>(func)(this->value);
+    }
+
+    template <class Func>
+    decltype(auto) apply(Func&& func) {
+        const std::lock_guard lock(this->mutex);
+        return std::forward<Func>(func)(this->value);
+    }
+};
+
 // =============
 // --- Utils ---
 // =============
@@ -5623,25 +5650,15 @@ inline std::size_t max_thread_count() {
 constexpr std::size_t _min_size(std::size_t a, std::size_t b) noexcept { return (b < a) ? b : a; }
 constexpr std::size_t _max_size(std::size_t a, std::size_t b) noexcept { return (b < a) ? a : b; }
 
-// We REALLY don't want compiler to mess up inlining of binary operations or unrolling template
-// since that alone can tank the performance so we force inlining just to be sure
-#if defined(_MSC_VER) || defined(_MSC_FULL_VER)
-#define utl_parallel_force_inline __forceinline
-#elif defined(__GNUC__) || defined(__clang__) || defined(__INTEL_COMPILER)
-#define utl_parallel_force_inline __attribute__((always_inline))
-#else
-#define utl_parallel_force_inline
-#endif
-
 // Template for automatic loop unrolling.
 //
-// It is used in 'parallel::reduce()' to speed up a tight loop while
-// leaving the used with ability to easily control that unrolling.
+// It is used in 'parallel::reduce()' to (optionally) speed up a tight loop while leaving the user
+// with ability to easily control that unrolling. By default NO unrolling is used.
 //
 // Benchmarks indicate speedups ~130% to ~400% depending on CPU, compiler and options
 // large unrolling (32) seems to be the best on benchmarks, however it may bloat the binary
 // and take over too many branch predictor slots in case of min/max reductions, 4-8 seems
-// like a reasonable sweetspot for most machines. We use 4 as a less intrusive option.
+// like a reasonable sweetspot for most machines.
 //
 // One may think that it is a job of compiler to perform such optimizations, yet even with
 // GCC '-Ofast -funroll-all-loop' and GCC unroll pragmas it fails to do them reliably.
@@ -5649,17 +5666,17 @@ constexpr std::size_t _max_size(std::size_t a, std::size_t b) noexcept { return 
 // The reason it fails to do so is pretty clear for '-O2' and below - strictly speaking, most binary
 // operations on floats are non-commutative (sum depends on the order of addition, for example), however
 // since reduction is inherently not-order-preserving there is no harm in reordering operations some more
-// and unrolling the loop so compiler will be able to use SIMD if sees it as possile (it often does).
+// and unrolling the loop so compiler will be able to use SIMD if it sees it as possile (which it often does).
 //
-// Why unrolling still fails with '-Ofast' which reduce conformance and allows reordering
-// of math operations is unclear, but it is how it happens when actually measured.
+// Why vectorization of simple loops still tends to fail with '-Ofast' which reduces conformance and
+// allows reordering of math operations is unclear, but this is how it happens when actually measured.
 //
 template <class T, T... indeces, class F>
-utl_parallel_force_inline constexpr void _unroll_impl(std::integer_sequence<T, indeces...>, F&& f) {
+constexpr void _unroll_impl(std::integer_sequence<T, indeces...>, F&& f) {
     (f(std::integral_constant<T, indeces>{}), ...);
 }
 template <class T, T count, class F>
-utl_parallel_force_inline constexpr void _unroll(F&& f) {
+constexpr void _unroll(F&& f) {
     _unroll_impl(std::make_integer_sequence<T, count>{}, std::forward<F>(f));
 }
 
@@ -5982,7 +5999,7 @@ void for_loop(Container& container, Func&& func) {
 
 constexpr std::size_t default_unroll = 1;
 
-template <std::size_t unroll = default_unroll, class Iter, class BinaryOp, class T = typename Iter::value_type>
+template <std::size_t unroll = default_unroll, class BinaryOp, class Iter, class T = typename Iter::value_type>
 auto reduce(Range<Iter> range, BinaryOp&& op) -> T {
 
     std::mutex result_mutex;
@@ -6039,55 +6056,71 @@ auto reduce(Range<Iter> range, BinaryOp&& op) -> T {
     return result;
 }
 
-template <std::size_t unroll = default_unroll, class Container, class BinaryOp>
-auto reduce(Container& container, BinaryOp&& op) -> typename Container::value_type {
-    return reduce<unroll>(Range{container}, std::forward<BinaryOp>(op));
-}
-
-template <std::size_t unroll = default_unroll, class Container, class BinaryOp>
-auto reduce(const Container& container, BinaryOp&& op) -> typename Container::value_type {
-    return reduce<unroll>(Range{container}, std::forward<BinaryOp>(op));
+template <std::size_t unroll = default_unroll, class BinaryOp, class Container>
+auto reduce(Container&& container, BinaryOp&& op) -> typename std::decay_t<Container>::value_type {
+    return reduce<unroll>(Range{std::forward<Container>(container)}, std::forward<BinaryOp>(op));
 }
 
 // --- Pre-defined binary ops ---
 // ------------------------------
 
-// Note:
-// Defining binary operations as free-standing function has a HUGE effect on
-// parallel::reduce performance, for example on 4 threads:
+// Note 1:
+// Defining binary operations as free-standing functions has a huge negative
+// effect on parallel::reduce performance, for example on 4 threads:
 //    binary op is 'sum'        => speedup ~90%-180%
 //    binary op is 'struct sum' => speedup ~370%
 // This is caused by failed inlining and seems to be the reason why standard library implements
 // 'std::plus' as a functor class and not a free-standing function. I spent 2 hours of my life
-// and 4 rewrites of 'parallel::reduce()' on this. Force-inline just to be sure.
+// and 4 rewrites of 'parallel::reduce()' on this.
 
-template <class T>
-struct sum {
-    utl_parallel_force_inline constexpr T operator()(const T& lhs, const T& rhs) const { return lhs + rhs; }
-};
+// Note 2:
+// 'sum' & 'prod' can are just aliases for standard functors, 'min' & 'max' on the other hand
+// require custom, implementation. Note the '<void>' specialization for transparent functors,
+// see https://en.cppreference.com/w/cpp/utility/functional
 
+template <class... Args>
+using sum = std::plus<Args...>; // without variadic 'Args...' we wouldn't be able to alias 'std::plus<>'
 
-template <class T>
-struct prod {
-    utl_parallel_force_inline constexpr T operator()(const T& lhs, const T& rhs) const { return lhs * rhs; }
-};
+template <class... Args>
+using prod = std::multiplies<Args...>;
 
 template <class T>
 struct min {
-    utl_parallel_force_inline constexpr T operator()(const T& lhs, const T& rhs) const {
-        return (rhs < lhs) ? rhs : lhs;
+    constexpr const T& operator()(const T& lhs, const T& rhs) const noexcept(noexcept((lhs < rhs) ? lhs : rhs)) {
+        return (lhs < rhs) ? lhs : rhs;
     }
+};
+
+template <>
+struct min<void> {
+    template <class T1, class T2>
+    constexpr auto operator()(T1&& lhs, T2&& rhs) const
+        noexcept(noexcept(std::less<>{}(lhs, rhs) ? std::forward<T1>(lhs) : std::forward<T2>(rhs)))
+            -> decltype(std::less<>{}(lhs, rhs) ? std::forward<T1>(lhs) : std::forward<T2>(rhs)) {
+        return std::less<>{}(lhs, rhs) ? std::forward<T1>(lhs) : std::forward<T2>(rhs);
+    }
+
+    using is_transparent = std::less<>::is_transparent;
 };
 
 template <class T>
 struct max {
-    utl_parallel_force_inline constexpr T operator()(const T& lhs, const T& rhs) const {
-        return (rhs < lhs) ? lhs : rhs;
+    constexpr const T& operator()(const T& lhs, const T& rhs) const noexcept(noexcept((lhs < rhs) ? rhs : lhs)) {
+        return (lhs < rhs) ? rhs : lhs;
     }
 };
 
-// Clean up codegen macros
-#undef utl_parallel_force_inline
+template <>
+struct max<void> {
+    template <class T1, class T2>
+    constexpr auto operator()(T1&& lhs, T2&& rhs) const
+        noexcept(noexcept(std::less<>{}(lhs, rhs) ? std::forward<T1>(rhs) : std::forward<T2>(lhs)))
+            -> decltype(std::less<>{}(lhs, rhs) ? std::forward<T1>(rhs) : std::forward<T2>(lhs)) {
+        return std::less<>{}(lhs, rhs) ? std::forward<T1>(rhs) : std::forward<T2>(lhs);
+    }
+
+    using is_transparent = std::less<>::is_transparent;
+};
 
 } // namespace utl::parallel
 
@@ -8131,6 +8164,9 @@ T rand_linear_combination(const T& A, const T& B) { // random linear combination
 //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+#include <mutex>
+#include <stdexcept>
+#include <type_traits>
 #if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_SHELL)
 #ifndef UTLHEADERGUARD_SHELL
 #define UTLHEADERGUARD_SHELL
@@ -8139,7 +8175,7 @@ T rand_linear_combination(const T& A, const T& B) { // random linear combination
 
 #include <cstddef>       // size_t
 #include <cstdlib>       // atexit(), system(), rand()
-#include <filesystem>    // filesystem::remove(), filesystem::path, filesystem::exists()
+#include <filesystem>    // fs::remove(), fs::path, fs::exists(), fs::temp_directory_path()
 #include <fstream>       // ofstream, ifstream
 #include <sstream>       // ostringstream
 #include <string>        // string
@@ -8194,7 +8230,11 @@ namespace utl::shell {
     for (std::size_t i = 0; i < length; ++i)
         result[i] = static_cast<char>(min_char + std::rand() % (max_char - min_char + 1));
     // we don't really care about the quality of random here, and we already include <cstdlib>,
-    // so rand() is fine, otherwise we'd have to include the entirety of <random> for this function
+    // so rand() is fine, otherwise we'd have to include the entirety of <random> for this function.
+    // There's also a whole buch of issues caused by questionable design <random>, (such as
+    // 'std::uniform_int_distribution' not supporting 'char') for generating random strings properly
+    // (aka faster and thread-safe) there is a much better option in 'utl::random::rand_string()'.
+    // Note that using remainder formula for int distribution is also biased, but here it doesn't matter.
     return result;
 }
 
@@ -8217,8 +8257,9 @@ inline std::string generate_temp_file() {
     // No '[[nodiscard]]' since the function could still be used to generate files without
     // actually accessing them (through the returned path) in the same program.
 
-    constexpr std::size_t MAX_ATTEMPTS = 500; // shouldn't realistically be encountered but still
-    constexpr std::size_t NAME_LENGTH  = 30;
+    constexpr auto        filename_prefix = "utl___";
+    constexpr std::size_t max_attempts    = 500; // shouldn't realistically be encountered, but still
+    constexpr std::size_t name_length     = 30;
 
     // Register std::atexit() if not already registered
     if (!_temp_files_cleanup_registered) {
@@ -8227,22 +8268,25 @@ inline std::string generate_temp_file() {
     }
 
     // Try creating files until unique name is found
-    for (std::size_t i = 0; i < MAX_ATTEMPTS; ++i) {
-        const std::filesystem::path temp_path(random_ascii_string(NAME_LENGTH) + ".txt");
+    for (std::size_t i = 0; i < max_attempts; ++i) {
+        const std::filesystem::path temp_directory = std::filesystem::temp_directory_path();
+        const std::string           temp_filename  = filename_prefix + random_ascii_string(name_length) + ".txt";
+        const std::filesystem::path temp_path      = temp_directory / temp_filename;
 
         if (std::filesystem::exists(temp_path)) continue;
 
-        const std::ofstream temp_file(temp_path);
+        const std::ofstream os(temp_path);
 
-        if (temp_file.good()) {
-            _temp_files.insert(temp_path.string());
-            return temp_path.string();
-        } else {
-            return std::string();
-        }
+        if (!os)
+            throw std::runtime_error("shell::generate_temp_file(): Could open created temporary file `" +
+                                     temp_path.string() + "`");
+
+        _temp_files.insert(temp_path.string());
+        return temp_path.string();
     }
 
-    return std::string();
+    throw std::runtime_error("shell::generate_temp_file(): Could no create a unique temporary file in " +
+                             std::to_string(max_attempts) + " attempts.");
 }
 
 // ===================

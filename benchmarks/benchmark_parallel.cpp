@@ -201,7 +201,7 @@ void benchmark_sum() {
     parallel::set_thread_count(thread_count);
     benchmark("parallel::reduce()", [&]() {
         sum_parallel_reduce = 0;
-        sum_parallel_reduce = parallel::reduce(A, parallel::sum<double>());
+        sum_parallel_reduce = parallel::reduce(A, parallel::sum<>{});
     });
     
     // parallel::reduce()
@@ -209,7 +209,7 @@ void benchmark_sum() {
     parallel::set_thread_count(thread_count);
     benchmark("parallel::reduce<4>() (loop unrolling enabled)", [&]() {
         sum_parallel_reduce_unrolled = 0;
-        sum_parallel_reduce_unrolled = parallel::reduce<4>(A, parallel::sum<double>());
+        sum_parallel_reduce_unrolled = parallel::reduce<4>(A, parallel::sum<>{});
     });
     
     // Verify correctness
