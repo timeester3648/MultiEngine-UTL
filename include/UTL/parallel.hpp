@@ -8,6 +8,7 @@
 //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+#include <iterator>
 #if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_PARALLEL)
 #ifndef UTLHEADERGUARD_PARALLEL
 #define UTLHEADERGUARD_PARALLEL
@@ -37,9 +38,9 @@
 
 namespace utl::parallel {
 
-// =======================
-// --- Mutex-protected ---
-// =======================
+// =============
+// --- Utils ---
+// =============
 
 template <class T, class Mutex = std::mutex>
 class MutexProtected {
@@ -62,13 +63,11 @@ public:
         const std::lock_guard lock(this->mutex);
         return std::forward<Func>(func)(this->value);
     }
+
+    [[nodiscard]] T&& release() { return std::move(this->value); }
 };
 
-// =============
-// --- Utils ---
-// =============
-
-inline std::size_t max_thread_count() {
+[[nodiscard]] inline std::size_t max_thread_count() noexcept {
     const std::size_t detected_threads = std::thread::hardware_concurrency();
     return detected_threads ? detected_threads : 1;
     // 'hardware_concurrency()' returns '0' if it can't determine the number of threads,
@@ -77,8 +76,8 @@ inline std::size_t max_thread_count() {
 
 // No reason to include the entirety of <algorithm> just for 2 one-liner functions,
 // so we implement 'std::size_t' min/max here
-constexpr std::size_t _min_size(std::size_t a, std::size_t b) noexcept { return (b < a) ? b : a; }
-constexpr std::size_t _max_size(std::size_t a, std::size_t b) noexcept { return (b < a) ? a : b; }
+[[nodiscard]] constexpr std::size_t _min_size(std::size_t a, std::size_t b) noexcept { return (b < a) ? b : a; }
+[[nodiscard]] constexpr std::size_t _max_size(std::size_t a, std::size_t b) noexcept { return (b < a) ? a : b; }
 
 // Template for automatic loop unrolling.
 //
@@ -110,9 +109,23 @@ constexpr void _unroll(F&& f) {
     _unroll_impl(std::make_integer_sequence<T, count>{}, std::forward<F>(f));
 }
 
+// Contant used to restring 'parallel::Range' to random-access iterators
+template <class Iter>
+constexpr bool _is_random_access_iterator_v =
+    std::is_same_v<typename std::iterator_traits<Iter>::iterator_category, std::random_access_iterator_tag>;
+
 // ===================
 // --- Thread pool ---
 // ===================
+
+// A simple single-queue task threadpool, uploads of arbitrary callables as tasks,
+// returns optional futures, supports pausing. Work stealing would probably be better
+// in a general case, however it complicates the implementation quite noticeably and
+// doesn't provide much measurable benefit under the API of this module.
+
+// Note:
+// We don't use 'MutexProtected' here to make implementation a bit more decoupled, plus such idiom isn't nearly as
+// convenient once we enter the realm of non-trivial syncronization with recursive mutexes and condition variables.
 
 class ThreadPool {
 private:
@@ -214,7 +227,7 @@ public:
     // --- Threads ---
     // ---------------
 
-    std::size_t get_thread_count() const {
+    [[nodiscard]] std::size_t get_thread_count() const {
         const std::lock_guard<std::recursive_mutex> thread_lock(this->thread_mutex);
         return this->threads.size();
     }
@@ -308,11 +321,12 @@ public:
 // =====================================
 
 inline ThreadPool& static_thread_pool() {
+    // no '[nodiscard]' since a call to this function might be used to initialize a threadpool
     static ThreadPool pool(max_thread_count());
     return pool;
 }
 
-inline std::size_t get_thread_count() { return static_thread_pool().get_thread_count(); }
+[[nodiscard]] inline std::size_t get_thread_count() { return static_thread_pool().get_thread_count(); }
 
 inline void set_thread_count(std::size_t thread_count) { static_thread_pool().set_thread_count(thread_count); }
 
@@ -340,8 +354,8 @@ inline void wait_for_tasks() { static_thread_pool().wait_for_tasks(); }
 constexpr std::size_t default_grains_per_thread = 4;
 // by default we distribute 4 tasks per thread, this number is purely empirical.
 // We don't want to split up work into too many tasks (like with 'grain_size = 1')
-// yet we want it to be a bit more granular than doing 1 task per threads since
-// that would be horrible if tasks are uneven.
+// yet we want it to be a bit more granular than doing 1 task per thread since
+// that would be horrible if tasks are noticeably uneven.
 
 // Note:
 // In range constructors we intentionally allow some possibly narrowing conversions like 'it1 - it2' to 'size_t'
@@ -360,7 +374,7 @@ struct IndexRange {
         : IndexRange(first, last, _max_size(1, (last - first) / (get_thread_count() * default_grains_per_thread))){};
 };
 
-template <class Iter>
+template <class Iter, std::enable_if_t<_is_random_access_iterator_v<Iter>, bool> = true>
 struct Range {
     Iter        begin;
     Iter        end;
@@ -377,7 +391,7 @@ struct Range {
 
     template <class Container>
     Range(Container& container) : Range(container.begin(), container.end()) {}
-}; // requires 'Iter' to be random-access-iterator
+};
 
 // User-defined deduction guides
 //
@@ -412,13 +426,10 @@ void for_loop(Range<Iter> range, Func&& func) {
 }
 
 template <class Container, class Func>
-void for_loop(const Container& container, Func&& func) {
-    for_loop(Range{container}, std::forward<Func>(func));
-}
-
-template <class Container, class Func>
-void for_loop(Container& container, Func&& func) {
-    for_loop(Range{container}, std::forward<Func>(func));
+void for_loop(Container&& container, Func&& func) {
+    static_assert(_is_random_access_iterator_v<typename std::decay_t<Container>::iterator>,
+                  "Type does not provide random access iterator."); // redundant, but improves error messages
+    for_loop(Range{std::forward<Container>(container)}, std::forward<Func>(func));
 }
 // couldn't figure out how to make it work perfect-forwared 'Container&&',
 // for some reason it would always cause template deduction to fail
@@ -432,8 +443,7 @@ constexpr std::size_t default_unroll = 1;
 template <std::size_t unroll = default_unroll, class BinaryOp, class Iter, class T = typename Iter::value_type>
 auto reduce(Range<Iter> range, BinaryOp&& op) -> T {
 
-    std::mutex result_mutex;
-    T          result = *range.begin;
+    MutexProtected<T> result = *range.begin;
     // we have to start from the 1st element and not 'T{}' because there is no guarantee
     // than doing so would be correct for some non-trivial 'T' and 'op'
 
@@ -458,8 +468,7 @@ auto reduce(Range<Iter> range, BinaryOp&& op) -> T {
                     partial_results[0] = op(partial_results[0], partial_results[i]);
 
                 // (critical section) Add partial result to the global one
-                const std::lock_guard<std::mutex> result_lock(result_mutex);
-                result = op(result, partial_results[0]);
+                result.apply([&](auto&& res) { res = op(std::forward<decltype(res)>(res), partial_results[0]); });
 
                 return; // skip the non-unrolled version
             }
@@ -470,8 +479,7 @@ auto reduce(Range<Iter> range, BinaryOp&& op) -> T {
         for (auto it = low + 1; it != high; ++it) partial_result = op(partial_result, *it);
 
         // (critical section) Add partial result to the global one
-        const std::lock_guard<std::mutex> result_lock(result_mutex);
-        result = op(result, partial_result);
+        result.apply([&](auto&& res) { res = op(std::forward<decltype(res)>(res), partial_result); });
     });
 
     // Note 1:
@@ -483,11 +491,13 @@ auto reduce(Range<Iter> range, BinaryOp&& op) -> T {
     // 'if constexpr (unroll > 1)' ensures that unrolling logic will have no effect
     //  whatsoever on the non-unrolled version of the template, it will not even compile.
 
-    return result;
+    return result.release();
 }
 
 template <std::size_t unroll = default_unroll, class BinaryOp, class Container>
 auto reduce(Container&& container, BinaryOp&& op) -> typename std::decay_t<Container>::value_type {
+    static_assert(_is_random_access_iterator_v<typename std::decay_t<Container>::iterator>,
+                  "Type does not provide random access iterator."); // redundant, but improves error messages
     return reduce<unroll>(Range{std::forward<Container>(container)}, std::forward<BinaryOp>(op));
 }
 

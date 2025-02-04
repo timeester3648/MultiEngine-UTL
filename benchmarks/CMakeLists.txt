@@ -2,7 +2,7 @@
 macro(add_utl_benchmark filename)
     add_executable(${filename} ${filename}.cpp)
     target_compile_features(${filename} PRIVATE cxx_std_17)
-    target_compile_options(${filename} PRIVATE -O2 -Wall -Wextra -Wpedantic -Werror -fmax-errors=1)
+    target_compile_options(${filename} PRIVATE -O2 -Wall -Wextra -Wpedantic -Werror -fmax-errors=10)
 endmacro()
 
 add_utl_benchmark(benchmark_json)

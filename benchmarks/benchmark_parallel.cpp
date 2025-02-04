@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <functional>
+#include <iterator>
 #include <vector>
 
 #ifdef _OPENMP
