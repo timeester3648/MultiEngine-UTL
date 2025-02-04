@@ -168,9 +168,9 @@ utl_log_define_trait(_is_pad, std::declval<std::decay_t<T>>().is_pad);
 // By checking if 'std::next(c.begin())' compiles we can properly check that iterator satisfies input iterator
 // requirements, which means we can use it with operator '++' to iterate over the container. Trying to just
 // check for operator '++' would lead to false positives, while checking '++c.begin()' would lead to false
-// negatives on containers such as 'std::array'. Note that target container doesn't even have to provide
-// 'T::iterator', the type gets deduced from 'c.begin()'.
-
+// negatives on containers such as 'std::array'. It would seem that 'std::iterator_traits' is the way to go,
+// but since it provides no good way to test if iterator satisfies a category without checking every possible
+// tag, it ends up being more verbose that exisiting solution.
 
 #undef utl_log_define_trait
 

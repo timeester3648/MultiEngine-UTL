@@ -1828,9 +1828,9 @@ utl_log_define_trait(_is_pad, std::declval<std::decay_t<T>>().is_pad);
 // By checking if 'std::next(c.begin())' compiles we can properly check that iterator satisfies input iterator
 // requirements, which means we can use it with operator '++' to iterate over the container. Trying to just
 // check for operator '++' would lead to false positives, while checking '++c.begin()' would lead to false
-// negatives on containers such as 'std::array'. Note that target container doesn't even have to provide
-// 'T::iterator', the type gets deduced from 'c.begin()'.
-
+// negatives on containers such as 'std::array'. It would seem that 'std::iterator_traits' is the way to go,
+// but since it provides no good way to test if iterator satisfies a category without checking every possible
+// tag, it ends up being more verbose that exisiting solution.
 
 #undef utl_log_define_trait
 
@@ -5679,11 +5679,6 @@ constexpr void _unroll(F&& f) {
     _unroll_impl(std::make_integer_sequence<T, count>{}, std::forward<F>(f));
 }
 
-// Contant used to restring 'parallel::Range' to random-access iterators
-template <class Iter>
-constexpr bool _is_random_access_iterator_v =
-    std::is_same_v<typename std::iterator_traits<Iter>::iterator_category, std::random_access_iterator_tag>;
-
 // ===================
 // --- Thread pool ---
 // ===================
@@ -5944,7 +5939,7 @@ struct IndexRange {
         : IndexRange(first, last, _max_size(1, (last - first) / (get_thread_count() * default_grains_per_thread))){};
 };
 
-template <class Iter, std::enable_if_t<_is_random_access_iterator_v<Iter>, bool> = true>
+template <class Iter>
 struct Range {
     Iter        begin;
     Iter        end;
@@ -5961,7 +5956,7 @@ struct Range {
 
     template <class Container>
     Range(Container& container) : Range(container.begin(), container.end()) {}
-};
+};// requires random-access iterator, but no good way to express that before C++20 concepts
 
 // User-defined deduction guides
 //
@@ -5997,8 +5992,6 @@ void for_loop(Range<Iter> range, Func&& func) {
 
 template <class Container, class Func>
 void for_loop(Container&& container, Func&& func) {
-    static_assert(_is_random_access_iterator_v<typename std::decay_t<Container>::iterator>,
-                  "Type does not provide random access iterator."); // redundant, but improves error messages
     for_loop(Range{std::forward<Container>(container)}, std::forward<Func>(func));
 }
 // couldn't figure out how to make it work perfect-forwared 'Container&&',
@@ -6066,8 +6059,6 @@ auto reduce(Range<Iter> range, BinaryOp&& op) -> T {
 
 template <std::size_t unroll = default_unroll, class BinaryOp, class Container>
 auto reduce(Container&& container, BinaryOp&& op) -> typename std::decay_t<Container>::value_type {
-    static_assert(_is_random_access_iterator_v<typename std::decay_t<Container>::iterator>,
-                  "Type does not provide random access iterator."); // redundant, but improves error messages
     return reduce<unroll>(Range{std::forward<Container>(container)}, std::forward<BinaryOp>(op));
 }
 
