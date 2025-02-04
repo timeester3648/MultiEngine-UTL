@@ -326,9 +326,19 @@ template <class T> struct  sum { constexpr T operator()(const T& lhs, const T& r
 template <class T> struct prod { constexpr T operator()(const T& lhs, const T& rhs) const; }
 template <class T> struct  min { constexpr T operator()(const T& lhs, const T& rhs) const; }
 template <class T> struct  max { constexpr T operator()(const T& lhs, const T& rhs) const; }
+
+// Transparent specializations
+template<> struct  sum<void> { template<class T, class U> constexpr auto operator()(T&& lhs, T&& rhs) const; }
+template<> struct prod<void> { template<class T, class U> constexpr auto operator()(T&& lhs, T&& rhs) const; }
+template<> struct  min<void> { template<class T, class U> constexpr auto operator()(T&& lhs, T&& rhs) const; }
+template<> struct  max<void> { template<class T, class U> constexpr auto operator()(T&& lhs, T&& rhs) const; }
 ```
 
 Pre-defined binary operations for `parallel::reduce()`.
+
+**Note 1:** All functors will be `noexcept` if possible.
+
+**Note 2:** "Transparent functors" are `void` specializations that deduce their parameter and return types from the arguments. This is how function objects should usually be used. See [cpprefence](https://en.cppreference.com/w/cpp/utility/functional#Transparent_function_objects) for details.
 
 ## Examples
 
@@ -417,7 +427,7 @@ const double sum = parallel::reduce(vals, parallel::sum<double>());
 assert( sum == 5'000'000 * 2 );
 
 // Reduce range over a binary operation
-const double subrange_sum = parallel::reduce(parallel::Range{vals.begin() + 100, vals.end()}, parallel::sum<double>());
+const double subrange_sum = parallel::reduce(parallel::Range{vals.begin() + 100, vals.end()}, parallel::sum<>());
 
 assert( subrange_sum == (5'000'000 - 100) * 2 );
 ```
