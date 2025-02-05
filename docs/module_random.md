@@ -295,26 +295,28 @@ Thankfully, `<random>` design is quite flexible and fully abstracts the concept 
 
 ### Overview of available PRNGs
 
-| Generator            | Performance           | Memory     | Quality | Period            | Motivation                          |
-| -------------------- | --------------------- | ---------- | ------- | ----------------- | ----------------------------------- |
-| `RomuTrio32`         | ~200% (450%)**&ast;** | 12 bytes   | ★★★☆☆   | $\geq 2^{53}$     | Fastest 32-bit PRNG                 |
-| `JSF32`              | ~200% (360%)**&ast;** | 16 bytes   | ★★★★☆   | $\approx 2^{126}$ | Fast yet decent quality 32-bit PRNG |
-| `RomuDuoJr`          | ~195%                 | 16 bytes   | ★★☆☆☆   | $\geq 2^{51}$     | Fastest 64-bit PRNG                 |
-| `JSF64`              | ~180%                 | 32 bytes   | ★★★★☆   | $\approx 2^{126}$ | Fast yet decent quality 64-bit PRNG |
-| `Xoshiro256PlusPlus` | ~175%                 | 32 bytes   | ★★★★☆   | $2^{256} − 1$     | Best all purpose 64-bit PRNG        |
-| `Xorshift64Star`     | ~125%                 | 8 bytes    | ★★★☆☆   | $2^{64} − 1$      | Smallest state 64-bit PRNG          |
-| `ChaCha20`           | ~40%                  | 120 bytes  | ★★★★★   | $2^{128}$         | Cryptographically secure PRNG       |
-| `std::minstd_rand`   | 100%                  | 8 bytes    | ★☆☆☆☆   | $2^{31} − 1$      |                                     |
-| `std::mt19937`       | ~70%                  | 5000 bytes | ★★★☆☆   | $2^{19937} − 1$   |                                     |
-| `std::ranlux48`      | ~4%                   | 120 bytes  | ★★★★☆   | $\approx 2^{576}$ |                                     |
-
-**[&ast;]** A lot of CPUs lacks 64-bit `rotl` instructions, which can make 32-bit versions offer up to **300–500% speedup**. 
+| Generator            | Performance    | Memory     | Result type     | Quality | Period            | Motivation                          |
+| -------------------- | -------------- | ---------- | --------------- | ------- | ----------------- | ----------------------------------- |
+| `RomuTrio32`         | ~450%**&ast;** | 12 bytes   | `std::uint32_t` | ★★★☆☆   | $\geq 2^{53}$     | Fastest 32-bit PRNG                 |
+| `JSF32`              | ~255%**&ast;** | 16 bytes   | `std::uint32_t` | ★★★★☆   | $\approx 2^{126}$ | Fast yet decent quality 32-bit PRNG |
+| `RomuDuoJr`          | ~600%          | 16 bytes   | `std::uint32_t` | ★★☆☆☆   | $\geq 2^{51}$     | Fastest 64-bit PRNG                 |
+| `JSF64`              | ~375%          | 32 bytes   | `std::uint64_t` | ★★★★☆   | $\approx 2^{126}$ | Fast yet decent quality 64-bit PRNG |
+| `Xoshiro256PlusPlus` | ~385%          | 32 bytes   | `std::uint64_t` | ★★★★☆   | $2^{256} − 1$     | Best all purpose 64-bit PRNG        |
+| `Xorshift64Star`     | ~285%          | 8 bytes    | `std::uint64_t` | ★★★☆☆   | $2^{64} − 1$      | Smallest state 64-bit PRNG          |
+| `ChaCha20`           | ~70%           | 120 bytes  | `std::uint32_t` | ★★★★★   | $2^{128}$         | Cryptographically secure PRNG       |
+| `std::minstd_rand`   | 100%           | 8 bytes    | `std::uint64_t` | ★☆☆☆☆   | $2^{31} − 1$      |                                     |
+| `std::mt19937`       | ~105%          | 5000 bytes | `std::uint32_t` | ★★★☆☆   | $2^{19937} − 1$   |                                     |
+| `std::knuth_b`       | ~55%           | 2064 bytes | `std::uint64_t` | ★★☆☆☆   | $2^{31} − 1$      |                                     |
+| `std::ranlux48`      | ~4%            | 120 bytes  | `std::uint64_t` | ★★★★☆   | $\approx 2^{576}$ |                                     |
 
 > [!Note]
-> `C` function [rand()](https://en.cppreference.com/w/c/numeric/random/rand) is implementation-defined, but in virtually all existing implementation it uses an old [LCG](https://en.wikipedia.org/wiki/Linear_congruential_generator) engine similar to `std::minstd_rand`. It is generally an extremely low-quality way of generating random and faces a host of additional issues on platforms with low `RAND_MAX`, which includes Windows where `RAND_MAX` is equal `32767` (less than **2 bytes** of information, an almost ridiculous value, really).
+> `C` function [rand()](https://en.cppreference.com/w/c/numeric/random/rand) is implementation-defined, but in most existing implementation it uses an old [LCG](https://en.wikipedia.org/wiki/Linear_congruential_generator) engine similar to `std::minstd_rand`. It is generally an extremely low-quality way of generating random and faces a host of additional issues on platforms with low `RAND_MAX`, which includes Windows where `RAND_MAX` is equal `32767` (less than **2 bytes** of information, an almost ridiculous value, really).
 
 > [!Important]
-> Performance ratings are **relative to the commonly used  `std::minstd_rand` / `rand()`**. Particular number may differ depending on the hardware and compilation settings, however general trends tend to stay the same. Benchmarks can be found [here](../benchmarks/benchmark_random.cpp).
+> Performance ratings are **relative to the commonly used  `std::minstd_rand` / `rand()`**.  Particular number may differ depending on the hardware and compilation settings, however general trends tend to stay the same. Benchmarks can be found [here](../benchmarks/benchmark_random.cpp).
+
+> [!Important]
+> Performance is measured in **values per unit of time**, to get a *bytes per unit of time* metric, the measurements can be normalized by a `sizeof(result_type)`, making 32-bit generators effectively two times slower than listed in the table.
 
 Random quality ratings are as follows:
 
