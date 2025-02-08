@@ -2,25 +2,27 @@
 
 [<- back to README.md](..)
 
-**random** module adds most of the sensible random functions one would need.
+**random** module implements several additions to std [&lt;random&gt;](https://en.cppreference.com/w/cpp/header/random) that aim to:
+
+- Make random friendlier for the "naive" use without compromising on quality
+- Improve random performance
+
+The module was created during my ongoing work on a thesis that uses [stochastic differential equations](https://en.wikipedia.org/wiki/Stochastic_differential_equation) and [Monte—Carlo method](https://en.wikipedia.org/wiki/Monte_Carlo_method) to model explosive heat transfer in a turbulent flow.
 
 It implements several random bit generators seamlessly compatible with [&lt;random&gt;](https://en.cppreference.com/w/cpp/header/random):
 
+- [16-bit Romu Mono PRNG](https://www.romu-random.org/)
 - [32-bit Romu Trio PRNG](https://www.romu-random.org/)
-
-- [32-bit Bob Jenkins Small Fast PRNG](https://burtleburtle.net/bob/rand/smallprng.html)
-
+- [32bit SplitMix PRNG](https://dl.acm.org/doi/10.1145/2714064.2660195)
+- [32-bit Xoshiro128++ PRNG](https://prng.di.unimi.it/)
 - [64-bit Romu Duo Jr. PRNG](https://www.romu-random.org/)
-
-- [64-bit Bob Jenkins Small Fast PRNG](https://burtleburtle.net/bob/rand/smallprng.html)
-
+- [64-bit SplitMix PRNG](https://rosettacode.org/wiki/Pseudo-random_numbers/Splitmix64)
 - [64-bit Xoshiro256++ PRNG](https://prng.di.unimi.it/)
-
-- [64-bit XorShift64&ast; PRNG](https://www.jstatsoft.org/article/view/v008i14)
-
+- [ChaCha8 CSPRNG](https://en.wikipedia.org/wiki/Salsa20#ChaCha_variant)
+- [ChaCha12 CSPRNG](https://en.wikipedia.org/wiki/Salsa20#ChaCha_variant)
 - [ChaCha20 CSPRNG](https://en.wikipedia.org/wiki/Salsa20#ChaCha_variant)
 
-These pseudorandom number generators (aka [PRNGs](https://en.wikipedia.org/wiki/Pseudorandom_number_generator)) cover most of the common uses cases better than somewhat outdated standard library implementations, see [notes on random number generation](#notes-on-random-number-generation).
+These pseudorandom number generators (aka [PRNGs](https://en.wikipedia.org/wiki/Pseudorandom_number_generator)) cover most of the common uses cases better than somewhat outdated standard library PRNGs, see [notes on random number generation](#notes-on-random-number-generation).
 
 **Why use `utl::random` over built-in functions?**
 
@@ -29,6 +31,7 @@ These pseudorandom number generators (aka [PRNGs](https://en.wikipedia.org/wiki/
 - Provides [better quality random](#notes-on-random-number-generation) than built-in methods
 - Reproducible results, built-in engines may differ compiler to compiler
 - Random generators work even in `constexpr` context
+- Almost everything is `noexcept`
 - An option to use [cryptographically secure PRNG](https://en.wikipedia.org/wiki/Cryptographically_secure_pseudorandom_number_generator)
 - More reliable sources of entropy than [std::random_device](https://en.cppreference.com/w/cpp/numeric/random/random_device)
 
@@ -52,47 +55,61 @@ namespace generators {
         constexpr result_type operator()() noexcept;
     };
     
+    // 16-bit PRNGs
+    class RomuMono32   { /* Generator API */ };
     // 32-bit PRNGs
-    class RomuTrio32         { /* Generator API */ };
-    class JSF32              { /* Generator API */ };
+    class RomuTrio32   { /* Generator API */ };
+    class SplitMix32   { /* Generator API */ };
+    class Xoshiro128PP { /* Generator API */ };
     // 64-bit PRNGs
-    class RomuDuoJr          { /* Generator API */ };
-    class JSF64              { /* Generator API */ };
-    class Xoshiro256PlusPlus { /* Generator API */ };
-    class Xorshift64Star     { /* Generator API */ };
+    class RomuDuoJr64  { /* Generator API */ };
+    class SplitMix64   { /* Generator API */ };
+    class Xoshiro256PP { /* Generator API */ };
     // CSPRNGs
-    class ChaCha20           { /* Generator API */ };
+    class ChaCha8      { /* Generator API */ };
+    class ChaCha12     { /* Generator API */ };
+    class ChaCha20     { /* Generator API */ };
 }
 
 // Default global PRNG
-using default_generator_type = generators::Xoshiro256PlusPlus;
+using default_generator_type = generators::Xoshiro256PP;
 using default_result_type    = std::uint64_t;
 
 inline default_generator_type default_generator;
 
-void seed(std::uint64_t seed);
+void seed(std::uint64_t seed) noexcept;
 void seed_with_entropy();
 
 // Entropy
 std::seed_seq entropy_seq();
 std::uint32_t entropy();
 
+// Distributions
+template <class T>
+struct UniformIntDistribution  { /* same API as std::uniform_int_distribution<T> */  };
+
+template <class T>
+struct UniformRealDistribution { /* same API as std::uniform_real_distribution<T> */ };
+
+template <class T, class Gen>
+constexpr T generate_canonical(Gen& gen) noexcept(noexcept(gen()));
+
 // Convenient random functions
-int rand_int(int min, int max);
-int rand_uint(unsigned int min, unsigned int max);
+int rand_int(int min, int max)                    noexcept;
+int rand_uint(unsigned int min, unsigned int max) noexcept;
 
-float rand_float();                     // U[0, 1]     uniform distribution
-float rand_float(float min, float max); // U[min, max] uniform distribution
-float rand_normal_float();              // N(0, 1)      normal distribution
+float rand_float()                     noexcept; // U[0, 1]     uniform distribution
+float rand_float(float min, float max) noexcept; // U[min, max] uniform distribution
+float rand_normal_float();                       // N(0, 1)      normal distribution
 
-double rand_double();                       // U[0, 1]     uniform distribution
-double rand_double(double min, double max); // U[min, max] uniform distribution
-double rand_normal_float();                 // N(0, 1)      normal distribution
+double rand_double()                       noexcept; // U[0, 1]     uniform distribution
+double rand_double(double min, double max) noexcept; // U[min, max] uniform distribution
+double rand_normal_float();                          // N(0, 1)      normal distribution
 
-bool rand_bool();
+bool rand_bool() noexcept;
 
 template<class T>
-const T& rand_choise(std::initializer_list<T> objects);
+constexpr T& rand_choise(std::initializer_list<T> objects) noexcept;
 
 template<class T>
 T rand_linear_combination(const T& A, const T& B);
@@ -104,42 +121,46 @@ T rand_linear_combination(const T& A, const T& B);
 
 > ```cpp
 > class GeneratorAPIExample {
->    using result_type;
+>     using result_type;
 > 
->    static constexpr result_type min() noexcept;
->    static constexpr result_type max() noexcept;
+>     static constexpr result_type min() noexcept;
+>     static constexpr result_type max() noexcept;
 > 
->    constexpr GeneratorAPI(result_type seed);
->    constexpr void    seed(result_type seed) noexcept;
+>     constexpr GeneratorAPI(result_type seed);
+>     constexpr void    seed(result_type seed) noexcept;
 > 
->    template<class SeedSeq> GeneratorAPI(SeedSeq& seq);
->    template<class SeedSeq> void    seed(SeedSeq& seq);
+>     template<class SeedSeq> GeneratorAPI(SeedSeq& seq);
+>     template<class SeedSeq> void    seed(SeedSeq& seq);
 > 
->    constexpr result_type operator()() noexcept;
+>     constexpr result_type operator()() noexcept;
 > };
 > 
+> // 16-bit PRNGs
+> class RomuMono32   { /* Generator API */ };
 > // 32-bit PRNGs
-> class RomuTrio32         { /* Generator API */ };
-> class JSF32              { /* Generator API */ };
+> class RomuTrio32   { /* Generator API */ };
+> class SplitMix32   { /* Generator API */ };
+> class Xoshiro128PP { /* Generator API */ };
 > // 64-bit PRNGs
-> class RomuDuoJr          { /* Generator API */ };
-> class JSF64              { /* Generator API */ };
-> class Xoshiro256PlusPlus { /* Generator API */ };
-> class Xorshift64Star     { /* Generator API */ };
+> class RomuDuoJr64  { /* Generator API */ };
+> class SplitMix64   { /* Generator API */ };
+> class Xoshiro256PP { /* Generator API */ };
 > // CSPRNGs
-> class ChaCha20           { /* Generator API */ };
+> class ChaCha8      { /* Generator API */ };
+> class ChaCha12     { /* Generator API */ };
+> class ChaCha20     { /* Generator API */ };
 > ```
 
 All of these generators satisfy [uniform random bit generator generator requirements](https://en.cppreference.com/w/cpp/named_req/UniformRandomBitGenerator) and [std::uniform_random_bit_generator](https://en.cppreference.com/w/cpp/numeric/random/uniform_random_bit_generator) concept, which makes them drop-in replacements for standard generators such as `std::mt19937`.
 
 Unlike standard generators these can also be used in `constexpr` functions.
 
-**Note:** Unfortunately, distributions such as `std::uniform_int_distribution` aren't marked `constexpr`, which makes non-trivial number generation a bit annoying. Their output will have to be used directly, similar to `rand()`.
+**Note:** All provided PRNGs have `min() == 0` and `max() == std::numeric_limits<result_type>::max()`.
 
 ### Default global PRNG
 
 > ```cpp
-> using default_generator_type = generators::Xoshiro256PlusPlus;
+> using default_generator_type = generators::Xoshiro256PP;
 > using default_result_type    = std::uint64_t;
 > ```
 
@@ -154,13 +175,13 @@ A global instance of **Xoshiro256++** generator used by convenience functions of
 **Note:** All random engines are inherently non-thread-safe, a proper way of generating numbers in parallel is to create local generators on each thread and seed them with different values.
 
 > ```cpp
-> random::seed(uint64_t random_seed);
+> void random::seed(uint64_t random_seed) noexcept;
 > ```
 
 Seeds global random engine with `random_seed`.
 
 > ```cpp
-> random::seed_with_entropy();
+> void random::seed_with_entropy();
 > ```
 
 Seeds global random engine using combined entropy from several sources, the main one being [std::random_device](https://en.cppreference.com/w/cpp/numeric/random/random_device) which uses hardware source of non-deterministic randomness.
@@ -182,11 +203,55 @@ These functions serve a role of a "slightly better and more convenient [std::ran
 
 `std::random_device` has a critical deficiency in it's design — in case its implementation doesn't provide a proper source of entropy, it is free to fallback onto a regular PRNGs that don't change from run to run. The method [std::random_device::entropy()](https://en.cppreference.com/w/cpp/numeric/random/random_device/entropy) which should be able to detect that information is notoriously unreliable and returns different things on every platform.
 
-`entropy()` samples several sources of entropy (including the `std::random_device` itself) and is guaranteed to change from run to run even if it can't provide a proper hardware-sourced entropy that would be suitable for cryptography. It can be used as a drop-in replacement to `std::random_device{}()` calls.
+`entropy()` samples several sources of entropy (including the `std::random_device` itself) and is (almost) guaranteed to change from run to run even if it can't provide a proper hardware-sourced entropy that would be suitable for cryptography. It can be used as a drop-in replacement to `std::random_device{}()` calls.
 
 `entropy_seq()` generates a full [std::seed_seq](https://en.cppreference.com/w/cpp/numeric/random/seed_seq) instead of a single number, it is mainly useful for seeding generators with a large state.
 
 **Note:** These functions are thread-safe.
+
+### Distributions
+
+> ```cpp
+> template <class T>
+> struct UniformIntDistribution {
+>     /* ... */
+> };
+> ```
+
+Uniform integer distribution class that provides a 1-to-1 copy of [`std::uniform_int_distribution`](https://en.cppreference.com/w/cpp/numeric/random/uniform_int_distribution) API, except:
+
+- Everything is `constexpr` and `noexcept`
+- `operator()` is `const`-qualified
+- `std::uint8_t`, `std::int8_t` and `char` specializations are properly supported
+- Distribution sequence is platform-independent
+
+**Note:** This is a close reimplementation of `std::uniform_int_distribution` for [GCC libstdc++](https://github.com/gcc-mirror/gcc) with some additional considerations, it provides similar performance and in some cases may even produce the same sequence.
+
+> ```cpp
+> template <class T>
+> struct UniformRealDistribution {
+>     /* ... */
+> };
+> ```
+
+Uniform floating-point distribution class that provides a 1-to-1 copy of [`std::uniform_real_distribution`](https://en.cppreference.com/w/cpp/numeric/random/uniform_real_distribution) API, except:
+
+- Everything is `constexpr` and `noexcept`
+- `operator()` is `const`-qualified
+- Performance on a common use case is drastically improved (~1.3 to ~4 times faster `double` and `float` generation)
+
+**Note:** This is a close reimplementation of `std::uniform_real_distribution` for [MSVC STL](https://github.com/microsoft/STL) with some additional considerations and special logic for common optimizable cases.
+
+**How is it faster than std:** Parts of [`std::generate_canonical<>()`](https://en.cppreference.com/w/cpp/numeric/random/generate_canonical) which is used by  `std::uniform_real_distribution` can be moved to `constexpr` , avoiding the runtime `std::log()` computation, this produces a measurable speedup ranging anywhere between 0% and 30%. Some cases such as `double` & `float` generation with bit-uniform PRNGs (aka all PRNGs of this module and `std::mt19937`) can be handled with a simple bitmask rather than a generic implementation of `std::generate_canonical<>()` which accounts for all the esoteric PRNGs with weird ranges that could exist. This produces a speedup of up to 4 times. Combined with a speedup from faster PRNGs it is possible to achieve **over 10 times faster** random `double` generation in an interval.
+
+> ```cpp
+> template <class T, class Gen>
+> constexpr T generate_canonical(Gen& gen) noexcept(noexcept(gen()));
+> ```
+
+Generates a random floating point number in range $[0, 1)$ similarly to [`std::generate_canonical<>()`](https://en.cppreference.com/w/cpp/numeric/random/generate_canonical).
+
+Always generates `std::numeric_limits<T>::digits` bits of randomness, which is enough to fill the mantissa. See `UniformRealDistribution` for notes on implementation improvements.
 
 ### Convenient random functions
 
@@ -272,7 +337,7 @@ rand_linear_combination(2., 3.) = 2.13217
 ```cpp
 using namespace utl;
 
-random::generators::JSF32 gen{random::entropy()};
+random::generators::SplitMix64 gen{random::entropy()};
 std::chi_squared_distribution distr{2.}; // Chi-squared distribution with a n = 2
 
 std::cout << "Random value from distribution -> " << distr(gen) << "\n";
@@ -285,7 +350,7 @@ Random value from distribution -> 0.158468
 
 ## Notes on random number generation
 
-As of 2024, the selection of pseudorandom number generators (aka [PRNGs](https://en.wikipedia.org/wiki/Pseudorandom_number_generator)) in the standard library [&lt;random&gt;](https://en.cppreference.com/w/cpp/header/random) is highly outdated, with most generators being developed before year 2000 and providing sub-par characteristics.
+As of 2025, the selection of pseudorandom number generators (aka [PRNGs](https://en.wikipedia.org/wiki/Pseudorandom_number_generator)) in the standard library [&lt;random&gt;](https://en.cppreference.com/w/cpp/header/random) is highly outdated, with most generators being developed before year 2000 and providing sub-par characteristics.
 
 While suitable for most uses cases, better performance & quality can be achieved virtually "for free" by switching to a newer PRNG implementations.
 
@@ -295,28 +360,41 @@ Thankfully, `<random>` design is quite flexible and fully abstracts the concept 
 
 ### Overview of available PRNGs
 
-| Generator            | Performance    | Memory     | Result type     | Quality | Period            | Motivation                          |
-| -------------------- | -------------- | ---------- | --------------- | ------- | ----------------- | ----------------------------------- |
-| `RomuTrio32`         | ~450%**&ast;** | 12 bytes   | `std::uint32_t` | ★★★☆☆   | $\geq 2^{53}$     | Fastest 32-bit PRNG                 |
-| `JSF32`              | ~255%**&ast;** | 16 bytes   | `std::uint32_t` | ★★★★☆   | $\approx 2^{126}$ | Fast yet decent quality 32-bit PRNG |
-| `RomuDuoJr`          | ~600%          | 16 bytes   | `std::uint32_t` | ★★☆☆☆   | $\geq 2^{51}$     | Fastest 64-bit PRNG                 |
-| `JSF64`              | ~375%          | 32 bytes   | `std::uint64_t` | ★★★★☆   | $\approx 2^{126}$ | Fast yet decent quality 64-bit PRNG |
-| `Xoshiro256PlusPlus` | ~385%          | 32 bytes   | `std::uint64_t` | ★★★★☆   | $2^{256} − 1$     | Best all purpose 64-bit PRNG        |
-| `Xorshift64Star`     | ~285%          | 8 bytes    | `std::uint64_t` | ★★★☆☆   | $2^{64} − 1$      | Smallest state 64-bit PRNG          |
-| `ChaCha20`           | ~70%           | 120 bytes  | `std::uint32_t` | ★★★★★   | $2^{128}$         | Cryptographically secure PRNG       |
-| `std::minstd_rand`   | 100%           | 8 bytes    | `std::uint64_t` | ★☆☆☆☆   | $2^{31} − 1$      |                                     |
-| `std::mt19937`       | ~105%          | 5000 bytes | `std::uint32_t` | ★★★☆☆   | $2^{19937} − 1$   |                                     |
-| `std::knuth_b`       | ~55%           | 2064 bytes | `std::uint64_t` | ★★☆☆☆   | $2^{31} − 1$      |                                     |
-| `std::ranlux48`      | ~4%            | 120 bytes  | `std::uint64_t` | ★★★★☆   | $\approx 2^{576}$ |                                     |
-
-> [!Note]
-> `C` function [rand()](https://en.cppreference.com/w/c/numeric/random/rand) is implementation-defined, but in most existing implementation it uses an old [LCG](https://en.wikipedia.org/wiki/Linear_congruential_generator) engine similar to `std::minstd_rand`. It is generally an extremely low-quality way of generating random and faces a host of additional issues on platforms with low `RAND_MAX`, which includes Windows where `RAND_MAX` is equal `32767` (less than **2 bytes** of information, an almost ridiculous value, really).
+| Generator                   | Performance    | Memory                 | Result type     | Quality | Period                 | Motivation                        |
+| --------------------------- | -------------- | ---------------------- | --------------- | ------- | ---------------------- | --------------------------------- |
+| `RomuMono`                  | ~500% | 4 bytes                | `std::uint16_t` | ★★☆☆☆   | $\approx 2^{32}$       | Fastest 16-bit PRNG **⁽¹⁾** |
+| `RomuTrio32`                | ~470%        | 12 bytes               | `std::uint32_t` | ★★☆☆☆   | **Chaotic** **⁽²⁾**         | Fastest 32-bit PRNG               |
+| `SplitMix32`                | ~540%          | 4 bytes                | `std::uint32_t` | ★★★☆☆   | $2^{32}$               | Smallest state 32-bit PRNG        |
+| `Xoshiro128PP`              | ~375%          | 16 bytes               | `std::uint32_t` | ★★★★☆   | $2^{128} − 1$          | Best all purpose 32-bit PRNG      |
+| `RomuDuoJr`                 | ~600%          | 16 bytes | `std::uint64_t` | ★★☆☆☆   | **Chaotic**            | Fastest 64-bit PRNG               |
+| `SplitMix64`                | ~540%          | 8 bytes                | `std::uint64_t` | ★★★★☆   | $2^{64}$               | Smallest state 64-bit PRNG        |
+| `Xoshiro256PP`              | ~385%          | 32 bytes               | `std::uint64_t` | ★★★★☆   | $2^{256} − 1$          | Best all purpose 64-bit PRNG      |
+| `ChaCha8` **⁽³⁾** | ~125%          | 120 bytes              | `std::uint32_t` | ★★★★★   | $2^{128}$              | Cryptographically secure PRNG     |
+| `ChaCha12`                  | ~105%          | 120 bytes              | `std::uint32_t` | ★★★★★   | $2^{128}$              | Cryptographically secure PRNG     |
+| `ChaCha20`                  | ~70%           | 120 bytes              | `std::uint32_t` | ★★★★★   | $2^{128}$              | Cryptographically secure PRNG     |
+| `std::minstd_rand`          | 100%           | 8 bytes                | `std::uint64_t` | ★☆☆☆☆   | $2^{31} − 1$           |                                   |
+| `rand()` | ~80%           | **Platform-dependent** **⁽⁴⁾** | `int`           | ★☆☆☆☆   | **Platform-dependent** |                                   |
+| `std::mt19937`              | ~105%          | 5000 bytes             | `std::uint32_t` | ★★★☆☆   | $2^{19937} − 1$        |                                   |
+| `std::knuth_b`              | ~55%           | 2064 bytes             | `std::uint64_t` | ★★☆☆☆   | $2^{31} − 1$           |                                   |
+| `std::ranlux48`             | ~4%            | 120 bytes              | `std::uint64_t` | ★★★★☆   | $\approx 2^{576}$      |                                   |
 
 > [!Important]
 > Performance ratings are **relative to the commonly used  `std::minstd_rand` / `rand()`**.  Particular number may differ depending on the hardware and compilation settings, however general trends tend to stay the same. Benchmarks can be found [here](../benchmarks/benchmark_random.cpp).
 
 > [!Important]
 > Performance is measured in **values per unit of time**, to get a *bytes per unit of time* metric, the measurements can be normalized by a `sizeof(result_type)`, making 32-bit generators effectively two times slower than listed in the table.
+
+> [!Note]
+> **(1)** Here "fastest" also takes into account such things as register pressure and "friendliness" towards instruction-level parallelism, which is not always apparent on a heavily loaded benchmark.
+
+> [!Note]
+> **(2)** Non-linear PRNGs also known as "chaotic PRNGs" have a cycle length that is different for each seed. This introduces a theoretical possibility of encountering short cycles, but opens up several avenues for optimization.
+
+> [!Note]
+> **(3)** The difference between `ChaCha8`, `ChaCha12` and `ChaCha20` is the number of stream cypher rounds — 8, 12 and 20 correspondingly. More rounds make the state more difficult to discover, but have a negative effect on performance. As of now (year 2025) `ChaCha12` seems like a reasonable default since it provides 5 rounds of security margin over the best known attack.
+
+> [!Note]
+> **(4)** `C` function [rand()](ht ://en.cppreference.com/w/c/numeric/random/rand) is implementation-defined, on most existing implementation it uses an old [LCG](https://en.wikipedia.org/wiki/Linear_congruential_generator) engine similar to `std::minstd_rand`. It is generally an extremely low-quality way of generating random and faces a host of additional issues on platforms with low `RAND_MAX`, which includes Windows where `RAND_MAX` is equal `32767` (less than **2 bytes** of information, an almost ridiculous value, really). **GCC**, which is used in this benchmark, implements `rand()` using [linear feedback shift register](http://en.wikipedia.org/wiki/Linear_feedback_shift_register), which is less likely to encounter the most blatant of issues, but is still ultimately an inferior approach.
 
 Random quality ratings are as follows:
 
@@ -334,7 +412,7 @@ Using low-quality random may introduce artificial biases and unexpected effects 
 
 - Inaccurate statical estimates in [Monte—Carlo simulations](https://en.wikipedia.org/wiki/Monte_Carlo_method) and stochastic modeling
 - Biased optimizations in [genetic algorithms](https://en.wikipedia.org/wiki/Genetic_algorithm)
-- Noticeable biases in mob pathfinding in games (for example, [mobs tending to always go north-west](https://bugs.mojang.com/browse/MCPE-41092) as time goes on)
+- Noticeable biases in entity pathfinding and behavior in games
 - Issues in procedural generation
 
 These issues become particularly dangerous and difficult to diagnose in multidimensional simulations, as a lot of older PRNGs have significant statistical issues in higher dimensions that simply aren't apparent in a 1D case. 
@@ -388,15 +466,57 @@ However Mersenne Twister still fails some of the less obvious statistical tests 
 
 This trend can be observed rather clearly by looking at the lineup of default PRNGs used in different programming languages:
 
-| Language       | Fist release | Default PRNG                                          | Quality       |
-| -------------- | ------------ | ----------------------------------------------------- | ------------- |
-| `C`            | 1972         | LCG                                                   | Bad           |
-| `Matlab`       | 1979         | Mersenne Twister                                      | Decent        |
-| `C++`          | 1985         | Mersenne Twister / LCG                                | Decent / Bad  |
-| `Python`       | 1991         | Mersenne Twister                                      | Decent        |
-| `GNU Octave`   | 1993         | Mersenne Twister                                      | Decent        |
-| `Python NumPy` | 2006         | Mersenne Twister (below v.1.17), PCG64 (above v.1.17) | Decent / Good |
-| `Julia`        | 2012         | Xoshiro256++                                          | Good          |
-| `Rust`         | 2015         | ChaCha12 / Xoshiro256++                               | Good          |
+| Language       | Fist release | Default PRNG                                                 | Quality       |
+| -------------- | ------------ | ------------------------------------------------------------ | ------------- |
+| `C`            | 1972         | LCG                                                          | Bad           |
+| `Matlab`       | 1979         | Mersenne Twister                                             | Decent        |
+| `C++`          | 1985         | Mersenne Twister / LCG                                       | Decent / Bad  |
+| `Python`       | 1991         | Mersenne Twister                                             | Decent        |
+| `GNU Octave`   | 1993         | Mersenne Twister                                             | Decent        |
+| `Python NumPy` | 2006         | Mersenne Twister (below v.1.17) ➔ PCG64 (above v.1.17)       | Decent ➔ Good |
+| `Julia`        | 2012         | Xoshiro256++                                                 | Good          |
+| `Rust`         | 2015         | ChaCha12 / Xoshiro256++                                      | Good          |
+| `.NET`         | 2016         | Subtractive Generator (below v.6) ➔ Xoshiro256&ast;&ast; (above v.6) | Decent ➔ Good |
 
-While older languages usually stick to their already existing implementations, newer project tend to choose modern PRNGs for the purpose. This establishes a strong case for switching to using `Xoshiro` / `PCG` family of PRNGs as a default choice in new projects. Engines of families such as `ChaCha` and `ISAAC` also provide cryptographic security to the random sequence, which in essence means that the state of the engine cannot be easily discovered from a piece of its random sequence. This usually has a noticeable performance cost, however even they fair rather well compared to the old monsters such as `std::ranlux48` which runs almost **60 times slower** than Xoshiro256++.
+While older languages usually stick to their already existing implementations, newer project tend to choose modern PRNGs for the purpose. This establishes a strong case for switching to using `Xoshiro` / `PCG` family of PRNGs as a default choice in new projects. Engines of families such as `ChaCha` and `ISAAC` also provide cryptographic security to the random sequence, which in essence means that the state of the engine cannot be easily discovered from a piece of its random sequence. This usually has a noticeable performance cost, however even they fair rather well compared to the old monsters such as `std::ranlux48` which runs almost **80 times slower** than Xoshiro256++.
+
+### Additional considerations
+
+#### Output range
+
+In practice, most PRNG outputs aren't used directly as they are generated but rather pass thorough an additional layer of abstraction such as, for example [`std::uniform_int_distribution`](https://en.cppreference.com/w/cpp/numeric/random/uniform_int_distribution), to compute a distributed value.
+
+This has a noticeable effect on quality and performance of some PRNGs, for example, engines with `::min() != 0` or `::max() != std::numeric_limits<result_type>::max()` are inherently at a disadvantage due to preventing the usage of [Lemire's algorithm](https://arxiv.org/abs/1805.10941) for uniform integer distribution in an interval, which makes `libc++` fallback onto a significantly slower generic algorithm, effectively making the PRNG benchmark misleading about real performance.
+
+For this reason all generators selected for this module provide a full range from `0` to `std::numeric_limits<result_type>::max()` and try to avoid "surprises".
+
+#### Seeding
+
+Some engines can be "picky" about zero-seeding or require a non-trivial seeding with [`std::seed_seq`](https://en.cppreference.com/w/cpp/numeric/random/seed_seq) which is cumbersome and difficult to get right. This is exactly the case with widely `std::mt19937` which is usually seeded like this:
+
+```cpp
+std::random_device rd; // create source of entropy
+
+std::mt19937 gen{rd()}; // seed with too little state
+```
+
+This is not nearly enough entropy for a huge state of `std::mt19937`, a "proper" way of seeding would be using more entropy and "spreading" it to the state using `std::seed_seq`:
+
+```cpp
+std::array<std::mt19937::result_type, std::mt19937::state_size> state;
+
+std::random_device rd; // create source of entropy
+
+std::seed_seq seq({rd(), rd(), rd(), rd()}); // create seeding sequence
+seq.generate(state.begin(), state.end());
+
+std::mt19937 gen(seq); // seed mt19937 properly
+```
+
+Such approach however is beyond cumbersome and is rarely used in practice, which is why it is sensible to pick generators that work well with a single-number seeding as a default option.
+
+#### Entropy
+
+Unfortunately the is no "nice" and portable way of getting proper cryptographic entropy is a standard library. Main issues were already mentioned in the section documenting [`random::entropy_seq()`](#entropy), the best we can do without using system API is to sample everything we can (`std::random_device`, time in nanoseconds, some other PRNG and etc.) and use seeding sequence to mash it all together into a single state.
+
+The result of such approach is generally satisfactory, however oftentimes not sufficient for proper cryptographic security.

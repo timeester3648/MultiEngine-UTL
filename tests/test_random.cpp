@@ -9,9 +9,14 @@
 
 // _______________________ INCLUDES _______________________
 
-#include <algorithm> // PRNG sanity tests
-#include <numeric>   // PRNG sanity tests
-#include <vector>    // PRNG sanity tests
+#include <algorithm>   // PRNG sanity tests
+#include <array>       // PRNG sanity tests
+#include <cstddef>     // PRNG sanity tests
+#include <cstdint>     // PRNG sanity tests
+#include <numeric>     // PRNG sanity tests
+#include <random>      // PRNG sanity tests
+#include <type_traits> // PRNG sanity tests
+#include <vector>      // PRNG sanity tests
 
 // ____________________ DEVELOPER DOCS ____________________
 
@@ -23,21 +28,161 @@
 // --- Basic PRNG sanity tests ---
 // ===============================
 
-double vec_mean(const std::vector<double>& vec) {
-    return std::reduce(vec.cbegin(), vec.cend()) / static_cast<double>(vec.size());
+#define FAST_CHECK(arg_)                                                                                               \
+    if (bool res_ = !(arg_)) CHECK(res_)
+// doing straight-up 'CHECK' is somehown MUCH slower, I assume this is caused by the need to remember/log
+// successful checks too
+
+template <class T, class Func>
+void test_in_every_real_range(Func&& func) {
+    // try range [ -2^N, 2^N ] for all N
+    auto min = T(-1);
+    auto max = T(1);
+    for (; max < nlim<T>::max() / 2; min *= 2, max *= 2) func(min, max);
+    // try range [ 0,    2^N ] for all N
+    min = T(-1);
+    max = T(1);
+    for (; max < nlim<T>::max() / 2; min *= 2, max *= 2) func(T(0), max);
+    // try range [ -2^N,   0 ] for all N
+    min = T(-1);
+    max = T(1);
+    for (; max < nlim<T>::max() / 2; min *= 2, max *= 2) func(min, T(0));
 }
 
-double vec_min(const std::vector<double>& vec) {
-    return static_cast<double>(*std::min_element(vec.cbegin(), vec.cend()));
+TEST_CASE_TEMPLATE("Uniform real distribution doesn't go out of range", T, //
+                   long double,                                            //
+                   double,                                                 //
+                   float                                                   //
+) {
+    random::generators::SplitMix32 gen;
+
+    constexpr std::size_t sample = 200; // large samples are slower
+
+    // Check that values never escape [min, max] range,
+    // technically it should be [min, max) range according to the standard,
+    // however almost every major has/had a bug where bounds were included
+    test_in_every_real_range<T>([&](T min, T max) {
+        const random::UniformRealDistribution dist{min, max};
+        for (std::size_t i = 0; i < sample; ++i) {
+            const auto value = dist(gen);
+            FAST_CHECK(min <= value);
+            FAST_CHECK(max >= value);
+        }
+    });
 }
 
-double vec_max(const std::vector<double>& vec) {
-    return static_cast<double>(*std::max_element(vec.cbegin(), vec.cend()));
+template <class T, class Func>
+void test_in_every_int_range(Func&& func) {
+    // try range [ -2^N, 2^N ] for all N
+    if constexpr (std::is_signed_v<T>) {
+        auto min = T(-1);
+        auto max = T(1);
+        for (; max < nlim<T>::max() / 2; min *= 2, max *= 2) func(min, max);
+        func(nlim<T>::min(), nlim<T>::max());
+    }
+    // try range [ 0,    2^N ] for all N
+    if constexpr (true) {
+        auto max = T(1);
+        for (; max < nlim<T>::max() / 2; max *= 2) func(T(0), max);
+        func(T(0), nlim<T>::max());
+    }
+    // try range [ -2^N,   0 ] for all N
+    if constexpr (std::is_signed_v<T>) {
+        auto min = T(-1);
+        for (; min > nlim<T>::min() / 2; min *= 2) func(min, T(0));
+        func(nlim<T>::min(), T(0));
+    }
 }
 
-TEST_CASE("Uniform distribution mean/min/max are sensible") {
+TEST_CASE_TEMPLATE("Uniform int distribution doesn't go out of range", T, //
+                   char,                                                  //
+                   std::int8_t,                                           //
+                   std::int16_t,                                          //
+                   std::int32_t,                                          //
+                   std::int64_t,                                          //
+                   std::int8_t,                                           //
+                   std::uint16_t,                                         //
+                   std::uint32_t,                                         //
+                   std::uint64_t                                          //
+) {
+    random::generators::SplitMix32 gen;
 
-    constexpr std::size_t N   = 500'000; // number of random vals
+    constexpr std::size_t sample = 200; // large samples are slower
+
+    // Check that values never escape [min, max] range
+    test_in_every_int_range<T>([&](T min, T max) {
+        const random::UniformIntDistribution dist{min, max};
+        for (std::size_t i = 0; i < sample; ++i) {
+            const auto value = dist(gen);
+            std::cout << "[" << min << " / " << max << "]\n";
+            FAST_CHECK(min <= value);
+            FAST_CHECK(max >= value);
+        }
+    });
+}
+
+TEST_CASE_TEMPLATE("Uniform int distribution covers whole interval for every type", T, //
+                   char,                                                               //
+                   std::int8_t,                                                        //
+                   std::int16_t,                                                       //
+                   std::int32_t,                                                       //
+                   std::int64_t,                                                       //
+                   std::int8_t,                                                        //
+                   std::uint16_t,                                                      //
+                   std::uint32_t,                                                      //
+                   std::uint64_t                                                       //
+) {
+    random::generators::SplitMix32 gen;
+
+    constexpr auto min   = T(0);
+    constexpr auto max   = T(17);
+    constexpr auto count = max - min + 1;
+
+    std::array<bool, count> visited_values{};
+
+    const random::UniformIntDistribution dist{min, max};
+
+    for (std::size_t cursor = 0; cursor < visited_values.size();) {
+        visited_values[dist(gen)] = true;
+        if (visited_values[cursor]) ++cursor;
+    }
+}
+
+TEST_CASE_TEMPLATE("Uniform int distribution covers whole interval for every PRNG", Gen, //
+                   std::minstd_rand0,                                                    //
+                   random::generators::RomuMono16,                                       //
+                   random::generators::RomuTrio32,                                       //
+                   random::generators::SplitMix32,                                       //
+                   random::generators::Xoshiro128PP,                                     //
+                   random::generators::RomuDuoJr64,                                      //
+                   random::generators::SplitMix64,                                       //
+                   random::generators::Xoshiro256PP                                      //
+) {
+    random::generators::SplitMix32 gen;
+
+    constexpr int min   = 0;
+    constexpr int max   = 17;
+    constexpr int count = max - min + 1;
+
+    std::array<bool, count> visited_values{};
+
+    const random::UniformIntDistribution dist{min, max};
+
+    for (std::size_t cursor = 0; cursor < visited_values.size();) {
+        visited_values[dist(gen)] = true;
+        if (visited_values[cursor]) ++cursor;
+    }
+}
+
+double vec_mean(const std::vector<double>& vec) { return std::reduce(vec.begin(), vec.end()) / vec.size(); }
+
+double vec_min(const std::vector<double>& vec) { return *std::min_element(vec.begin(), vec.end()); }
+
+double vec_max(const std::vector<double>& vec) { return *std::max_element(vec.begin(), vec.end()); }
+
+TEST_CASE("Uniform distribution mean/min/max are sensible for every generator") {
+
+    constexpr std::size_t N   = 100'000; // number of random vals
     constexpr double      eps = 2e-2;    // epsilon used for double comparison, 1e-2 ~ 1% allowed error
     std::vector<double>   vec(N);
 
