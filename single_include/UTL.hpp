@@ -7404,6 +7404,8 @@ public:
                             // std::uniform_real_distribution<>, generate_canonical<>
 #include <type_traits>      // is_integral_v<>
 #include <utility>          // declval<>()
+#include <vector>           // vector<>, hash<>
+
 
 // ____________________ DEVELOPER DOCS ____________________
 
@@ -8128,12 +8130,20 @@ inline std::seed_seq entropy_seq() {
     static std::uint32_t seed_counter = 0;
     ++seed_counter;
 
+    // Stack address (tends to be random each run on most platforms)
+    const std::size_t stack_address_hash = std::hash<std::uint32_t*>{}(&seed_counter);
+
+    // Heap address (also tends to be random)
+    std::vector<std::uint32_t>  dummy_vec(1, seed_counter);
+    const std::size_t heap_address_hash = std::hash<std::uint32_t*>{}(dummy_vec.data());
+
     // Note:
     // There are other sources of entropy, such as memory space, heap/stack/function adresses,
     // but those can be rather "constant" on some platforms, using intrinsics could also be good
     // but that isn't portable
 
-    return {seed_rd, _crush_to_uint32(seed_time), seed_counter};
+    return {seed_rd, _crush_to_uint32(seed_time), seed_counter, _crush_to_uint32(stack_address_hash),
+            _crush_to_uint32(heap_address_hash)};
 }
 
 inline std::uint32_t entropy() {
@@ -8447,7 +8457,7 @@ struct UniformRealDistribution {
     constexpr result_type operator()(Gen& gen) const noexcept(noexcept(gen())) {
         return this->pars.min + generate_canonical<result_type>(gen) * (this->pars.max - this->pars.min);
     }
-    
+
     template <class Gen>
     constexpr T operator()(Gen& gen, const param_type& p) const noexcept(noexcept(gen())) {
         assert(p.min < p.max);

@@ -177,7 +177,7 @@ A global instance of **Xoshiro256++** generator used by convenience functions of
 **Note:** All random engines are inherently non-thread-safe, a proper way of generating numbers in parallel is to create local generators on each thread and seed them with different values.
 
 > ```cpp
-> void random::seed(uint64_t random_seed) noexcept;
+> void random::seed(std::uint64_t random_seed) noexcept;
 > ```
 
 Seeds global random engine with `random_seed`.
@@ -258,28 +258,28 @@ Always generates `std::numeric_limits<T>::digits` bits of randomness, which is e
 ### Convenient random functions
 
 > ```cpp
-> int random::rand_int(int min, int max);
+> int random::rand_int(          int min,          int max);
 > int random::rand_uint(unsigned int min, unsigned int max);
 > ```
 
-Returns random integer in a given range.
+Returns random integer in a $[min, max]$ range.
 
 > ```cpp
-> float random::rand_float();
+> float  random::rand_float();
 > double random::rand_double();
 > ```
 
-Returns random float/double in a $[0, 1]$ range.
+Returns random float/double in a $[0, 1)$ range.
 
 > ```cpp
-> float random::rand_float(float min, float max);
+> float  random::rand_float(  float min,  float max);
 > double random::rand_double(double min, double max);
 > ```
 
-Returns random float/double in a $[min, max]$ range.
+Returns random float/double in a $[min, max)$ range.
 
 > ```cpp
-> float random::rand_normal_float();
+> float  random::rand_normal_float();
 > double random::rand_normal_double();
 > ```
 
@@ -301,7 +301,7 @@ Returns randomly chosen object from a list.
 > T rand_linear_combination(const T& A, const T& B);
 > ```
 
-Returns $\alpha A + (1 - \alpha) B$, with random $0 < \alpha < 1$. Useful for vector and color operations. Object must have  a defined `operator+()` and scalar `operator*()`.
+Returns $\alpha A + (1 - \alpha) B$, with random $0 \leq \alpha < 1$. Useful for vector and color operations. Object must have  a defined `operator+()` and scalar `operator*()`.
 
 ## Examples
 
@@ -332,9 +332,9 @@ rand_choise({1, 2, 3})          = 2
 rand_linear_combination(2., 3.) = 2.13217
 ```
 
-### Using custon PRNGs with &lt;random&gt;
+### Using custom PRNGs with &lt;random&gt;
 
-[ [Run this code](https://godbolt.org/#g:!((g:!((g:!((h:codeEditor,i:(filename:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,selection:(endColumn:1,endLineNumber:5,positionColumn:1,positionLineNumber:5,selectionStartColumn:1,selectionStartLineNumber:5,startColumn:1,startLineNumber:5),source:'%23include+%3Chttps://raw.githubusercontent.com/DmitriBogdanov/UTL/master/single_include/UTL.hpp%3E%0A%0Aint+main()+%7B%0A++++using+namespace+utl%3B%0A%0A++++random::generators::JSF32+gen%7Brandom::entropy()%7D%3B%0A++++std::chi_squared_distribution+distr%7B2.%7D%3B+//+Chi-squared+distribution+with+a+n+%3D+2%0A%0A++++std::cout+%3C%3C+%22Random+value+from+distribution+-%3E+%22+%3C%3C+distr(gen)+%3C%3C+%22%5Cn%22%3B%0A%7D%0A'),l:'5',n:'0',o:'C%2B%2B+source+%231',t:'0')),k:71.71783148269105,l:'4',n:'0',o:'',s:0,t:'0'),(g:!((g:!((h:compiler,i:(compiler:clang1600,filters:(b:'0',binary:'1',binaryObject:'1',commentOnly:'0',debugCalls:'1',demangle:'0',directives:'0',execute:'0',intel:'0',libraryCode:'0',trim:'1',verboseDemangling:'0'),flagsViewOpen:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,libs:!(),options:'-std%3Dc%2B%2B17+-O2',overrides:!(),selection:(endColumn:1,endLineNumber:1,positionColumn:1,positionLineNumber:1,selectionStartColumn:1,selectionStartLineNumber:1,startColumn:1,startLineNumber:1),source:1),l:'5',n:'0',o:'+x86-64+clang+16.0.0+(Editor+%231)',t:'0')),header:(),l:'4',m:50,n:'0',o:'',s:0,t:'0'),(g:!((h:output,i:(compilerName:'x86-64+clang+16.0.0',editorid:1,fontScale:14,fontUsePx:'0',j:1,wrap:'1'),l:'5',n:'0',o:'Output+of+x86-64+clang+16.0.0+(Compiler+%231)',t:'0')),k:46.69421860597116,l:'4',m:50,n:'0',o:'',s:0,t:'0')),k:28.282168517308946,l:'3',n:'0',o:'',t:'0')),l:'2',n:'0',o:'',t:'0')),version:4) ]
+[ [Run this code](https://godbolt.org/#g:!((g:!((g:!((h:codeEditor,i:(filename:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,selection:(endColumn:35,endLineNumber:6,positionColumn:35,positionLineNumber:6,selectionStartColumn:25,selectionStartLineNumber:6,startColumn:25,startLineNumber:6),source:'%23include+%3Chttps://raw.githubusercontent.com/DmitriBogdanov/UTL/master/single_include/UTL.hpp%3E%0A%0Aint+main()+%7B%0A++++using+namespace+utl%3B%0A%0A++++random::generators::SplitMix64+gen%7Brandom::entropy()%7D%3B%0A++++std::chi_squared_distribution+distr%7B2.%7D%3B+//+Chi-squared+distribution+with+a+n+%3D+2%0A%0A++++std::cout+%3C%3C+%22Random+value+from+distribution+-%3E+%22+%3C%3C+distr(gen)+%3C%3C+%22%5Cn%22%3B%0A%7D%0A'),l:'5',n:'0',o:'C%2B%2B+source+%231',t:'0')),k:71.71783148269105,l:'4',n:'0',o:'',s:0,t:'0'),(g:!((g:!((h:compiler,i:(compiler:clang1600,filters:(b:'0',binary:'1',binaryObject:'1',commentOnly:'0',debugCalls:'1',demangle:'0',directives:'0',execute:'0',intel:'0',libraryCode:'0',trim:'1',verboseDemangling:'0'),flagsViewOpen:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,libs:!(),options:'-std%3Dc%2B%2B17+-O2',overrides:!(),selection:(endColumn:1,endLineNumber:1,positionColumn:1,positionLineNumber:1,selectionStartColumn:1,selectionStartLineNumber:1,startColumn:1,startLineNumber:1),source:1),l:'5',n:'0',o:'+x86-64+clang+16.0.0+(Editor+%231)',t:'0')),header:(),l:'4',m:50,n:'0',o:'',s:0,t:'0'),(g:!((h:output,i:(compilerName:'x86-64+clang+16.0.0',editorid:1,fontScale:14,fontUsePx:'0',j:1,wrap:'1'),l:'5',n:'0',o:'Output+of+x86-64+clang+16.0.0+(Compiler+%231)',t:'0')),k:46.69421860597116,l:'4',m:50,n:'0',o:'',s:0,t:'0')),k:28.282168517308946,l:'3',n:'0',o:'',t:'0')),l:'2',n:'0',o:'',t:'0')),version:4) ]
 
 ```cpp
 using namespace utl;
@@ -347,7 +347,36 @@ std::cout << "Random value from distribution -> " << distr(gen) << "\n";
 
 Output:
 ```
-Random value from distribution -> 0.158468
+Random value from distribution -> 4.80049
+```
+
+### Constexpr random
+
+[ [Run this code](https://godbolt.org/#g:!((g:!((g:!((h:codeEditor,i:(filename:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,selection:(endColumn:1,endLineNumber:11,positionColumn:1,positionLineNumber:11,selectionStartColumn:1,selectionStartLineNumber:11,startColumn:1,startLineNumber:11),source:'%23include+%3Chttps://raw.githubusercontent.com/DmitriBogdanov/UTL/master/single_include/UTL.hpp%3E%0A+%0Atemplate+%3Cstd::size_t+size%3E%0Aconstexpr+auto+random_integers(std::uint64_t+seed,+int+min,+int+max)+%7B%0A++++std::array%3Cint,+size%3E+res%7B%7D%3B%0A++++utl::random::UniformIntDistribution+dist%7Bmin,+max%7D%3B%0A++++utl::random::default_generator_type+gen(seed)%3B%0A++++for+(auto+%26e+:+res)+e+%3D+dist(gen)%3B%0A++++return+res%3B%0A%7D%0A%0Aint+main()+%7B%0A++++%0A++++constexpr+auto+random_array+%3D+random_integers%3C6%3E(0,+-10,+10)%3B%0A%0A++++utl::log::println(random_array)%3B+//+using+another+module+for+convenience%0A%7D%0A'),l:'5',n:'0',o:'C%2B%2B+source+%231',t:'0')),k:71.71783148269105,l:'4',n:'0',o:'',s:0,t:'0'),(g:!((g:!((h:compiler,i:(compiler:clang1600,filters:(b:'0',binary:'1',binaryObject:'1',commentOnly:'0',debugCalls:'1',demangle:'0',directives:'0',execute:'0',intel:'0',libraryCode:'0',trim:'1',verboseDemangling:'0'),flagsViewOpen:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,libs:!(),options:'-std%3Dc%2B%2B17+-O2',overrides:!(),selection:(endColumn:1,endLineNumber:1,positionColumn:1,positionLineNumber:1,selectionStartColumn:1,selectionStartLineNumber:1,startColumn:1,startLineNumber:1),source:1),l:'5',n:'0',o:'+x86-64+clang+16.0.0+(Editor+%231)',t:'0')),header:(),l:'4',m:50,n:'0',o:'',s:0,t:'0'),(g:!((h:output,i:(compilerName:'x86-64+clang+16.0.0',editorid:1,fontScale:14,fontUsePx:'0',j:1,wrap:'1'),l:'5',n:'0',o:'Output+of+x86-64+clang+16.0.0+(Compiler+%231)',t:'0')),k:46.69421860597116,l:'4',m:50,n:'0',o:'',s:0,t:'0')),k:28.282168517308946,l:'3',n:'0',o:'',t:'0')),l:'2',n:'0',o:'',t:'0')),version:4) ]
+
+```cpp
+template <std::size_t size>
+constexpr auto random_integers(std::uint64_t seed, int min, int max) {
+    std::array<int, size> res{};
+    utl::random::UniformIntDistribution dist{min, max};
+    utl::random::default_generator_type gen(seed);
+    for (auto &e : res) e = dist(gen);
+    return res;
+}
+
+// ...
+
+constexpr auto random_array = random_integers<6>(0, -10, 10);
+
+utl::log::println(random_array); // using another module for convenience
+
+// compile-time random like this can be used to automatically build lookup tables
+// and generate seemingly random patterns
+```
+
+Output:
+```
+{ -2, 6, 6, 3, -6, 2 }
 ```
 
 ## Notes on random number generation
@@ -519,6 +548,6 @@ Such approach however is beyond cumbersome and is rarely used in practice, which
 
 #### Entropy
 
-Unfortunately the is no "nice" and portable way of getting proper cryptographic entropy is a standard library. Main issues were already mentioned in the section documenting [`random::entropy_seq()`](#entropy), the best we can do without using system API is to sample everything we can (`std::random_device`, time in nanoseconds, some other PRNG and etc.) and use seeding sequence to mash it all together into a single state.
+Unfortunately the is no "nice" and portable way of getting proper cryptographic entropy is a standard library. Main issues were already mentioned in the section documenting [`random::entropy_seq()`](#entropy), the best we can do without using system API is to sample everything we can (`std::random_device`, time in nanoseconds, address space, some other PRNG and etc.) and use seeding sequence to mash it all together into a single state.
 
 The result of such approach is generally satisfactory, however oftentimes not sufficient for proper cryptographic security.
