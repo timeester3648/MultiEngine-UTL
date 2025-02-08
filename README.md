@@ -89,7 +89,6 @@ While the library itself consists of a single header with no embedded dependenci
 * Matrix concat functions for `utl::mvl`;
 * Index span API for `utl::mvl`;
 * Binary operator refactors for `utl::mvl`;
-* Temp file creation improvements for `utl::shell`;
 * Coordinate transformations in `utl::math`;
 * More type traits in `utl::math`;
 * Test coverage statistics.

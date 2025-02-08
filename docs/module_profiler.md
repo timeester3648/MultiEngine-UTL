@@ -1,6 +1,8 @@
 # utl::profiler
 
-[<- back to README.md](..)
+[<- to README.md](..)
+
+[<- to implementation.hpp](../include/UTL/profiler.hpp)
 
 **utl::profiler** module contains macros for quick scope profiling and micro-benchmarking with x86 intrinsics (GCC/clang only).
 

@@ -1,6 +1,8 @@
 # utl::progressbar
 
-[<- back to README.md](..)
+[<- to README.md](..)
+
+[<- to implementation.hpp](../include/UTL/progressbar.hpp)
 
 **progressbar** adds configurable progress bars for CLI apps.
 

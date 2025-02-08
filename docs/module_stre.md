@@ -1,6 +1,8 @@
 # utl::stre
 
-[<- back to README.md](..)
+[<- to README.md](..)
+
+[<- to implementation.hpp](../include/UTL/stre.hpp)
 
 **stre** (aka **STR**ing **E**xpansions) module contains efficient implementations of most commonly used string utility-functions.
 

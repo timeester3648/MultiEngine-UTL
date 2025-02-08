@@ -1,6 +1,8 @@
 # utl::log
 
-[<- back to README.md](..)
+[<- to README.md](..)
+
+[<- to implementation.hpp](../include/UTL/log.hpp)
 
 **log** module aims to provide simple logging facilities for prototyping and small projects.
 
