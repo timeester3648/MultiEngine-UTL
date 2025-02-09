@@ -59,7 +59,7 @@
 // # ::rand_bool() #
 // Randomly chooses 0 or 1.
 //
-// # ::rand_choise() #
+// # ::rand_choice() #
 // Randomly chooses a value from initializer list.
 //
 // # ::rand_linear_combination() #
@@ -306,7 +306,7 @@ public:
 // Quality:     4/5
 // State:       16 bytes
 //
-// Excellent choise as a general purpose 32-bit PRNG.
+// Excellent choice as a general purpose 32-bit PRNG.
 // Battle-tested and provides a good statistical quality at an excellent speed.
 //
 class Xoshiro128PP {
@@ -470,7 +470,7 @@ public:
 // Quality:     4/5
 // State:       32 bytes
 //
-// Excellent choise as a general purpose PRNG.
+// Excellent choice as a general purpose PRNG.
 // Used by several modern languages as their default.
 //
 class Xoshiro256PP {
@@ -1156,7 +1156,7 @@ inline double rand_normal_double() {
 inline bool rand_bool() noexcept { return static_cast<bool>(rand_uint(0, 1)); }
 
 template <class T>
-const T& rand_choise(std::initializer_list<T> objects) noexcept {
+const T& rand_choice(std::initializer_list<T> objects) noexcept {
     const int random_index = rand_int(0, static_cast<int>(objects.size()) - 1);
     return objects.begin()[random_index];
 }

@@ -223,7 +223,7 @@ TEST_CASE("Uniform distribution mean/min/max are sensible for every generator") 
     CHECK(vec_min(vec) == doctest::Approx(0.0).epsilon(eps));
     CHECK(vec_max(vec) == doctest::Approx(1.0).epsilon(eps));
 
-    for (auto& e : vec) e = random::rand_choise({-2, -1, 0, 1, 2});
+    for (auto& e : vec) e = random::rand_choice({-2, -1, 0, 1, 2});
     CHECK(vec_mean(vec) == doctest::Approx(0.0).epsilon(eps));
     CHECK(vec_min(vec) == doctest::Approx(-2.0).epsilon(eps));
     CHECK(vec_max(vec) == doctest::Approx(2.0).epsilon(eps));

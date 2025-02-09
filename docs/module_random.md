@@ -111,7 +111,7 @@ double rand_normal_float();                          // N(0, 1)      normal dist
 bool rand_bool() noexcept;
 
 template<class T>
-constexpr T& rand_choise(std::initializer_list<T> objects) noexcept;
+constexpr T& rand_choice(std::initializer_list<T> objects) noexcept;
 
 template<class T>
 T rand_linear_combination(const T& A, const T& B);
@@ -292,7 +292,7 @@ Returns random normally distributed float/double with a mean $0$ and variance $1
 Returns `true`/`false` randomly. Effectively same as `rand_uint(0, 1)`.
 
 > ```cpp
-> const T& rand_choise(std::initializer_list<T> objects);
+> const T& rand_choice(std::initializer_list<T> objects);
 > ```
 
 Returns randomly chosen object from a list.
@@ -307,7 +307,7 @@ Returns $\alpha A + (1 - \alpha) B$, with random $0 \leq \alpha < 1$. Useful for
 
 ### Getting random values
 
-[ [Run this code](https://godbolt.org/#z:OYLghAFBqd5QCxAYwPYBMCmBRdBLAF1QCcAaPECAMzwBtMA7AQwFtMQByARg9KtQYEAysib0QXACx8BBAKoBnTAAUAHpwAMvAFYTStJg1DIApACYAQuYukl9ZATwDKjdAGFUtAK4sGIAJzSrgAyeAyYAHI%2BAEaYxHoADqgKhE4MHt6%2BAdJJKY4CoeFRLLHxXLaY9vkMQgRMxAQZPn6BFVVptfUEhZExcXoKdQ1NWa2DXT3FpRIAlLaoXsTI7BzmAMxhyN5YANQma24IBAQJCiAA9OfETADuAHTAhAhe0V5KS7KMBHdoLOcAIixCMQ8BZUMB0IZUAA3c5yAAqwXOLCYgzi5xSRnoAH1NttMHDEXcEAkEvtsCYNABBSlUsIEHYosIQGZ7ADsVmpO25OzeYWAO2YbAUCSYy15BFo%2B05NK5POuDHQqBYIBASkw6GxNye2K%2BxFQCQAnizpbSeTtBuhVWgvAQzeaefs3E69mYzArNfSIBpSDsuBoNKyHcHzft/q6zHsDi6PcrVR7cYJvb7/YGQ%2Bmo86DhGTABWNwMcxme3Bp0uosJpUvegsjN1sMRzMxwxKlUgSsLaI1oN1kNl7NFvMFwdy0vRgdujvVzAQAC0ud9uZ7vYbRab2djbanXZn88Xy/r47cOfzhbdJYd/ePFZb2OiqE8td7GdXbvXx838dv98fB%2BfoaPE9h3PUdL0Am9FWxZAEFQPAlAgEwOXKHYzF9NZEP%2BP8APDNcrx2T921vaDYPgxCLGQ1CdnQtlMMPLNr3PU8RypdM8IgzVaDCTB6ig5VojCJhqggMw7jQu5WVfSM8IIhNOPCHjfn45ghJEsSJPAxjgOLNYZQw2kODmWhOFzXg/A4LRSFQThnUsawLQWJZMFdNYeFIAhNAMuYAGsQDZLg7j8tkAA4XMkIKzAANn8f0FyMjhJFMjzLM4Xgzh9dzzIM0g4FgGBEBQZUEjoOJyEoX4ivoeItkMYAuAigM%2BDoAg4jOCBoiSpT6kNThXM64hDQAeWibRMAcHreF%2BNhBAGhhaG6zLSCwV5gDcMRaDObheCwFEsRWCz8GIUbHGhTANoszBVFG209t4elKiSzjomufqPCwJKCBBFVNtIE7iHvJR/kwHbgDk0BMrmKgDGABQADU8EwG4BoSRhxpkQQRDEdgpDR%2BQlDUJLdHKAwjBQaxrH0PBojOSA5gNaoNtnS0w1MWzLC4NkdlnAazF4GE4hBLBqZZNojrSFxFRGPxyhCLipn6cpclSARJcSZIlYYSY%2BjKEWHA6IZGk8ZoBkqUWBE6BpNZKeXbH1lXynGC3Za12Z5kWZYXbikzSDMiyrI4HZVCCiLZwiyQdmqow/Qiu4NBjnYIFwQgSGcrgZl4DKtBmOYEG4rB4mFuKEtIFVcx9H3eZS2wQHSjy5hy/KFhOW1SogcriuICJWBWQPg9D8PiYFOqY5j3gNSTgW9H4dHRHEbGp9xlR1AWwnSBua4EnGwzjMSha/YG20EltHZUCoAOg5DsOI8H6PY40eOPBYCq4hTtO3Nr7yQEkaOoskMwuCDjQuZ/B%2BTqvoTgRcS5lySn7VK1c37gw/mYIKdwkF/wikFXM7M1gaCCoECKYCOBrB3r7SuGdPIEJ5t7aBpD34/RamLSQQA%3D%3D%3D) ]
+[ [Run this code](https://godbolt.org/#z:OYLghAFBqd5QCxAYwPYBMCmBRdBLAF1QCcAaPECAMzwBtMA7AQwFtMQByARg9KtQYEAysib0QXACx8BBAKoBnTAAUAHpwAMvAFYTStJg1DIApACYAQuYukl9ZATwDKjdAGFUtAK4sGE6a4AMngMmAByPgBGmMQgAOykAA6oCoRODB7evv5JKWkCwaERLNGxCXaYDulCBEzEBJk%2BflK2mPaOAjV1BIXhUTHxtrX1jdktCsM9IX0lA3EAlLaoXsTI7BzmAMwhyN5YANQmm24IBASJCiAA9FfETADuAHTAhAhekV5Kq7KMBI9oLCuABEWIRiHgLKhgOhDKgAG5XOQAFUCVxYTAmMSuqSM9AA%2Bjs9phESjHghEokjtgTBoAII02khAj7dEhCDzQ5xKx0/a8/afELAfbMNgKRJMNb8gi0I7c%2Bk8vl3BjoVAsEAgJSYdB4%2B6vPG/YioRIAT3ZsoZfP2E3Q6rQXgIFstfKObhdhzMZiV2qZEA0pH2XA0Gg5TtDlqOQPdZkOxzdXtV6q9BMEvv9geDYczMddxyjJgArG4GOYzI7Qy63SWkyr3vR2VmGxGo9m44YVWqQNXlpE6yGG2GK7mSwWi8OFeXY0OPV3a5gIABafP%2B/N9/tNkst3PxjszntzxfL1eNyduPOF4sestOwenqttvGRVCeev9rPrj2b0/bxP3x/Po%2BvuGJ5nqOl7jtewF3sqeLIAgqB4GsEAmFyXD%2BmY/qbMhQIAUBkYbje%2Bzfp296wfBiHIRYqH7Oh%2ByYXE2HHjmt6XueY60pmBFQdqtDTHUMGqpEIRMB0DAQGYjwYY8HLvtGBFEUmPGhHxAKCcwIliRJtFSZ%2BIEXqWmxylhDIcIstCcPmvB%2BBwWikKgnCupY1hWssqyYO6mw8KQBCaCZiwANbxFwjxxFwcQABweZIYVmAAbAAnIGS5mRwkiWT5tmcLwlx%2Bt51kmaQcCwDAiAoKqiR0DE5CUAC5X0LEuyGMAXAxUGfB0AQMSXBAkTpapdTGpwnl9cQxoAPKRNolS5Z5AJsIIo0MLQA15aQWAfMAbhiLQlzcLwWDori6w2fgxBTXgcKYDtNmYKolT2kdvBMm06U8ZEdwjR4WDpQQ4JqrtpAXcQj5KECmAHcAimgHlixUAYwAKAAangmD3KNiSMINvD8IIIhiOwLTY/IShqOluioQYRgoNY1j6HgkSXJAixGiJO3ztaEamI5lihfs86jWYvDwjE4JYAz7KtO06QuMqozNKQQTTMUpR6MkqQibLKt5CJvRKwMqEVFUnSTBr%2BttGdRvdDr/SxPrxueE0egTJbivWxIiwKC5axu/o5lpStdkcPsqhhTF84xZI%2BwNUYAYxY8Ghx/sEC4IQJDuVw8y8LlWjzIsCCYEwWCxOLyWpaQar5n6Vk2QHWUgDlPmLIVJXLOc9pVRANUVcQYSsOsweh%2BHkcU0KzVx3HvBainIt6ITuPiATsiKCo6grWTpD3HciSY6ZvukFXgucKN9qJPa%2ByoFQQch2HEdRyPsfxxoiceCwtUxGnGdeQ3/kgJIsfxZIZguAhw0PmOKIVmo%2BxSrwculd0o11sHXT%2B0Nv5mDCo8VBgCYphXzKFTYGgwpxV/pAzYftq6ZSQdnHeHABZ7zgeQrOvkAadSlpIIAA%3D%3D%3D) ]
 
 ```cpp
 using namespace utl;
@@ -318,7 +318,7 @@ std::cout
     << "rand_double()                   = " << random::rand_double()                   << "\n"
     << "rand_double(-5, 5)              = " << random::rand_double(-5, 5)              << "\n"
     << "rand_bool()                     = " << random::rand_bool()                     << "\n"
-    << "rand_choise({1, 2, 3})          = " << random::rand_choise({1, 2, 3})          << "\n"
+    << "rand_choice({1, 2, 3})          = " << random::rand_choice({1, 2, 3})          << "\n"
     << "rand_linear_combination(2., 3.) = " << random::rand_linear_combination(2., 3.) << "\n";
 ```
 
@@ -328,7 +328,7 @@ rand_int(0, 100)                = 14
 rand_double()                   = 0.333702
 rand_double(-5, 5)              = -1.9462
 rand_bool()                     = 0
-rand_choise({1, 2, 3})          = 2
+rand_choice({1, 2, 3})          = 2
 rand_linear_combination(2., 3.) = 2.13217
 ```
 
@@ -491,7 +491,7 @@ In practice, something like this would be encountered during any stochastic simu
 
 ### Why not just use Mersenne Twister
 
-One could argue that a widely used [Mersenne Twister](https://en.wikipedia.org/wiki/Mersenne_Twister), which, in case of `C++` is called `std::mt19937` should be good enough for most purposes and that is true. For quite a while Mersenne Twister used to be the default choise for new RNG facilities — it is acceptably performant and has a decent statistical quality with a huge period.
+One could argue that a widely used [Mersenne Twister](https://en.wikipedia.org/wiki/Mersenne_Twister), which, in case of `C++` is called `std::mt19937` should be good enough for most purposes and that is true. For quite a while Mersenne Twister used to be the default choice for new RNG facilities — it is acceptably performant and has a decent statistical quality with a huge period.
 
 However Mersenne Twister still fails some of the less obvious statistical tests on [TestU01 BigCrush](https://en.wikipedia.org/wiki/TestU01), combined with rather subpar performance relative to the newer methods and a huge state (**5000** bytes against **32** used by Xoshiro256++) there is little reason to use it in a modern environment.
 
