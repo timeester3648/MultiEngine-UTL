@@ -277,7 +277,7 @@ Returns random float/double in a $[0, 1]$ range.
 > double random::rand_double(double min, double max);
 > ```
 
-Returns random float/double in a $[min, max)$ range.
+Returns random float/double in a $[min, max]$ range.
 
 > ```cpp
 > float  random::rand_normal_float();
