@@ -241,17 +241,18 @@ Uniform floating-point distribution class that provides a 1-to-1 copy of [`std::
 - Everything is `constexpr` and `noexcept`
 - `operator()` is `const`-qualified
 - Performance on a common use case is drastically improved (~1.3 to ~4 times faster `double` and `float` generation)
+- Output range is $[min, max]$ instead of standard-mandated $[min, max)$
 
 **Note:** This is a close reimplementation of `std::uniform_real_distribution` for [MSVC STL](https://github.com/microsoft/STL) with some additional considerations and special logic for common optimizable cases.
 
-**How is it faster than std:** Parts of [`std::generate_canonical<>()`](https://en.cppreference.com/w/cpp/numeric/random/generate_canonical) which is used by  `std::uniform_real_distribution` can be moved to `constexpr` , avoiding the runtime `std::log()` computation, this produces a measurable speedup ranging anywhere between 0% and 30%. Some cases such as `double` & `float` generation with bit-uniform PRNGs (aka all PRNGs of this module and `std::mt19937`) can be handled with a simple bitmask rather than a generic implementation of `std::generate_canonical<>()` which accounts for all the esoteric PRNGs with weird ranges that could exist. This produces a speedup of up to 4 times. Combined with a speedup from faster PRNGs it is possible to achieve **over 10 times faster** random `double` generation in an interval.
+**How is it faster than std:** Parts of [`std::generate_canonical<>()`](https://en.cppreference.com/w/cpp/numeric/random/generate_canonical) which is used by  `std::uniform_real_distribution` can be moved to `constexpr` , avoiding the runtime `std::log()` computation. Some cases such as `double` & `float` generation with bit-uniform PRNGs (aka all PRNGs of this module and `std::mt19937`) can be handled with a simple bitmask rather than a generic implementation of `std::generate_canonical<>()` which accounts for all the esoteric PRNGs with weird ranges that could exist. This produces a speedup of up to 4 times. Combined with a speedup from faster PRNGs it is possible to achieve **over 10 times faster** random `double` generation in an interval.
 
 > ```cpp
 > template <class T, class Gen>
 > constexpr T generate_canonical(Gen& gen) noexcept(noexcept(gen()));
 > ```
 
-Generates a random floating point number in range $[0, 1)$ similarly to [`std::generate_canonical<>()`](https://en.cppreference.com/w/cpp/numeric/random/generate_canonical).
+Generates a random floating point number in range $[0, 1]$ similarly to [`std::generate_canonical<>()`](https://en.cppreference.com/w/cpp/numeric/random/generate_canonical).
 
 Always generates `std::numeric_limits<T>::digits` bits of randomness, which is enough to fill the mantissa. See `UniformRealDistribution` for notes on implementation improvements.
 
@@ -269,7 +270,7 @@ Returns random integer in a $[min, max]$ range.
 > double random::rand_double();
 > ```
 
-Returns random float/double in a $[0, 1)$ range.
+Returns random float/double in a $[0, 1]$ range.
 
 > ```cpp
 > float  random::rand_float(  float min,  float max);
