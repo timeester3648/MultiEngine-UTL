@@ -302,7 +302,7 @@ Returns randomly chosen object from a list.
 > T rand_linear_combination(const T& A, const T& B);
 > ```
 
-Returns $\alpha A + (1 - \alpha) B$, with random $0 \leq \alpha < 1$. Useful for vector and color operations. Object must have  a defined `operator+()` and scalar `operator*()`.
+Returns $\alpha A + (1 - \alpha) B$, with random $0 \leq \alpha \leq 1$. Useful for vector and color operations. Object must have  a defined `operator+()` and scalar `operator*()`.
 
 ## Examples
 
