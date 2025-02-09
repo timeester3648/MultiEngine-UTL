@@ -32,7 +32,7 @@ These pseudorandom number generators (aka [PRNGs](https://en.wikipedia.org/wiki/
 - Likely to be [faster](#overview-of-available-prngs) than built-in methods
 - Provides [better quality random](#notes-on-random-number-generation) than built-in methods
 - Reproducible results, built-in engines may differ compiler to compiler
-- Random generators work even in `constexpr` context
+- Random generators & distributions work even in `constexpr` context
 - Almost everything is `noexcept`
 - An option to use [cryptographically secure PRNG](https://en.wikipedia.org/wiki/Cryptographically_secure_pseudorandom_number_generator)
 - More reliable sources of entropy than [std::random_device](https://en.cppreference.com/w/cpp/numeric/random/random_device)
@@ -196,10 +196,10 @@ It is effectively the same as seeding global engine with `random::entropy_seq()`
 
 ### Entropy
 
-```cpp
-std::seed_seq entropy_seq();
-std::uint32_t entropy();
-```
+> ```cpp
+> std::seed_seq entropy_seq();
+> std::uint32_t entropy();
+> ```
 
 These functions serve a role of a "slightly better and more convenient [std::random_device](https://en.cppreference.com/w/cpp/numeric/random/random_device)".
 
@@ -381,11 +381,11 @@ Output:
 
 ## Notes on random number generation
 
-As of 2025, the selection of pseudorandom number generators (aka [PRNGs](https://en.wikipedia.org/wiki/Pseudorandom_number_generator)) in the standard library [&lt;random&gt;](https://en.cppreference.com/w/cpp/header/random) is highly outdated, with most generators being developed before year 2000 and providing sub-par characteristics.
+As of 2025, the selection of pseudorandom number generators (aka [PRNGs](https://en.wikipedia.org/wiki/Pseudorandom_number_generator)) in the standard library [&lt;random&gt;](https://en.cppreference.com/w/cpp/header/random) is quite outdated, with most generators being developed before year 2000 and providing sub-par characteristics relative to what can be achieved.
 
-While suitable for most uses cases, better performance & quality can be achieved virtually "for free" by switching to a newer PRNG implementations.
+While suitable for most uses cases, better performance & quality can be achieved virtually "for free" by switching to some of the newer PRNG implementations.
 
-Thankfully, `<random>` design is quite flexible and fully abstracts the concept of a random bit generator which makes it seamlessly usable with any custom PRNG that provides minimal necessary interface.
+Thankfully, `<random>` design is quite flexible and fully abstracts the concept of a random bit generator, which makes it seamlessly compatible with any custom PRNG that exposes the necessary API.
 
 `utl::random` provides `<random>`-compatible implementations of several modern PRNGs. By default, rand functions from this header use **Xoshiro256++** as it well tested, used by several modern languages ([Rust](https://docs.rs/rand/latest/rand/), [Julia](https://docs.julialang.org/en/v1/stdlib/Random/), slightly different version is used by [.NET](https://devblogs.microsoft.com/dotnet/performance-improvements-in-net-6/), [GNU FORTRAN](https://gcc.gnu.org/fortran/) and [Lua](https://www.lua.org/manual/5.4/manual.html#pdf-math.random)) as their default and provides an excellent balance of speed and statistical quality.
 
