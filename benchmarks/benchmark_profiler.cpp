@@ -33,7 +33,7 @@ const auto compute_value = []() { return std::atan(std::pow(std::cos(std::sin(ut
 void benchmark_profiling_overhead() {
     constexpr int repeats = 50'000;
 
-    bench.minEpochIterations(10).timeUnit(millisecond, "ms").relative(true);
+    bench.minEpochIterations(10).timeUnit(1ms, "ms").relative(true);
 
     benchmark("UTL_PROFILE()", [&]() {
         double s = 0.;

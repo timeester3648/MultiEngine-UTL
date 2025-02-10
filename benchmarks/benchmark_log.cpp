@@ -28,7 +28,7 @@ void benchmark_stringification() {
 
     constexpr int repeats = 20'000;
 
-    bench.timeUnit(nanosecond, "ms").minEpochIterations(20);
+    bench.timeUnit(1ns, "ms").minEpochIterations(20);
 
     // --- Integer stringification ---
     // -------------------------------
@@ -189,11 +189,7 @@ void benchmark_stringification() {
 
     // In this benchmark we want to format as simple error message and return it as 'std::string',
     // stringstream will have to be temporary for that purpose
-    bench.title("Format an error message")
-        .timeUnit(nanosecond, "ns")
-        .minEpochIterations(1000)
-        .warmup(10)
-        .relative(true);
+    bench.title("Format an error message").timeUnit(1ns, "ns").minEpochIterations(1000).warmup(10).relative(true);
 
     benchmark("log::stringify()", [&]() {
         std::string str = log::stringify("JSON object node encountered unexpected symbol {", datagen::rand_char(),
@@ -210,15 +206,15 @@ void benchmark_stringification() {
 
     benchmark("std::ostringstream <<", [&]() {
         std::ostringstream oss;
-        oss << "JSON object node encountered unexpected symbol {" << datagen::rand_char() << "} after the pair key at pos "
-            << datagen::rand_int() << " (should be {:}).";
+        oss << "JSON object node encountered unexpected symbol {" << datagen::rand_char()
+            << "} after the pair key at pos " << datagen::rand_int() << " (should be {:}).";
         std::string str = oss.str();
         DO_NOT_OPTIMIZE_AWAY(str);
     });
 
     // --- Left-pad formatting ---
     // ---------------------------
-    bench.title("Left-pad a string").timeUnit(nanosecond, "ns").minEpochIterations(20).warmup(10).relative(true);
+    bench.title("Left-pad a string").timeUnit(1ns, "ns").minEpochIterations(20).warmup(10).relative(true);
 
     constexpr std::size_t pad_size = 20;
 
@@ -255,7 +251,7 @@ void benchmark_stringification() {
 
     // --- Right-pad formatting ---
     // ---------------------------
-    bench.title("Right-pad a string").timeUnit(nanosecond, "ns").minEpochIterations(20).warmup(10).relative(true);
+    bench.title("Right-pad a string").timeUnit(1ns, "ns").minEpochIterations(20).warmup(10).relative(true);
 
     reset_strings();
     benchmark("log::stringify(log::PadRight{})", [&]() {
@@ -291,7 +287,7 @@ void benchmark_raw_logging_overhead() {
     using namespace utl;
 
     // Benchmark logging
-    bench.title("Logging").timeUnit(nanosecond, "ns").epochIterations(10).warmup(10).relative(true);
+    bench.title("Logging").timeUnit(1ns, "ns").epochIterations(10).warmup(10).relative(true);
 
     constexpr int repeats = 5'000;
 
@@ -308,7 +304,8 @@ void benchmark_raw_logging_overhead() {
 
     benchmark("utl::log", [&]() {
         REPEAT(repeats)
-        UTL_LOG_TRACE("int = ", datagen::rand_int(), ", float = ", datagen::rand_double(), ", string = ", datagen::rand_string());
+        UTL_LOG_TRACE("int = ", datagen::rand_int(), ", float = ", datagen::rand_double(),
+                      ", string = ", datagen::rand_string());
     });
 
     benchmark("flushed std::ostream::<<", [&]() {
@@ -328,6 +325,6 @@ void benchmark_raw_logging_overhead() {
 int main() {
     using namespace utl;
 
-    //benchmark_stringification();
+    // benchmark_stringification();
     benchmark_raw_logging_overhead();
 }

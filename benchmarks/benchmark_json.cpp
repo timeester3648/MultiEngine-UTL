@@ -49,7 +49,7 @@ void benchmark_on_data(const std::string& filepath) {
     json_utl.to_file(parsing_target_prettified, json::Format::PRETTY);
 
     // Set global benchmark options
-    bench.minEpochIterations(4).timeUnit(millisecond, "ms");
+    bench.minEpochIterations(4).timeUnit(1ms, "ms");
 
     // Benchmark parsing (minimized)
     bench.title("Parsing minimized JSON").relative(true).warmup(10);

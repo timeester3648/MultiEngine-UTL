@@ -28,19 +28,7 @@
 #define REPEAT(repeats_) for (int count_ = 0; count_ < repeats_; ++count_)
 #define DO_NOT_OPTIMIZE_AWAY ankerl::nanobench::doNotOptimizeAway
 
-namespace nb = ankerl::nanobench;
-
-using std::chrono::microseconds;
-using std::chrono::milliseconds;
-using std::chrono::nanoseconds;
-using std::chrono::seconds;
-
-constexpr auto nanosecond  = nanoseconds(1);
-constexpr auto microsecond = microseconds(1);
-constexpr auto millisecond = milliseconds(1);
-constexpr auto second      = seconds(1);
-
-inline nb::Bench bench;
+inline ankerl::nanobench::Bench bench;
 
 template <class Func>
 void benchmark(const char* name, Func lambda) {
@@ -48,6 +36,7 @@ void benchmark(const char* name, Func lambda) {
 }
 
 using namespace utl;
+using namespace std::chrono_literals;
 
 // Set up fast random-stuff generation so we can benchmark on unpredictable workloads
 // that can't be "folded" with optimization. The reason we don't just use 'utl::random'
@@ -68,20 +57,20 @@ constexpr int min_int = -1500;
 constexpr int max_int = 1500;
 
 // PRNG & buffers
-inline random::generators::RomuTrio32 gen;
-inline std::vector<std::string>       pregen_strings;
+inline random::generators::RomuDuoJr64 gen;
+inline std::vector<std::string>        pregen_strings;
 // we want random generation to be as fast as possible to reduce its impact on benchmarks that measure
 // overhead of calling something else, which is why we choose the fastest PRNG available and pregenerate
 // strings. Number generation is fast enough that we don't really get much benefit from pregeneration.
 
 // Datagen functions
-inline auto rand_bool() { return static_cast<bool>(std::uniform_int_distribution{0, 1}(gen)); }
-inline auto rand_char() { return static_cast<char>(std::uniform_int_distribution{'a', 'z'}(gen)); }
-inline auto rand_int() { return std::uniform_int_distribution{min_int, max_int}(gen); }
-inline auto rand_double() { return std::uniform_real_distribution{min_double, max_double}(gen); }
+inline auto rand_bool() { return static_cast<bool>(random::UniformIntDistribution{0, 1}(gen)); }
+inline auto rand_char() { return static_cast<char>(random::UniformIntDistribution{'a', 'z'}(gen)); }
+inline auto rand_int() { return random::UniformIntDistribution{min_int, max_int}(gen); }
+inline auto rand_double() { return random::UniformRealDistribution{min_double, max_double}(gen); }
 inline auto rand_complex() { return std::complex{rand_double(), rand_double()}; }
 inline auto rand_string() {
-    return pregen_strings[std::uniform_int_distribution<std::size_t>{0, string_pregen_count - 1}(gen)];
+    return pregen_strings[random::UniformIntDistribution<std::size_t>{0, string_pregen_count - 1}(gen)];
 }
 inline auto rand_vector_of_strings() { return std::vector{rand_string(), rand_string(), rand_string(), rand_string()}; }
 

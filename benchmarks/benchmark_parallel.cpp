@@ -56,7 +56,7 @@ void benchmark_matrix_multiplication() {
 
     // Global benchmark options
     bench.minEpochIterations(6)
-        .timeUnit(millisecond, "ms")
+        .timeUnit(1ms, "ms")
         .title("Repeated matrix multiplication")
         .relative(true)
         .warmup(2);
@@ -164,7 +164,7 @@ void benchmark_sum() {
 
     // Global benchmark options
     bench.minEpochIterations(10)
-        .timeUnit(millisecond, "ms")
+        .timeUnit(1ms, "ms")
         .title("Parallel vector sum")
         .relative(true)
         .warmup(10);

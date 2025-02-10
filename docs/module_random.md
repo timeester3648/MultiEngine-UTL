@@ -15,7 +15,7 @@ It implements several random bit generators seamlessly compatible with [&lt;rand
 
 - [16-bit Romu Mono PRNG](https://www.romu-random.org/)
 - [32-bit Romu Trio PRNG](https://www.romu-random.org/)
-- [32bit SplitMix PRNG](https://dl.acm.org/doi/10.1145/2714064.2660195)
+- [32-bit SplitMix PRNG](https://dl.acm.org/doi/10.1145/2714064.2660195)
 - [32-bit Xoshiro128++ PRNG](https://prng.di.unimi.it/)
 - [64-bit Romu Duo Jr. PRNG](https://www.romu-random.org/)
 - [64-bit SplitMix PRNG](https://rosettacode.org/wiki/Pseudo-random_numbers/Splitmix64)
@@ -48,7 +48,7 @@ namespace generators {
         static constexpr result_type min() noexcept;
         static constexpr result_type max() noexcept;
         
-        constexpr GeneratorAPI(result_type seed);
+        constexpr GeneratorAPI(result_type seed) noexcept;
         constexpr void    seed(result_type seed) noexcept;
         
         template<class SeedSeq> GeneratorAPI(SeedSeq& seq);
@@ -128,7 +128,7 @@ T rand_linear_combination(const T& A, const T& B);
 >     static constexpr result_type min() noexcept;
 >     static constexpr result_type max() noexcept;
 > 
->     constexpr GeneratorAPI(result_type seed);
+>     constexpr GeneratorAPI(result_type seed) noexcept;
 >     constexpr void    seed(result_type seed) noexcept;
 > 
 >     template<class SeedSeq> GeneratorAPI(SeedSeq& seq);
@@ -476,7 +476,7 @@ In fact, this quality is generic to all LCGs — any LCG with modulus $m$ used t
 
 #### minstd_rand & rand()
 
-While RANDU algorithm is no longer in use today, its family of algorithms (LCG) is still frequently used through `rand()` and `std::minstd_rand`, with `rand()` being the worst offender as it is the default way of generating random numbers in `C` (`C++` guides and documentation tend to prefer `std::mt19937` which despite not being ideal avoid most horrible of the issues).
+While RANDU algorithm is no longer in use today, its family of algorithms (LCG) is still frequently used through `rand()` and `std::minstd_rand`, with `rand()` being the worst offender as it is the default way of generating random numbers in `C` (`C++` guides and documentation tend to prefer `std::mt19937` which despite not being ideal avoids most of the significant issues).
 
 **Note:** Since nothing in the standard specifies how `rand()` should be implemented it is generally not something one could rely upon, in most cases it's LCG, sometimes it's [linear-feedback shift register](https://en.wikipedia.org/wiki/Linear-feedback_shift_register) which is a little better.
 
@@ -518,7 +518,7 @@ While older languages usually stick to their already existing implementations, n
 
 In practice, most PRNG outputs aren't used directly as they are generated but rather pass thorough an additional layer of abstraction such as, for example [`std::uniform_int_distribution`](https://en.cppreference.com/w/cpp/numeric/random/uniform_int_distribution), to compute a distributed value.
 
-This has a noticeable effect on quality and performance of some PRNGs, for example, engines with `::min() != 0` or `::max() != std::numeric_limits<result_type>::max()` are inherently at a disadvantage due to preventing the usage of [Lemire's algorithm](https://arxiv.org/abs/1805.10941) for uniform integer distribution in an interval, which makes `libc++` fallback onto a significantly slower generic algorithm, effectively making the PRNG benchmark misleading about real performance.
+This has a noticeable effect on quality and performance of some PRNGs, for example, engines with `::min() != 0` or `::max() != std::numeric_limits<result_type>::max()` are inherently at a disadvantage due to preventing the usage of [Lemire's algorithm](https://arxiv.org/abs/1805.10941) for uniform integer distribution in an interval, which makes `libstdc++` fallback onto a significantly slower generic algorithm, effectively making the PRNG benchmark misleading about real performance.
 
 For this reason all generators selected for this module provide a full range from `0` to `std::numeric_limits<result_type>::max()` and try to avoid "surprises".
 

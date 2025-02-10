@@ -185,7 +185,7 @@ void benchmark_simd_unrolling() {
     std::vector<double> vec(5'000'000);
     for (auto& e : vec) e = random::rand_double(-0.01, 0.01);
 
-    bench.minEpochIterations(200).timeUnit(millisecond, "ms").title("Unrolling the sum").relative(true).warmup(10);
+    bench.minEpochIterations(200).timeUnit(1ms, "ms").title("Unrolling the sum").relative(true).warmup(10);
 
     benchmark("sum_regular", [&] {
         sum = 0;
@@ -365,7 +365,7 @@ void benchmark_matmul() {
     log::println("Data memory usage -> ", math::memory_size<double>(A.size() + B.size() + C.size()), " MiB");
 
     bench.minEpochIterations(1)
-        .timeUnit(millisecond, "ms")
+        .timeUnit(1ms, "ms")
         .title("dense/dense matrix multiplication")
         .relative(true)
         .warmup(2);
@@ -459,7 +459,7 @@ void benchmark_stringify() {
     log::println("Data memory usage -> ", math::memory_size<double>(A.size()), " MiB");
 
     bench.minEpochIterations(4)
-        .timeUnit(millisecond, "ms")
+        .timeUnit(1ms, "ms")
         .title("float stringify")
         .relative(true)
         .warmup(4);
@@ -495,7 +495,7 @@ void benchmark_indexation() {
     double sum = 0;
     
     bench.minEpochIterations(4)
-        .timeUnit(millisecond, "ms")
+        .timeUnit(1ms, "ms")
         .title("Dense vector/matrix indexation")
         .relative(true)
         .warmup(2);
