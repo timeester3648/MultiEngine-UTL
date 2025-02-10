@@ -6,9 +6,6 @@
 
 **struct_reflect** is a lean `struct` reflection library based around the [map-macro](https://github.com/swansontec/map-macro).
 
-> [!Note]
-> Implementation header can be found [here](../include/UTL/struct_reflect.hpp).
-
 ## Definitions
 
 ```cpp
@@ -301,7 +298,7 @@ log::println("q = ", struct_reflect::entry_view(q));
 
 // Note: there is no tight coupling between the modules, 
 //       'utl::log' just knows how to expand tuples,
-//       other logger that do this will also work
+//       other loggers that do this will also work
 ```
 
 Output:

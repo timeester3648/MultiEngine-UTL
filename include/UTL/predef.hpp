@@ -19,6 +19,7 @@
 #include <cstdlib>     // exit()
 #include <iostream>    // cerr
 #include <iterator>    // ostreambuf_iterator<>
+#include <new>         // hardware_destructive_interference_size, hardware_constructive_interference_size
 #include <ostream>     // endl
 #include <sstream>     // istringstream
 #include <string>      // string, getline()
@@ -330,6 +331,16 @@ __builtin_assume(__VA_ARGS__)
     buffer += "Architecture:      ";
     buffer += architecture_name;
     buffer += '\n';
+    
+    #ifdef __cpp_lib_hardware_interference_size
+    buffer += "L1 cache line (D):  ";
+    buffer += std::to_string(std::hardware_destructive_interference_size);
+    buffer += '\n';
+    
+    buffer += "L1 cache line (C):  ";
+    buffer += std::to_string(std::hardware_constructive_interference_size);
+    buffer += '\n';
+    #endif // not (currently) implemented in GCC / clang despite being a C++17 feature
 
     buffer += "Compiled in DEBUG: ";
     buffer += debug ? "true" : "false";

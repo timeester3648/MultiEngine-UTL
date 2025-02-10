@@ -224,7 +224,7 @@ Uniform integer distribution class that provides a 1-to-1 copy of [`std::uniform
 
 - Everything is `constexpr` and `noexcept`
 - `operator()` is `const`-qualified
-- `std::uint8_t`, `std::int8_t` and `char` specializations are properly supported
+- `std::uint8_t`, `std::int8_t` and `char`, `std::char8_t`, `std::char16_t`, `std::char32_t` specializations are properly supported
 - Distribution sequence is platform-independent
 
 **Note:** This is a close reimplementation of `std::uniform_int_distribution` for [GCC libstdc++](https://github.com/gcc-mirror/gcc) with some additional considerations, it provides similar performance and in some cases may even produce the same sequence.
