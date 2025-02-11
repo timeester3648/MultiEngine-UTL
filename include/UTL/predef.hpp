@@ -295,12 +295,13 @@ constexpr bool debug =
 
 // Assume condition
 #if defined(UTL_PREDEF_STANDARD_IS_23_PLUS)
-#define UTL_PREDEF_ASSUME [[assume(__VA_ARGS__))]]
+#define UTL_PREDEF_ASSUME(...) [[assume(__VA_ARGS__))]]
 #elif defined(UTL_PREDEF_COMPILER_IS_MSVC)
-__assume(__VA_ARGS__)
+#define UTL_PREDEF_ASSUME(...) __assume(__VA_ARGS__)
 #elif defined(UTL_PREDEF_COMPILER_IS_CLANG)
-__builtin_assume(__VA_ARGS__)
+#define UTL_PREDEF_ASSUME(...) __builtin_assume(__VA_ARGS__)
 #else // no equivalent GCC built-in
+#define UTL_PREDEF_ASSUME(...) __VA_ARGS__
 #endif
 
 [[noreturn]] inline void unreachable() {
