@@ -59,8 +59,6 @@ inline std::string _format_call_site(std::string_view file, int line, std::strin
     return (std::ostringstream() << filename << ":" << line << ", " << func << "()").str();
 }
 
-#define UTL_PROFILER_OPTION_USE_x86_INTRINSICS_FOR_FREQUENCY 3'300'000'000
-
 #if !defined(UTL_PROFILER_OPTION_USE_x86_INTRINSICS_FOR_FREQUENCY)
 using clock = std::chrono::steady_clock;
 #else

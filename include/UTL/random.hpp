@@ -72,7 +72,7 @@
 // ======================================
 
 // MSVC
-#if !defined(utl_random_cpu_counter) && defined(_MSC_VER)
+#if defined(UTL_RANDOM_USE_INTRINSICS) && !defined(utl_random_cpu_counter) && defined(_MSC_VER)
 #if defined(_M_IX86)
 #include <intrin.h>
 #define utl_random_cpu_counter __rdtsc()
@@ -80,14 +80,14 @@
 #endif
 
 // GCC
-#if !defined(utl_random_cpu_counter) && defined(__GNUC__)
+#if defined(UTL_RANDOM_USE_INTRINSICS) && !defined(utl_random_cpu_counter) && defined(__GNUC__)
 #if __has_builtin(__builtin_ia32_rdtsc)
 #define utl_random_cpu_counter __builtin_ia32_rdtsc()
 #endif
 #endif
 
 // clang
-#if !defined(utl_random_cpu_counter) && !defined(__GNUC__) && defined(__clang__)
+#if defined(UTL_RANDOM_USE_INTRINSICS) && !defined(utl_random_cpu_counter) && !defined(__GNUC__) && defined(__clang__)
 #if __has_builtin(__builtin_readcyclecounter) && __has_include(<xmmintrin.h>)
 #include <xmmintrin.h>
 #define utl_random_cpu_counter __builtin_readcyclecounter()
