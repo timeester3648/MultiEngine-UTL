@@ -934,7 +934,7 @@ constexpr T _generate_uniform_int(Gen& gen, T min, T max) noexcept {
 //
 // This means signed integer distribution can simply use unsigned algorithm and reinterpret the result internally.
 // This would be a bit nicer semantically with C++20 `std::bit_cast<>`, but not ultimately any different.
-template <class T, _require<std::is_integral_v<T>> = true>
+template <class T = int, _require<std::is_integral_v<T>> = true>
 struct UniformIntDistribution {
     using result_type = T;
 
@@ -1094,7 +1094,7 @@ constexpr T generate_canonical(Gen& gen) noexcept(noexcept(gen())) {
     }
 }
 
-template <class T, _require<std::is_floating_point_v<T>> = true>
+template <class T = double, _require<std::is_floating_point_v<T>> = true>
 struct UniformRealDistribution {
     using result_type = T;
 

@@ -2,7 +2,7 @@
 
 [<- to README.md](..)
 
-[<- to implementation.hpp](../include/UTL/sleep.hpp)
+[<- to implementation.hpp](../include/UTL/integral.hpp)
 
 **integral** module implements various utilities for that deal with integer types & bit twiddling. Main highlights are:
 
