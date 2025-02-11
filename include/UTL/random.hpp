@@ -189,8 +189,7 @@ std::uint64_t _seed_seq_to_uint64(SeedSeq&& seq) {
 }
 
 // 'std::rotl()' from C++20, used by many PRNGs,
-// have to use long name because platform-specific '#include <x86intrin.h>'
-// declared '_rotl' as a macro
+// have to use long name because platform-specific includes declare '_rotl' as a macro
 template <class T>
 [[nodiscard]] constexpr T _rotl_value(T x, int k) noexcept {
     return (x << k) | (x >> (std::numeric_limits<T>::digits - k));
