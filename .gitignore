@@ -27,6 +27,10 @@
 # > Data
 !*.json
 
+
+# > Data
+!.as
+
 # Ignore build & temporary directories regarless of their contents
 .cache/
 build/
