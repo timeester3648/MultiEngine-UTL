@@ -29,7 +29,7 @@
 
 
 # > Data
-!.as
+!*.as
 
 # Ignore build & temporary directories regarless of their contents
 .cache/
