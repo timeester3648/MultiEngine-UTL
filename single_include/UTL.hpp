@@ -6308,7 +6308,7 @@ constexpr std::string_view platform_name =
     defined(__TARGET_ARCH_ARM) || defined(__TARGET_ARCH_THUMB)
 #define UTL_PREDEF_ARCHITECTURE_IS_ARM
 #else
-UTL_PREDEF_ARCHITECTURE_IS_UNKNOWN
+#define UTL_PREDEF_ARCHITECTURE_IS_UNKNOWN
 #endif
 
 constexpr std::string_view architecture_name =
