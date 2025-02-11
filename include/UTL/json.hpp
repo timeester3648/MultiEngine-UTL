@@ -19,6 +19,7 @@
 #include <cmath>            // isfinite()
 #include <codecvt>          // codecvt_utf8<>
 #include <cstddef>          // size_t
+#include <cstdint>          // uint8_t
 #include <cuchar>           // size_t, char32_t, mbstate_t
 #include <exception>        // exception
 #include <fstream>          // ifstream, ofstream
