@@ -58,7 +58,7 @@ namespace generators {
     };
     
     // 16-bit PRNGs
-    class RomuMono32   { /* Generator API */ };
+    class RomuMono16   { /* Generator API */ };
     // 32-bit PRNGs
     class RomuTrio32   { /* Generator API */ };
     class SplitMix32   { /* Generator API */ };
@@ -138,7 +138,7 @@ T rand_linear_combination(const T& A, const T& B);
 > };
 > 
 > // 16-bit PRNGs
-> class RomuMono32   { /* Generator API */ };
+> class RomuMono16   { /* Generator API */ };
 > // 32-bit PRNGs
 > class RomuTrio32   { /* Generator API */ };
 > class SplitMix32   { /* Generator API */ };
@@ -394,11 +394,11 @@ Thankfully, `<random>` design is quite flexible and fully abstracts the concept 
 
 | Generator                   | Performance    | Memory                 | Result type     | Quality | Period                 | Motivation                        |
 | --------------------------- | -------------- | ---------------------- | --------------- | ------- | ---------------------- | --------------------------------- |
-| `RomuMono`                  | ~500% | 4 bytes                | `std::uint16_t` | ★★☆☆☆   | $\approx 2^{32}$       | Fastest 16-bit PRNG **⁽¹⁾** |
+| `RomuMono16`                | ~500% | 4 bytes                | `std::uint16_t` | ★★☆☆☆   | $\approx 2^{32}$       | Fastest 16-bit PRNG **⁽¹⁾** |
 | `RomuTrio32`                | ~470%        | 12 bytes               | `std::uint32_t` | ★★☆☆☆   | **Chaotic** **⁽²⁾**         | Fastest 32-bit PRNG               |
 | `SplitMix32`                | ~540%          | 4 bytes                | `std::uint32_t` | ★★★☆☆   | $2^{32}$               | Smallest state 32-bit PRNG        |
 | `Xoshiro128PP`              | ~375%          | 16 bytes               | `std::uint32_t` | ★★★★☆   | $2^{128} − 1$          | Best all purpose 32-bit PRNG      |
-| `RomuDuoJr`                 | ~600%          | 16 bytes | `std::uint64_t` | ★★☆☆☆   | **Chaotic**            | Fastest 64-bit PRNG               |
+| `RomuDuoJr64`               | ~600%          | 16 bytes | `std::uint64_t` | ★★☆☆☆   | **Chaotic**            | Fastest 64-bit PRNG               |
 | `SplitMix64`                | ~540%          | 8 bytes                | `std::uint64_t` | ★★★★☆   | $2^{64}$               | Smallest state 64-bit PRNG        |
 | `Xoshiro256PP`              | ~385%          | 32 bytes               | `std::uint64_t` | ★★★★☆   | $2^{256} − 1$          | Best all purpose 64-bit PRNG      |
 | `ChaCha8` **⁽³⁾** | ~125%          | 120 bytes              | `std::uint32_t` | ★★★★★   | $2^{128}$              | Cryptographically secure PRNG     |

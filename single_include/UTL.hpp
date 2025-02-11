@@ -7417,7 +7417,6 @@ public:
 #include <utility>          // declval<>()
 #include <vector>           // vector<>, hash<>
 
-
 // ____________________ DEVELOPER DOCS ____________________
 
 // Implements a proper modern PRNG engine, compatible with std <random>.
@@ -7458,11 +7457,46 @@ public:
 
 // ____________________ IMPLEMENTATION ____________________
 
+// ======================================
+// --- Ugly platform-specific entropy ---
+// ======================================
+
+// MSVC
+#if !defined(utl_random_cpu_counter) && defined(_MSC_VER)
+#if defined(_M_IX86)
+#include <intrin.h>
+#define utl_random_cpu_counter __rdtsc()
+#endif
+#endif
+
+// GCC
+#if !defined(utl_random_cpu_counter) && defined(__GNUC__)
+#if __has_builtin(__builtin_ia32_rdtsc)
+#define utl_random_cpu_counter __builtin_ia32_rdtsc()
+#endif
+#endif
+
+// clang
+#if !defined(utl_random_cpu_counter) && !defined(__GNUC__) && defined(__clang__)
+#if __has_builtin(__builtin_readcyclecounter) && __has_include(<xmmintrin.h>)
+#include <xmmintrin.h>
+#define utl_random_cpu_counter __builtin_readcyclecounter()
+#endif
+#endif
+
+// Fallback onto a constant that changes with each compilation,
+// not good, but better than nothing
+#if !defined(utl_random_cpu_counter)
+#include <string>
+#define utl_random_cpu_counter std::hash<std::string>{}(std::string(__TIME__))
+#endif
+
 namespace utl::random {
 
 // ============================
 // --- Implementation utils ---
 // ============================
+
 
 // --- Type traits ---
 // -------------------
@@ -7544,9 +7578,11 @@ std::uint64_t _seed_seq_to_uint64(SeedSeq&& seq) {
     return _merge_uint32_into_uint64(temp[0], temp[1]);
 }
 
-// 'std::rotl()' from C++20, used by many PRNGs
+// 'std::rotl()' from C++20, used by many PRNGs,
+// have to use long name because platform-specific '#include <x86intrin.h>'
+// declared '_rotl' as a macro
 template <class T>
-[[nodiscard]] constexpr T _rotl(T x, int k) noexcept {
+[[nodiscard]] constexpr T _rotl_value(T x, int k) noexcept {
     return (x << k) | (x >> (std::numeric_limits<T>::digits - k));
 }
 
@@ -7632,7 +7668,7 @@ public:
     constexpr result_type operator()() noexcept {
         const result_type result = this->s >> 16;
         this->s *= 3611795771u;
-        this->s = _rotl(this->s, 12);
+        this->s = _rotl_value(this->s, 12);
         return result;
     }
 };
@@ -7735,14 +7771,14 @@ public:
     }
 
     constexpr result_type operator()() noexcept {
-        const result_type result = _rotl(this->s[0] + this->s[3], 7) + this->s[0];
+        const result_type result = _rotl_value(this->s[0] + this->s[3], 7) + this->s[0];
         const result_type t      = s[1] << 9;
         this->s[2] ^= this->s[0];
         this->s[3] ^= this->s[1];
         this->s[1] ^= this->s[2];
         this->s[0] ^= this->s[3];
         this->s[2] ^= t;
-        this->s[3] = _rotl(this->s[3], 11);
+        this->s[3] = _rotl_value(this->s[3], 11);
         return result;
     }
 };
@@ -7797,9 +7833,9 @@ public:
         const result_type xp = this->s[0], yp = this->s[1], zp = this->s[2];
         this->s[0] = 3323815723u * zp;
         this->s[1] = yp - xp;
-        this->s[1] = _rotl(this->s[1], 6);
+        this->s[1] = _rotl_value(this->s[1], 6);
         this->s[2] = zp - yp;
-        this->s[2] = _rotl(this->s[2], 22);
+        this->s[2] = _rotl_value(this->s[2], 22);
         return xp;
     }
 };
@@ -7902,14 +7938,14 @@ public:
     }
 
     constexpr result_type operator()() noexcept {
-        const result_type result = _rotl(this->s[0] + this->s[3], 23) + this->s[0];
+        const result_type result = _rotl_value(this->s[0] + this->s[3], 23) + this->s[0];
         const result_type t      = this->s[1] << 17;
         this->s[2] ^= this->s[0];
         this->s[3] ^= this->s[1];
         this->s[1] ^= this->s[2];
         this->s[0] ^= this->s[3];
         this->s[2] ^= t;
-        this->s[3] = _rotl(this->s[3], 45);
+        this->s[3] = _rotl_value(this->s[3], 45);
         return result;
     }
 };
@@ -7964,7 +8000,7 @@ public:
         const result_type res = this->s[0];
         this->s[0]            = 15241094284759029579u * this->s[1];
         this->s[1]            = this->s[1] - res;
-        this->s[1]            = _rotl(this->s[1], 27);
+        this->s[1]            = _rotl_value(this->s[1], 27);
         return res;
     }
 };
@@ -7979,10 +8015,10 @@ public:
 
 // Quarted-round operation for ChaCha20 stream cipher
 constexpr void _quarter_round(std::uint32_t& a, std::uint32_t& b, std::uint32_t& c, std::uint32_t& d) {
-    a += b, d ^= a, d = _rotl(d, 16);
-    c += d, b ^= c, b = _rotl(b, 12);
-    a += b, d ^= a, d = _rotl(d, 8);
-    c += d, b ^= c, b = _rotl(b, 7);
+    a += b, d ^= a, d = _rotl_value(d, 16);
+    c += d, b ^= c, b = _rotl_value(b, 12);
+    a += b, d ^= a, d = _rotl_value(d, 8);
+    c += d, b ^= c, b = _rotl_value(b, 7);
 }
 
 template <std::size_t rounds>
@@ -8121,8 +8157,8 @@ inline default_generator_type default_generator;
 inline std::seed_seq entropy_seq() {
     // Ensure thread safery of our entropy source, it should generally work fine even without
     // it, but with this we can be sure things never race
-    std::mutex                  entropy_mutex;
-    std::lock_guard<std::mutex> entropy_guard(entropy_mutex);
+    static std::mutex     entropy_mutex;
+    const std::lock_guard entropy_guard(entropy_mutex);
 
     // Hardware entropy (if implemented),
     // some platfroms (mainly MinGW) implements random device as a regular PRNG that
@@ -8137,24 +8173,22 @@ inline std::seed_seq entropy_seq() {
     // Time in nanoseconds (on some platforms microseconds)
     const auto seed_time = std::chrono::high_resolution_clock::now().time_since_epoch().count();
 
-    // Counter that gets incremented each time
-    static std::uint32_t seed_counter = 0;
-    ++seed_counter;
+    // Heap address (tends to be random each run on most platforms)
+    std::vector<std::uint32_t> dummy_vec(1, seed_rd);
+    const std::size_t          heap_address_hash = std::hash<std::uint32_t*>{}(dummy_vec.data());
 
-    // Stack address (tends to be random each run on most platforms)
-    const std::size_t stack_address_hash = std::hash<std::uint32_t*>{}(&seed_counter);
+    // Stack address (also tends to be random)
+    const std::size_t stack_address_hash = std::hash<decltype(heap_address_hash)*>{}(&heap_address_hash);
 
-    // Heap address (also tends to be random)
-    std::vector<std::uint32_t>  dummy_vec(1, seed_counter);
-    const std::size_t heap_address_hash = std::hash<std::uint32_t*>{}(dummy_vec.data());
+    // CPU counter (if available, hashed compilation time otherwise)
+    const auto cpu_counter = static_cast<std::uint64_t>(utl_random_cpu_counter);
 
     // Note:
-    // There are other sources of entropy, such as memory space, heap/stack/function adresses,
-    // but those can be rather "constant" on some platforms, using intrinsics could also be good
-    // but that isn't portable
+    // There are other sources of entropy, such as function adresses,
+    // but those can be rather "constant" on some platforms
 
-    return {seed_rd, _crush_to_uint32(seed_time), seed_counter, _crush_to_uint32(stack_address_hash),
-            _crush_to_uint32(heap_address_hash)};
+    return {seed_rd, _crush_to_uint32(seed_time), _crush_to_uint32(heap_address_hash),
+            _crush_to_uint32(stack_address_hash), _crush_to_uint32(cpu_counter)};
 }
 
 inline std::uint32_t entropy() {
