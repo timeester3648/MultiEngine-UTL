@@ -8,197 +8,276 @@
 //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-#if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_PROGRESSBAR)
-#ifndef UTLHEADERGUARD_PROGRESSBAR
-#define UTLHEADERGUARD_PROGRESSBAR
+#if !defined(UTL_PICK_MODULES) || defined(UTL_MODULE_PROGRESSBAR)
+
+#ifndef utl_progressbar_headerguard
+#define utl_progressbar_headerguard
+
+#define UTL_PROGRESSBAR_VERSION_MAJOR 1
+#define UTL_PROGRESSBAR_VERSION_MINOR 0
+#define UTL_PROGRESSBAR_VERSION_PATCH 1
 
 // _______________________ INCLUDES _______________________
 
-#include <algorithm> // fill_n
-#include <chrono>    // chrono::steady_clock, chrono::time_point<>, chrono::duration_cast<>, chrono::seconds
-#include <cmath>     // floor()
-#include <cstddef>   // size_t
-#include <iomanip>   // setprecision()
-#include <ios>       // fixed
-#include <iostream>  // cout
-#include <iterator>  // ostreambuf_iterator<>
-#include <ostream>   // ostream
-#include <sstream>   // ostringstream
-#include <string>    // string
+#include <algorithm>   // max(), clamp()
+#include <array>       // array
+#include <charconv>    // to_chars
+#include <chrono>      // chrono::steady_clock, chrono::time_point<>, chrono::duration_cast<>
+#include <cstddef>     // size_t
+#include <iostream>    // cout
+#include <iterator>    // ostream_iterator<>
+#include <string>      // string
+#include <string_view> // string_view
 
 // ____________________ DEVELOPER DOCS ____________________
 
 // Simple progress bars for terminal applications. Rendered in ASCII on the main thread with manual updates
 // for maximal compatibility. Perhaps can be extended with some fancier async options that display animations.
 //
-// # ::set_ostream() #
-// Sets ostream used for progress bars.
-//
-// # ::Percentage #
-// Proper progress bar, uses carriage return escape sequence (\r) to render new states in the same spot.
-// Shows an estimate of remaining time.
-//
-// # ::Ruler #
-// Primitive & lightweight progress bar, useful when terminal has no proper support for escape sequences.
+// Used to be implemented in terms of 'std::stringstream' but later got rewritten to improve performance,
+// reduce includes, allow more style configuration and make API more robust against misuse.
 
 // ____________________ IMPLEMENTATION ____________________
 
+namespace utl::progressbar::impl {
+
+// Proper progress bar, uses '\r' to render new state in the same spot.
+// Allocates when formatting things for the first time, after that storage gets reused.
+class Percentage {
+public:
+    // - Public parameters -
+    struct Style {
+        char        fill            = '#';
+        char        empty           = '.';
+        char        left            = '[';
+        char        right           = ']';
+        std::string estimate_prefix = "(remaining: ";
+        std::string estimate_suffix = ")";
+    } style;
+
+    bool show_bar        = true;
+    bool show_percentage = true;
+    bool show_estimate   = true;
+
+    std::size_t bar_length  = 30;
+    double      update_rate = 2.5e-3; // every quarter of a % feels like a good default
+
+    // - Public API -
+    Percentage() : start_time_point(clock::now()) {
+        std::cout << '\n';
+        this->draw();
+        std::cout.flush();
+    }
+
+    void set_progress(double value) {
+        value = std::clamp(value, 0., 1.);
+
+        if (value - this->progress < this->update_rate) return; // prevents progress decrement
+
+        this->progress = value;
+
+        this->draw();
+        std::cout.flush();
+    }
+
+    void finish() {
+        if (this->finished) return; // prevents weird formatting from multiple 'finish()' calls
+
+        this->progress = 1.;
+        this->finished = true;
+
+        this->draw();
+        std::cout << '\n';
+        std::cout.flush();
+    }
+
+    void update_style() {
+        this->draw();
+        std::cout.flush();
+    }
+
+private:
+    // - Internal state -
+    using clock = std::chrono::steady_clock;
+
+    clock::time_point start_time_point = clock::now();
+    std::size_t       max_drawn_length = 0;
+    double            progress         = 0;
+    bool              finished         = false;
+
+    std::string buffer; // keep the buffer so we don't have to reallocate each time
+
+    void format_bar() {
+        if (!this->show_bar) return;
+
+        const std::size_t fill_length  = static_cast<std::size_t>(this->progress * this->bar_length);
+        const std::size_t empty_length = this->bar_length - fill_length;
+
+        this->buffer += this->style.left;
+        this->buffer.append(fill_length, this->style.fill);
+        this->buffer.append(empty_length, this->style.empty);
+        this->buffer += this->style.right;
+        this->buffer += ' ';
+    }
+
+    void format_percentage() {
+        if (!this->show_percentage) return;
+
+        constexpr auto        format    = std::chars_format::fixed;
+        constexpr std::size_t precision = 2;
+        constexpr std::size_t max_chars = 6; // enough for for '0.xx' to '100.xx',
+
+        std::array<char, max_chars> chars;
+        const double                percentage = this->progress * 100; // 'set_progress()' enforces 0 <= progress <= 1
+
+        const auto end_ptr = std::to_chars(chars.data(), chars.data() + max_chars, percentage, format, precision).ptr;
+        // can't error, buffer size is guaranteed to be enough
+
+        this->buffer.append(chars.data(), end_ptr - chars.data());
+        this->buffer += '%';
+        this->buffer += ' ';
+    }
+
+    void format_estimate() {
+        if (!this->show_estimate) return;
+        if (!this->progress) return;
+
+        const auto elapsed  = clock::now() - this->start_time_point;
+        const auto estimate = elapsed * (1. - this->progress) / this->progress;
+
+        const auto hours   = std::chrono::duration_cast<std::chrono::hours>(estimate);
+        const auto minutes = std::chrono::duration_cast<std::chrono::minutes>(estimate - hours);
+        const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(estimate - hours - minutes);
+
+        this->buffer += this->style.estimate_prefix;
+
+        if (hours.count()) {
+            this->buffer += std::to_string(hours.count());
+            this->buffer += " hours ";
+            this->buffer += std::to_string(minutes.count());
+            this->buffer += " min ";
+            this->buffer += std::to_string(seconds.count());
+            this->buffer += " sec";
+        } else if (minutes.count()) {
+            this->buffer += std::to_string(minutes.count());
+            this->buffer += " min ";
+            this->buffer += std::to_string(seconds.count());
+            this->buffer += " sec";
+        } else {
+            this->buffer += std::to_string(seconds.count());
+            this->buffer += " sec";
+        }
+
+        this->buffer += this->style.estimate_suffix;
+    }
+
+    void draw() {
+        this->buffer.clear();
+        this->buffer += '\r';
+
+        // Draw progressbar
+        this->format_bar();
+        this->format_percentage();
+        this->format_estimate();
+
+        // Draw spaces over potential remains of the previous bar (which could be longer due to time estimate)
+        this->max_drawn_length = std::max(this->max_drawn_length, this->buffer.size());
+        this->buffer.append(this->max_drawn_length - this->buffer.size(), ' ');
+
+        std::cout << this->buffer;
+    }
+};
+
+// Minimalistic progress bar, used when terminal doesn't support '\r' (they exist).
+// Does not allocate.
+class Ruler {
+    constexpr static std::string_view ticks      = "0    10   20   30   40   50   60   70   80   90   100%";
+    constexpr static std::string_view ruler      = "|----|----|----|----|----|----|----|----|----|----|";
+    constexpr static std::size_t      bar_length = ruler.size();
+
+public:
+    // - Public parameters -
+    struct Style {
+        char fill            = '#';
+        char ruler_line      = '-';
+        char ruler_delimiter = '|';
+    } style;
+
+    bool show_ticks = true;
+    bool show_ruler = true;
+    bool show_bar   = true; // useless, but might as well have it for uniformity
+
+    // - Public API -
+    Ruler() {
+        std::cout << '\n';
+        this->draw_ticks();
+        std::cout << '\n';
+        this->draw_ruler();
+        std::cout << '\n';
+        std::cout.flush();
+    }
+
+    void set_progress(double value) {
+        value = std::clamp(value, 0., 1.);
+
+        this->progress_in_chars = static_cast<std::size_t>(this->bar_length * value);
+
+        this->draw_bar();
+        std::cout.flush();
+    }
+
+    void finish() {
+        if (this->finished) return; // prevents weird formatting from multiple 'finish()' calls
+
+        this->progress_in_chars = this->bar_length;
+        this->finished          = true;
+
+        this->draw_bar();
+        std::cout << '\n';
+        std::cout.flush();
+    }
+
+private:
+    // - Internal state -
+    std::size_t progress_in_chars = 0;
+    std::size_t chars_drawn       = 0;
+    bool        finished          = false;
+
+    void draw_ticks() {
+        if (!this->show_ticks) return;
+        std::cout << this->ticks;
+    }
+
+    void draw_ruler() {
+        if (!this->show_ruler) return;
+
+        std::array<char, ruler.size()> buffer;
+        for (std::size_t i = 0; i < ruler.size(); ++i)
+            buffer[i] = (this->ruler[i] == '|') ? this->style.ruler_delimiter : this->style.ruler_line;
+        // formats ruler without allocating
+
+        std::cout.write(buffer.data(), buffer.size());
+    }
+
+    void draw_bar() {
+        if (!this->show_bar) return;
+
+        if (this->progress_in_chars > this->chars_drawn)
+            std::fill_n(std::ostream_iterator<char>(std::cout), this->progress_in_chars - this->chars_drawn,
+                        this->style.fill);
+
+        this->chars_drawn = this->progress_in_chars;
+    }
+};
+
+} // namespace utl::progressbar::impl
+
+// ______________________ PUBLIC API ______________________
+
 namespace utl::progressbar {
 
-inline std::ostream* _output_stream = &std::cout;
-
-inline void set_ostream(std::ostream& new_ostream) { _output_stream = &new_ostream; }
-
-class Percentage {
-private:
-    char done_char;
-    char not_done_char;
-    bool show_time_estimate;
-
-    std::size_t length_total;   // full   bar length
-    std::size_t length_current; // filled bar length
-
-    double last_update_percentage;
-    double update_rate;
-
-    using Clock     = std::chrono::steady_clock;
-    using TimePoint = std::chrono::time_point<Clock>;
-
-    TimePoint timepoint_start; // used to estimate remaining time
-    TimePoint timepoint_current;
-
-    int previous_string_length; // used to properly return the carriage when dealing with changed string size
-
-    void draw_progressbar(double percentage) {
-        const auto displayed_percentage = this->update_rate * std::floor(percentage / this->update_rate);
-        // floor percentage to a closest multiple of 'update_rate' for nicer display
-        // since actual updates are only required to happen no more ofter than 'update_rate'
-        // and don't have to correspond to exact multiples of it
-
-        // Estimate remaining time (linearly) and format it min + sec
-        const auto time_elapsed       = this->timepoint_current - this->timepoint_start;
-        const auto estimate_full      = time_elapsed / percentage;
-        const auto estimate_remaining = estimate_full - time_elapsed;
-
-        const auto estimate_remaining_sec = std::chrono::duration_cast<std::chrono::seconds>(estimate_remaining);
-
-        const auto displayed_min = (estimate_remaining_sec / 60ll).count();
-        const auto displayed_sec = (estimate_remaining_sec % 60ll).count();
-
-        const bool show_min  = (displayed_min != 0);
-        const bool show_sec  = (displayed_sec != 0) && !show_min;
-        const bool show_time = (estimate_remaining_sec.count() > 0);
-
-        std::ostringstream ss;
-
-        // Print bar
-        ss << '[';
-        std::fill_n(std::ostreambuf_iterator<char>(ss), this->length_current, this->done_char);
-        std::fill_n(std::ostreambuf_iterator<char>(ss), this->length_total - this->length_current, this->not_done_char);
-        ss << ']';
-
-        // Print percentage
-        ss << ' ' << std::fixed << std::setprecision(2) << 100. * displayed_percentage << '%';
-
-        // Print time estimate
-        if (this->show_time_estimate && show_time) {
-            ss << " (remaining:";
-            if (show_min) ss << ' ' << displayed_min << " min";
-            if (show_sec) ss << ' ' << displayed_sec << " sec";
-            ss << ')';
-        }
-
-        const std::string bar_string = ss.str();
-
-        // Add spaces at the end to overwrite the previous string if it was longer that current
-        const int current_string_length = static_cast<int>(bar_string.length());
-        const int string_length_diff    = this->previous_string_length - current_string_length;
-
-        if (string_length_diff > 0) { std::fill_n(std::ostreambuf_iterator<char>(ss), string_length_diff, ' '); }
-
-        this->previous_string_length = current_string_length;
-
-        // Return the carriage
-        (*_output_stream) << ss.str(); // don't reuse 'bar_string', now 'ss' can also contain spaces at the end
-        (*_output_stream) << '\r';
-        (*_output_stream).flush();
-        // '\r' returns cursor to the beginning of the line => most sensible consoles will
-        // render render new lines over the last one. Otherwise every update produces a
-        // bar on a new line, which looks worse but isn't critical for the purpose.
-    }
-
-public:
-    Percentage(char done_char = '#', char not_done_char = '.', std::size_t bar_length = 30, double update_rate = 1e-2,
-               bool show_time_estimate = true)
-        : done_char(done_char), not_done_char(not_done_char), show_time_estimate(show_time_estimate),
-          length_total(bar_length), length_current(0), last_update_percentage(0), update_rate(update_rate),
-          timepoint_start(Clock::now()), previous_string_length(static_cast<int>(bar_length) + sizeof("[] 100.00%")) {}
-
-    void start() {
-        this->last_update_percentage = 0.;
-        this->length_current         = 0;
-        this->timepoint_start        = Clock::now();
-        (*_output_stream) << '\n';
-    }
-
-    void set_progress(double percentage) {
-        if (percentage - this->last_update_percentage <= this->update_rate) return;
-
-        this->last_update_percentage = percentage;
-        this->length_current         = static_cast<std::size_t>(percentage * static_cast<double>(this->length_total));
-        this->timepoint_current      = Clock::now();
-        this->draw_progressbar(percentage);
-    }
-
-    void finish() {
-        this->last_update_percentage = 1.;
-        this->length_current         = this->length_total;
-        this->draw_progressbar(1.);
-        (*_output_stream) << '\n';
-    }
-};
-
-class Ruler {
-private:
-    char done_char;
-
-    std::size_t length_total;
-    std::size_t length_current;
-
-public:
-    Ruler(char done_char = '#') : done_char(done_char), length_total(51), length_current(0) {}
-
-    void start() {
-        this->length_current = 0;
-
-        (*_output_stream) << '\n'
-                          << " 0    10   20   30   40   50   60   70   80   90   100%\n"
-                          << " |----|----|----|----|----|----|----|----|----|----|\n"
-                          << ' ';
-    }
-
-    void set_progress(double percentage) {
-        const std::size_t length_new = static_cast<std::size_t>(percentage * static_cast<double>(this->length_total));
-
-        if (length_new > length_current) {
-            const auto chars_to_add = length_new - this->length_current;
-            std::fill_n(std::ostreambuf_iterator<char>(*_output_stream), chars_to_add, this->done_char);
-        }
-
-        this->length_current = length_new;
-    }
-
-    void finish() {
-        if (this->length_total > this->length_current) {
-            const auto chars_to_add = this->length_total - this->length_current;
-            std::fill_n(std::ostreambuf_iterator<char>(*_output_stream), chars_to_add, this->done_char);
-        }
-
-        this->length_current = this->length_total;
-
-        (*_output_stream) << '\n';
-    }
-};
+using impl::Percentage;
+using impl::Ruler;
 
 } // namespace utl::progressbar
 

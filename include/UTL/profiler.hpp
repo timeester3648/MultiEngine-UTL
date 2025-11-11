@@ -8,434 +8,822 @@
 //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-#if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_PROFILER)
-#ifndef UTLHEADERGUARD_PROFILER
-#define UTLHEADERGUARD_PROFILER
+#if !defined(UTL_PICK_MODULES) || defined(UTL_MODULE_PROFILER)
+
+#ifndef utl_profiler_headerguard
+#define utl_profiler_headerguard
+
+#define UTL_PROFILER_VERSION_MAJOR 1
+#define UTL_PROFILER_VERSION_MINOR 0
+#define UTL_PROFILER_VERSION_PATCH 2
 
 // _______________________ INCLUDES _______________________
 
-#include <algorithm>   // sort()
-#include <chrono>      // chrono::steady_clock, chrono::duration_cast<>, std::chrono::milliseconds
-#include <cstdlib>     // atexit()
-#include <fstream>     // ofstream
-#include <iomanip>     // setprecision(), setw()
-#include <ios>         // streamsize, fixed,
-#include <iostream>    // cout
-#include <ostream>     // ostream
-#include <sstream>     // ostringstream
-#include <string>      // string
-#include <string_view> // string_view
-#include <vector>      // vector<>
+#ifndef UTL_PROFILER_DISABLE
+
+#include <array>         // array<>, size_t
+#include <cassert>       // assert()
+#include <charconv>      // to_chars()
+#include <chrono>        // steady_clock, duration<>
+#include <cstdint>       // uint16_t, uint32_t
+#include <iostream>      // cout
+#include <mutex>         // mutex, lock_guard
+#include <string>        // string, to_string()
+#include <string_view>   // string_view
+#include <thread>        // thread::id, this_thread::get_id()
+#include <type_traits>   // enable_if_t<>, is_enum_v<>, is_invokable_v<>, underlying_type_t<>
+#include <unordered_map> // unordered_map<>
+#include <vector>        // vector<>
+
+#endif // no need to pull all these headers with profiling disabled
 
 // ____________________ DEVELOPER DOCS ____________________
 
-// Macros for quick code profiling.
-// Trivially simple, yet effective way of finding bottlenecks without any tooling.
+// Optional macros:
+// - #define UTL_PROFILER_DISABLE                            // disable all profiling
+// - #define UTL_PROFILER_USE_INTRINSICS_FOR_FREQUENCY 3.3e9 // use low-overhead rdtsc timestamps
+// - #define UTL_PROFILER_USE_SMALL_IDS                      // use 16-bit ids
 //
-// Can also be used to benchmark stuff "quick & dirty" due to doing all the time measuring
-// and table formatting one would usually implement in their benchmarks. A proper bechmark
-// suite of course would include support for automatic reruns and gather statistical data,
-// but in prototying this is often not necessary.
+// This used to be a much simpler header with a few macros to profile scope & print a flat table, it
+// already applied the idea of using static variables to mark callsites efficiently and later underwent
+// a full rewrite to add proper threading & call graph support.
 //
-// Resolving time recording inside recursion took some thinking, but ended up being quite simple in
-// implementation. See the docs for more details on that.
+// A lot of thought went into making it fast. The key idea is to use 'thread_local' callsite
+// markers to associate callsites with linearly growing thread-specific IDs and reduce all call
+// graph traversal logic to traversing a matrix of integers. Store everything we can densely,
+// minimize locks, delay formatting and result evaluation as much as possible.
 //
-// Currently, the overhead of profiling is barely different to the overhead of just time measurement,
-// this also took a bit of thinking but in the end there is a nice solution that uses static variables
-// to offload things that can only be done once to their initialization, and then links local variables
-// to 'static' markers of the callsite recording. See 'UTL_PROFILE' macro for some more details.
+// Docs & comments scattered through code should explain the details decently well.
 
 // ____________________ IMPLEMENTATION ____________________
 
-namespace utl::profiler {
+#ifndef UTL_PROFILER_DISABLE
+// '#ifndef' that wraps almost entire header,
+// in '#else' branch only no-op mocks of the public API are compiled
 
-// ==========================
-// --- Profiler Internals ---
-// ==========================
+// ==================================
+// --- Optional __rdtsc() support ---
+// ==================================
 
-inline std::string _format_call_site(std::string_view file, int line, std::string_view func) {
-    const std::string_view filename = file.substr(file.find_last_of("/\\") + 1);
+#ifdef UTL_PROFILER_USE_INTRINSICS_FOR_FREQUENCY
 
-    return (std::ostringstream() << filename << ":" << line << ", " << func << "()").str();
+#ifdef _MSC_VER
+#include <intrin.h>
+#else
+#include <x86intrin.h>
+#endif
+
+#define utl_profiler_cpu_counter __rdtsc()
+
+#endif
+
+// ====================
+// --- String utils ---
+// ====================
+
+namespace utl::profiler::impl {
+
+constexpr std::size_t max(std::size_t a, std::size_t b) noexcept {
+    return (a < b) ? b : a;
+} // saves us a heavy <algorithm> include
+
+template <class... Args>
+void append_fold(std::string& str, const Args&... args) {
+    ((str += args), ...);
+} // faster than 'std::ostringstream' and saves us an include
+
+inline std::string format_number(double value, std::chars_format format, int precision) {
+    std::array<char, 30> buffer; // 80-bit 'long double' fits in 29, 64-bit 'double' in 24, this is always enough
+    const auto end_ptr = std::to_chars(buffer.data(), buffer.data() + buffer.size(), value, format, precision).ptr;
+    return std::string(buffer.data(), end_ptr);
 }
 
-#if !defined(UTL_PROFILER_OPTION_USE_x86_INTRINSICS_FOR_FREQUENCY)
-using clock = std::chrono::steady_clock;
-#else
+inline std::string format_call_site(std::string_view file, int line, std::string_view func) {
+    const std::string_view filename = file.substr(file.find_last_of("/\\") + 1);
+
+    std::string res;
+    res.reserve(filename.size() + func.size() + 10); // +10 accounts for formatting chars and up to 5 line digits
+    append_fold(res, filename, ":", std::to_string(line), ", ", func, "()");
+    return res;
+}
+
+inline void append_aligned_right(std::string& str, const std::string& source, std::size_t width, char fill = ' ') {
+    assert(width >= source.size());
+
+    const std::size_t pad_left = width - source.size();
+    str.append(pad_left, fill) += source;
+}
+
+inline void append_aligned_left(std::string& str, const std::string& source, std::size_t width, char fill = ' ') {
+    assert(width >= source.size());
+
+    const std::size_t pad_right = width - source.size();
+    (str += source).append(pad_right, fill);
+}
+
+// ==============
+// --- Timing ---
+// ==============
+
+// If we know CPU frequency at compile time we can wrap '__rdtsc()' into a <chrono>-compatible
+// clock and use it seamlessly, no need for conditional compilation anywhere else
+
+#ifdef UTL_PROFILER_USE_INTRINSICS_FOR_FREQUENCY
 struct clock {
     using rep                   = unsigned long long int;
-    using period                = std::ratio<1, UTL_PROFILER_OPTION_USE_x86_INTRINSICS_FOR_FREQUENCY>;
+    using period                = std::ratio<1, static_cast<rep>(UTL_PROFILER_USE_INTRINSICS_FOR_FREQUENCY)>;
     using duration              = std::chrono::duration<rep, period>;
     using time_point            = std::chrono::time_point<clock>;
     static const bool is_steady = true;
 
-    static time_point now() noexcept {
-        unsigned int low, high;
-        asm volatile("rdtsc" : "=a"(low), "=d"(high)); // GCC/clang asm intrinsic, MSVC uses __asm() with more overhead
-        return time_point(duration(static_cast<rep>(high) << 32 | low));
-    }
+    static time_point now() noexcept { return time_point(duration(utl_profiler_cpu_counter)); }
 };
+#else
+using clock = std::chrono::steady_clock;
 #endif
 
 using duration   = clock::duration;
 using time_point = clock::time_point;
 
-inline const time_point _program_entry_time_point = clock::now();
+using ms = std::chrono::duration<double, std::chrono::milliseconds::period>;
+// float time makes conversions more convenient
 
-struct _record {
-    const char* file;
-    int         line;
-    const char* func;
-    const char* label;
-    duration    accumulated_time;
-};
+// =====================
+// --- Type-safe IDs ---
+// =====================
 
-inline void _utl_profiler_atexit(); // predeclaration, implementation has circular dependency with 'RecordManager'
-
-// =========================
-// --- Profiler Classess ---
-// =========================
-
-class _record_manager {
-private:
-    _record data;
-
-public:
-    inline static std::vector<_record> records;
-    inline static int                  exclusive_recursion{};
-    int                                recursion{};
-
-    void add_time(duration time) noexcept { this->data.accumulated_time += time; }
-
-    _record_manager() = delete;
-
-    _record_manager(const char* file, int line, const char* func, const char* label)
-        : data({file, line, func, label, duration(0)}) {
-        // 'file', 'func', 'label' are guaranteed to be string literals, since we want to
-        // have as little overhead as possible during runtime, we can just save raw pointers
-        // and convert them to nicer types like 'std::string_view' later in the formatting stage
-
-        // Profiler ever gets called => register result output at 'std::exit()'
-        static bool first_call = true;
-        if (first_call) {
-            std::atexit(_utl_profiler_atexit);
-            first_call = false;
-        }
-    }
-
-    ~_record_manager() { records.emplace_back(this->data); }
-};
-
-// We need 4 slightly different timer classes, so might as well deduplicate some code by moving it into a base class
-struct _timer_base {
-protected:
-    time_point       start;
-    _record_manager* record_manager;
-    // we could use 'std::optional<std::reference_wrapper<RecordManager>>',
-    // but that would inctroduce more dependencies for no real reason
-public:
-    constexpr operator bool() const noexcept { return true; }
-
-    _timer_base(_record_manager* manager) : record_manager(manager) {}
-};
-
-// Simple class that records the time of its creation and destruction and records it into the connected 'RecordManager'
-struct _scope_timer : public _timer_base {
-    _scope_timer(_record_manager* manager) : _timer_base(manager) {
-        if (this->record_manager->recursion++ == 0) this->start = clock::now();
-        // this check prevent timer from double-counting time spent inside
-        // of it's own scope due to recursive calls
-    }
-
-    ~_scope_timer() {
-        if (--this->record_manager->recursion == 0) this->record_manager->add_time(clock::now() - this->start);
-    }
-};
-
-// Same thing as '_scope_timer' except it uses global static 'exclusive_recursion' instead of regular 'recursion' that
-// is specific to each '_record_manager'. This effecively means no '_exclusive_scope_timer''s will count time as long a
-// single instance of another exclusive timer exists. This allows us to resolve som tricky situations such as recursion
-struct _exclusive_scope_timer : public _timer_base {
-    _exclusive_scope_timer(_record_manager* manager) : _timer_base(manager) {
-        if (this->record_manager->exclusive_recursion++ == 0) this->start = clock::now();
-    }
-
-    ~_exclusive_scope_timer() {
-        if (--this->record_manager->exclusive_recursion == 0)
-            this->record_manager->add_time(clock::now() - this->start);
-    }
-};
-
-// Same thing as '_scope_timer', except instead of destructor it uses an explicitly called method to record time.
-// We need it to implement code-segment profiling with 'UTL_PROFILER_BEGIN' and 'UTL_PROFILER_END'
-struct _segment_timer : public _timer_base {
-    _segment_timer(_record_manager* manager) : _timer_base(manager) {
-        if (this->record_manager->recursion++ == 0) this->start = clock::now();
-    }
-
-    void finish() {
-        if (--this->record_manager->recursion == 0) this->record_manager->add_time(clock::now() - this->start);
-    }
-};
-
-struct _exclusive_segment_timer : public _timer_base {
-    _exclusive_segment_timer(_record_manager* manager) : _timer_base(manager) {
-        if (this->record_manager->exclusive_recursion++ == 0) this->start = clock::now();
-    }
-
-    void finish() {
-        if (--this->record_manager->exclusive_recursion == 0)
-            this->record_manager->add_time(clock::now() - this->start);
-    }
-};
-
-// ==================================
-// --- Profiler Exit & Formatting ---
-// ==================================
-
-inline void _utl_profiler_atexit() {
-    // NOTE:
-    // Lots of ugly formatting stuff here, but it works, so a nicer rewrite is low-priority.
-    // Would make a lot more sense to format all the stuff into a `matrix` of strings first,
-    // and then do all the sorting/column width adjustment and etc. Should be faster (which
-    // doesn't really matter here) and more concise too.
-
-    const auto total_runtime = clock::now() - _program_entry_time_point;
-
-    std::ostream* os = &std::cout;
-
-    // Convenience functions
-    const auto duration_to_sec = [](duration duration) -> double {
-        return std::chrono::duration_cast<std::chrono::nanoseconds>(duration).count() / 1e9;
-    };
-
-    const auto duration_percentage = [&](double duration_sec) -> double {
-        const double total_runtime_sec = duration_to_sec(total_runtime);
-        return (duration_sec / total_runtime_sec) * 100.;
-    };
-
-    const auto float_printed_size = [](double value, std::streamsize precision, decltype(std::fixed) format,
-                                       std::string_view postfix) -> std::streamsize {
-        std::ostringstream ss;
-        ss << std::setprecision(precision) << format << value << postfix;
-        return ss.str().size(); // can be done faster but we don't really care here
-    };
-
-    const auto repeat_hline_symbol = [](std::streamsize repeats) -> std::string {
-        return std::string(static_cast<size_t>(repeats), '-');
-    };
-
-    constexpr std::streamsize  duration_precision = 2;
-    constexpr auto             duration_format    = std::fixed;
-    constexpr std::string_view duration_postfix   = " s";
-
-    constexpr std::streamsize  percentage_precision = 1;
-    constexpr auto             percentage_format    = std::fixed;
-    constexpr std::string_view percentage_postfix   = "%";
-
-    // Sort records by their accumulated time
-    std::sort(_record_manager::records.begin(), _record_manager::records.end(),
-              [](const _record& l, const _record& r) { return l.accumulated_time > r.accumulated_time; });
-
-    // Collect max length of each column (for proper formatting)
-    constexpr std::string_view column_name_call_site  = "Call Site";
-    constexpr std::string_view column_name_label      = "Label";
-    constexpr std::string_view column_name_duration   = "Time";
-    constexpr std::string_view column_name_percentage = "Time %";
-
-    std::streamsize max_length_call_site  = column_name_call_site.size();
-    std::streamsize max_length_label      = column_name_label.size();
-    std::streamsize max_length_duration   = column_name_duration.size();
-    std::streamsize max_length_percentage = column_name_percentage.size();
-
-    for (const auto& record : _record_manager::records) {
-        const std::string call_site    = _format_call_site(record.file, record.line, record.func);
-        const std::string label        = record.label;
-        const double      duration_sec = duration_to_sec(record.accumulated_time);
-
-        // 'Call Site' column
-        const std::streamsize length_call_site = call_site.size();
-        if (max_length_call_site < length_call_site) max_length_call_site = length_call_site;
-
-        // 'Label' column
-        const std::streamsize length_label = label.size();
-        if (max_length_label < length_label) max_length_label = length_label;
-
-        // 'Time' column
-        const std::streamsize length_duration =
-            float_printed_size(duration_sec, duration_precision, duration_format, duration_postfix);
-        if (max_length_duration < length_duration) max_length_duration = length_duration;
-
-        // 'Time %' column
-        const auto            percentage = duration_percentage(duration_sec);
-        const std::streamsize length_percentage =
-            float_printed_size(percentage, percentage_precision, percentage_format, percentage_postfix);
-        if (max_length_percentage < length_percentage) max_length_percentage = length_percentage;
-    }
-
-    // Print formatted profiler header
-    constexpr std::string_view HEADER_TEXT = " UTL PROFILING RESULTS ";
-
-    const std::streamsize total_table_length = sizeof("| ") - 1 + max_length_call_site + sizeof(" | ") - 1 +
-                                               max_length_label + sizeof(" | ") - 1 + max_length_duration +
-                                               sizeof(" | ") - 1 + max_length_percentage + sizeof(" |") -
-                                               1; // -1 because sizeof(char[]) accounts for invisible '\0' at the end
-
-    const std::streamsize header_text_length = HEADER_TEXT.size();
-    const std::streamsize header_left_pad    = (total_table_length - header_text_length) / 2;
-    const std::streamsize header_right_pad   = total_table_length - header_text_length - header_left_pad;
-
-    *os << "\n"
-        << repeat_hline_symbol(header_left_pad + 1) << HEADER_TEXT << repeat_hline_symbol(header_right_pad + 1)
-        << '\n'
-        // + 1 makes header hline extend 1 character past the table on both sides
-        << "\n"
-        << " Total runtime -> " << std::setprecision(duration_precision) << duration_format
-        << duration_to_sec(total_runtime) << " sec\n"
-        << "\n";
-
-    // Print formatted table header
-    *os << " | " << std::setw(max_length_call_site) << column_name_call_site << " | " << std::setw(max_length_label)
-        << column_name_label << " | " << std::setw(max_length_duration) << column_name_duration << " | "
-        << std::setw(max_length_percentage) << column_name_percentage << " |\n";
-
-    *os << " |"
-        << repeat_hline_symbol(max_length_call_site + 2) // add 2 to account for delimers not having spaces in hline
-        << "|" << repeat_hline_symbol(max_length_label + 2) << "|" << repeat_hline_symbol(max_length_duration + 2)
-        << "|" << repeat_hline_symbol(max_length_percentage + 2) << "|\n";
-
-    *os << std::setfill(' '); // reset the fill so we don't mess with table contents
-
-
-    // Print formatted table contents
-    for (const auto& record : _record_manager::records) {
-        const std::string call_site    = _format_call_site(record.file, record.line, record.func);
-        const std::string label        = record.label;
-        const double      duration_sec = duration_to_sec(record.accumulated_time);
-        const double      percentage   = duration_percentage(duration_sec);
-
-        // Join floats with their postfixes into a single string so they are properly handled by std::setw()
-        // (which only affects the first value leading to a table misaligned by postfix size)
-        std::ostringstream ss_duration;
-        ss_duration << std::setprecision(duration_precision) << duration_format << duration_sec << duration_postfix;
-
-        std::ostringstream ss_percentage;
-        ss_percentage << std::setprecision(percentage_precision) << percentage_format << percentage
-                      << percentage_postfix;
-
-        *os << " | " << std::setw(max_length_call_site) << call_site << " | " << std::setw(max_length_label) << label
-            << " | " << std::setw(max_length_duration) << ss_duration.str() << " | " << std::setw(max_length_percentage)
-            << ss_percentage.str() << " |\n";
-    }
+template <class Enum, std::enable_if_t<std::is_enum_v<Enum>, bool> = true>
+[[nodiscard]] constexpr auto to_int(Enum value) noexcept {
+    return static_cast<std::underlying_type_t<Enum>>(value);
 }
 
-// ========================
-// --- Profiler Codegen ---
-// ========================
+#ifdef UTL_PROFILER_USE_SMALL_IDS
+using id_type = std::uint16_t;
+#else
+using id_type = std::uint32_t;
+#endif
 
-#define _utl_profiler_concat_tokens(a, b) a##b
-#define _utl_profiler_concat_tokens_wrapper(a, b) _utl_profiler_concat_tokens(a, b)
-#define _utl_profiler_add_uuid(varname_) _utl_profiler_concat_tokens_wrapper(varname_, __LINE__)
-// This macro creates token 'varname_##__LINE__' from 'varname_'.
-//
-// The reason we can't just write it as is, is that function-macros only expands their macro-arguments
-// if neither the stringizing operator # nor the token-pasting operator ## are applied to the arguments
-// inside the macro body.
-//
-// Which means in a simple 'varname_##__LINE__' macro '__LINE__' doesn't expand to it's value.
-//
-// We can get around this fact by introducing indirection,
-// '__LINE__' gets expanded in '_utl_profiler_concat_tokens_wrapper()'
-// and then tokenized and concatenated in '_utl_profiler_concat_tokens()'
+enum class CallsiteId : id_type { empty = id_type(-1) };
+enum class NodeId : id_type { root = 0, empty = id_type(-1) };
 
-// --- Scope profiling ---
-// -----------------------
+struct CallsiteInfo {
+    const char* file;
+    const char* func;
+    const char* label;
+    int         line;
+    // 'file', 'func', 'label' are guaranteed to be string literals, since we want to
+    // have as little overhead as possible during runtime, we can just save raw pointers
+    // and convert them to nicer types like 'std::string_view' later in the formatting stage
+};
 
-#define UTL_PROFILER(label_)                                                                                           \
-    constexpr bool _utl_profiler_add_uuid(utl_profiler_macro_guard_) = true;                                           \
-                                                                                                                       \
-    static_assert(_utl_profiler_add_uuid(utl_profiler_macro_guard_), "UTL_PROFILE is a multi-line macro.");            \
-                                                                                                                       \
-    static utl::profiler::_record_manager _utl_profiler_add_uuid(utl_profiler_record_manager_)(__FILE__, __LINE__,     \
-                                                                                               __func__, label_);      \
-                                                                                                                       \
-    if constexpr (const utl::profiler::_scope_timer _utl_profiler_add_uuid(utl_profiler_scope_timer_){                 \
-                      &_utl_profiler_add_uuid(utl_profiler_record_manager_)})
-// Note 1:
-//
-//    constexpr bool ... = true;
-//    static_assert(..., "UTL_PROFILE is a multi-line macro.");
-//
-// is reponsible for preventing accidental errors caused by using macro like this:
-//
-//    for (...) UTL_PROFILER("") function(); // will only loop the first line of the multi-line macro
-//
-// If someone tries to write it like this, the constexpr bool variable will be "pulled" into a narrower scope,
-// causing 'static_assert()' to fail due to using undeclared identifier. Since the line with undeclared identifier
-// gets expanded, the user will be able to see the assert message.
-//
-// Note 2:
-//
-// By separating "record management" into a static variable and "actual timing" into a non-static one,
-// we can avoid additional overhead from having to locate the record, corresponding to the profiled source location.
-// (an operation that requires a non-trivial vector/map lookup with string comparisons)
-//
-// Static variable initializes its record once and timer does the bare minimum of work - 2 calls to 'now()' to get
-// timing, one addition to accumulated time and a check for recursion (so it can skip time appropriately).
-//
-//  Note 3:
-//
-// _utl_profiler_add_uuid(...) ensures no identifier collisions when several profilers exist in a single scope.
-// Since in this context 'uuid' is a line number, the only case in which ids can collide is when multiple profilers
-// are declated on the same line, which I assume no sane person would do. And even if they would, that would simply
-// lead to a compiler error. Can't really do better than that without resorting to non-standard macros like
-// '__COUNTER__' for 'uuid' creation
+// ==================
+// --- Formatting ---
+// ==================
 
-#define UTL_PROFILER_EXCLUSIVE(label_)                                                                                 \
-    constexpr bool _utl_profiler_add_uuid(utl_profiler_macro_guard_) = true;                                           \
-                                                                                                                       \
-    static_assert(_utl_profiler_add_uuid(utl_profiler_macro_guard_), "UTL_PROFILER_EXCLUSIVE is a multi-line macro."); \
-                                                                                                                       \
-    static utl::profiler::_record_manager _utl_profiler_add_uuid(utl_profiler_record_manager_)(__FILE__, __LINE__,     \
-                                                                                               __func__, label_);      \
-                                                                                                                       \
-    if constexpr (const utl::profiler::_exclusive_scope_timer _utl_profiler_add_uuid(utl_profiler_scope_timer_){       \
-                      &_utl_profiler_add_uuid(utl_profiler_record_manager_)})
-// Note:
-//
-// Exact same thing as a regular UTL_PROFILER() but uses '_exclusive_scope_timer' instead.
-// The reason we need this for recursion is nicely explained in the docs.
+struct Style {
+    std::size_t indent = 2;
+    bool        color  = true;
 
-// --- Segment profiling ---
-// -------------------------
+    double cutoff_red    = 0.40; // > 40% of total runtime
+    double cutoff_yellow = 0.20; // > 20% of total runtime
+    double cutoff_gray   = 0.01; // <  1% of total runtime
+};
 
-#define UTL_PROFILER_BEGIN(segment_label_, label_)                                                                     \
-    static utl::profiler::_record_manager utl_profiler_record_manager_##segment_label_(__FILE__, __LINE__, __func__,   \
-                                                                                       label_);                        \
-    utl::profiler::_segment_timer         utl_profiler_segment_timer_##segment_label_(                                 \
-        &utl_profiler_record_manager_##segment_label_)
+namespace color {
 
-#define UTL_PROFILER_END(segment_label_) utl_profiler_segment_timer_##segment_label_.finish()
-// Note 1:
-//
-// Last semicolon is intentiomally skipped so macro requires it at the end and
-// doesn't mess up auto code formatters that have a dislike for statement macros.
-//
-// Note 2:
-//
-// The idea here exactly the same as with scope profiles, except instead of '_scope_timer' we use '_segment_timer'
-// that records time on a '.finish()' call instead of destructor. We can put this call inside the END macro
-// and have a nice 2-macro API for profiling segments without creating a scope.
+constexpr std::string_view red          = "\033[31m";   // call graph rows that take very significant time
+constexpr std::string_view yellow       = "\033[33m";   // call graph rows that take significant time
+constexpr std::string_view gray         = "\033[90m";   // call graph rows that take very little time
+constexpr std::string_view bold_cyan    = "\033[36;1m"; // call graph headings
+constexpr std::string_view bold_green   = "\033[32;1m"; // joined  threads
+constexpr std::string_view bold_magenta = "\033[35;1m"; // running threads
+constexpr std::string_view bold_blue    = "\033[34;1m"; // thread runtime
 
-#define UTL_PROFILER_EXCLUSIVE_BEGIN(segment_label_, label_)                                                           \
-    static utl::profiler::_record_manager   utl_profiler_record_manager_##segment_label_(__FILE__, __LINE__, __func__, \
-                                                                                         label_);                      \
-    utl::profiler::_exclusive_segment_timer utl_profiler_segment_timer_##segment_label_(                               \
-        &utl_profiler_record_manager_##segment_label_)
+constexpr std::string_view reset = "\033[0m";
 
-#define UTL_PROFILER_EXCLUSIVE_END(segment_label_) utl_profiler_segment_timer_##segment_label_.finish()
+} // namespace color
+
+struct FormattedRow {
+    CallsiteInfo callsite;
+    duration     time;
+    std::size_t  depth;
+    double       percentage;
+};
+
+// =================================
+// --- Call graph core structure ---
+// =================================
+
+class NodeMatrix {
+    template <class T>
+    using array_type = std::vector<T>;
+    // Note: Using 'std::unique_ptr<T[]> arrays would shave off 64 bytes from 'sizeof(NodeMatrix)',
+    //       but it's cumbersome and not particularly important for performance
+
+    constexpr static std::size_t col_growth_mul = 2;
+    constexpr static std::size_t row_growth_add = 4;
+    // - rows capacity grows additively in fixed increments
+    // - cols capacity grows multiplicatively
+    // this unusual growth strategy is due to our anticipated growth pattern - callsites are few, every
+    // one needs to be manually created by the user, nodes can quickly grow in number due to recursion
+
+    array_type<NodeId> prev_ids;
+    // [ nodes ] dense vector encoding backwards-traversal of a call graph
+    // 'prev_ids[node_id]' -> id of the previous node in the call graph for 'node_id'
+
+    array_type<NodeId> next_ids;
+    // [ callsites x nodes ] dense matrix encoding forward-traversal of a call graph
+    // 'next_ids(callsite_id, node_id)' -> id of the next node in the call graph for 'node_id' at 'callsite_id',
+    //                                     storage is col-major due to our access pattern
+
+    // Note: Both 'prev_ids' and 'next_ids' will contain 'NodeId::empty' values at positions with no link
+
+    array_type<duration> times;
+    // [ nodes ] dense vector containing time spent at each node of the call graph
+    // 'times[node_id]' -> total time spent at 'node_id'
+
+    array_type<CallsiteInfo> callsites;
+    // [ callsites ] dense vector containing info about the callsites
+    // 'callsites[callsite_id]' -> pointers to file/function/label & line
+
+    std::size_t rows_size     = 0;
+    std::size_t cols_size     = 0;
+    std::size_t rows_capacity = 0;
+    std::size_t cols_capacity = 0;
+
+public:
+    std::size_t rows() const noexcept { return this->rows_size; }
+    std::size_t cols() const noexcept { return this->cols_size; }
+
+    bool empty() const noexcept { return this->rows() == 0 || this->cols() == 0; }
+
+    // - Access (mutable) -
+
+    NodeId& prev_id(NodeId node_id) {
+        assert(to_int(node_id) < this->cols());
+        return this->prev_ids[to_int(node_id)];
+    }
+
+    NodeId& next_id(CallsiteId callsite_id, NodeId node_id) {
+        assert(to_int(callsite_id) < this->rows());
+        assert(to_int(node_id) < this->cols());
+        return this->next_ids[to_int(callsite_id) + to_int(node_id) * this->rows_capacity];
+    }
+
+    duration& time(NodeId node_id) {
+        assert(to_int(node_id) < this->cols());
+        return this->times[to_int(node_id)];
+    }
+
+    CallsiteInfo& callsite(CallsiteId callsite_id) {
+        assert(to_int(callsite_id) < this->rows());
+        return this->callsites[to_int(callsite_id)];
+    }
+
+    // - Access (const) -
+
+    const NodeId& prev_id(NodeId node_id) const {
+        assert(to_int(node_id) < this->cols());
+        return this->prev_ids[to_int(node_id)];
+    }
+
+    const NodeId& next_id(CallsiteId callsite_id, NodeId node_id) const {
+        assert(to_int(callsite_id) < this->rows());
+        assert(to_int(node_id) < this->cols());
+        return this->next_ids[to_int(callsite_id) + to_int(node_id) * this->rows_capacity];
+    }
+
+    const duration& time(NodeId node_id) const {
+        assert(to_int(node_id) < this->cols());
+        return this->times[to_int(node_id)];
+    }
+
+    const CallsiteInfo& callsite(CallsiteId callsite_id) const {
+        assert(to_int(callsite_id) < this->rows());
+        return this->callsites[to_int(callsite_id)];
+    }
+
+    // - Resizing -
+
+    void resize(std::size_t new_rows, std::size_t new_cols) {
+        const bool new_rows_over_capacity = new_rows > this->rows_capacity;
+        const bool new_cols_over_capacity = new_cols > this->cols_capacity;
+        const bool requires_reallocation  = new_rows_over_capacity || new_cols_over_capacity;
+
+        // No reallocation case
+        if (!requires_reallocation) {
+            this->rows_size = new_rows;
+            this->cols_size = new_cols;
+            return;
+        }
+
+        // Reallocate
+        const std::size_t new_rows_capacity =
+            new_rows_over_capacity ? new_rows + NodeMatrix::row_growth_add : this->rows_capacity;
+        const std::size_t new_cols_capacity =
+            new_cols_over_capacity ? new_cols * NodeMatrix::col_growth_mul : this->cols_capacity;
+
+        array_type<NodeId>       new_prev_ids(new_cols_capacity, NodeId::empty);
+        array_type<NodeId>       new_next_ids(new_rows_capacity * new_cols_capacity, NodeId::empty);
+        array_type<duration>     new_times(new_cols_capacity, duration{});
+        array_type<CallsiteInfo> new_callsites(new_rows_capacity, CallsiteInfo{});
+
+        // Copy old data
+        for (std::size_t j = 0; j < this->cols_size; ++j) new_prev_ids[j] = this->prev_ids[j];
+        for (std::size_t j = 0; j < this->cols_size; ++j)
+            for (std::size_t i = 0; i < this->rows_size; ++i)
+                new_next_ids[i + j * new_rows_capacity] = this->next_ids[i + j * this->rows_capacity];
+        for (std::size_t j = 0; j < this->cols_size; ++j) new_times[j] = this->times[j];
+        for (std::size_t i = 0; i < this->rows_size; ++i) new_callsites[i] = this->callsites[i];
+
+        // Assign new data
+        this->prev_ids  = std::move(new_prev_ids);
+        this->next_ids  = std::move(new_next_ids);
+        this->times     = std::move(new_times);
+        this->callsites = std::move(new_callsites);
+
+        this->rows_size     = new_rows;
+        this->cols_size     = new_cols;
+        this->rows_capacity = new_rows_capacity;
+        this->cols_capacity = new_cols_capacity;
+    }
+
+    void grow_callsites() { this->resize(this->rows_size + 1, this->cols_size); }
+
+    void grow_nodes() { this->resize(this->rows_size, this->cols_size + 1); }
+
+    template <class Func, std::enable_if_t<std::is_invocable_v<Func, CallsiteId, NodeId, std::size_t>, bool> = true>
+    void node_apply_recursively(CallsiteId callsite_id, NodeId node_id, Func func, std::size_t depth) const {
+        func(callsite_id, node_id, depth);
+
+        for (std::size_t i = 0; i < this->rows(); ++i) {
+            const CallsiteId next_callsite_id = CallsiteId(i);
+            const NodeId     next_node_id     = this->next_id(next_callsite_id, node_id);
+            if (next_node_id != NodeId::empty)
+                this->node_apply_recursively(next_callsite_id, next_node_id, func, depth + 1);
+        }
+        // 'node_is' corresponds to a matrix column, to iterate over all
+        // "next" nodes we iterate rows (callsites) in a column
+    }
+
+    template <class Func, std::enable_if_t<std::is_invocable_v<Func, CallsiteId, NodeId, std::size_t>, bool> = true>
+    void root_apply_recursively(Func func) const {
+        if (!this->rows_size || !this->cols_size) return; // possibly redundant
+
+        func(CallsiteId::empty, NodeId::root, 0);
+
+        for (std::size_t i = 0; i < this->rows(); ++i) {
+            const CallsiteId next_callsite_id = CallsiteId(i);
+            const NodeId     next_node_id     = this->next_id(next_callsite_id, NodeId::root);
+            if (next_node_id != NodeId::empty) this->node_apply_recursively(next_callsite_id, next_node_id, func, 1);
+        }
+    }
+};
+
+// ================
+// --- Profiler ---
+// ================
+
+struct ThreadLifetimeData {
+    NodeMatrix mat;
+    bool       joined = false;
+};
+
+struct ThreadIdData {
+    std::vector<ThreadLifetimeData> lifetimes;
+    std::size_t                     readable_id;
+    // since we need a map from 'std::thread::id' to both lifetimes and human-readable id mappings,
+    // and those maps would be accessed at the same time, it makes sense to instead avoid a second
+    // map lookup and merge both values into a single struct
+};
+
+class Profiler {
+    // header-inline, only one instance exists, this instance is effectively a persistent
+    // "database" responsible for collecting & formatting results
+
+    using call_graph_storage = std::unordered_map<std::thread::id, ThreadIdData>;
+    // thread ID by itself is not enough to identify a distinct thread with a finite lifetime, OS only guarantees
+    // unique thread ids for currently existing threads, new threads may reuse IDs of the old joined threads,
+    // this is why for every thread ID we store a vector - this vector grows every time a new thread with a given
+    // id is created
+
+    friend struct ThreadCallGraph;
+
+    call_graph_storage call_graph_info;
+    std::mutex         call_graph_mutex;
+
+    std::thread::id main_thread_id = std::this_thread::get_id();
+    std::size_t     thread_counter = 0;
+
+    bool       print_at_destruction = true;
+    std::mutex setter_mutex;
+
+    bool results_are_empty() {
+        // A check used to deduce whether we have any meaningful results to automatically print after exit,
+        // all threads joined, yet none of them contain any profiling records <=> no profiling was ever invoked
+        for (const auto& [thread_id, thread_lifetimes] : this->call_graph_info)
+            for (const auto& lifetime : thread_lifetimes.lifetimes)
+                if (lifetime.joined == false || !lifetime.mat.empty()) return false;
+
+        return true;
+    }
+
+    std::string format_available_results(const Style& style = Style{}) {
+        const std::lock_guard lock(this->call_graph_mutex);
+
+        std::vector<FormattedRow> rows;
+        std::string               res;
+
+        // Format header
+        if (style.color) res += color::bold_cyan;
+        append_fold(res, "\n-------------------- UTL PROFILING RESULTS ---------------------\n");
+        if (style.color) res += color::reset;
+
+        for (const auto& [thread_id, thread_lifetimes] : this->call_graph_info) {
+            for (std::size_t reuse = 0; reuse < thread_lifetimes.lifetimes.size(); ++reuse) {
+                const auto&       mat         = thread_lifetimes.lifetimes[reuse].mat;
+                const bool        joined      = thread_lifetimes.lifetimes[reuse].joined;
+                const std::size_t readable_id = thread_lifetimes.readable_id;
+
+                rows.clear();
+                rows.reserve(mat.cols());
+
+                const std::string thread_str      = (readable_id == 0) ? "main" : std::to_string(readable_id);
+                const bool        thread_uploaded = !mat.empty();
+
+                // Format thread header
+                if (style.color) res += color::bold_cyan;
+                append_fold(res, "\n# Thread [", thread_str, "] (reuse ", std::to_string(reuse), ")");
+                if (style.color) res += color::reset;
+
+                // Format thread status
+                if (style.color) res += joined ? color::bold_green : color::bold_magenta;
+                append_fold(res, joined ? " (joined)" : " (running)");
+                if (style.color) res += color::reset;
+
+                // Early escape for lifetimes that haven't uploaded yet
+                if (!thread_uploaded) {
+                    append_fold(res, '\n');
+                    continue;
+                }
+
+                // Format thread runtime
+                const ms   runtime     = mat.time(NodeId::root);
+                const auto runtime_str = format_number(runtime.count(), std::chars_format::fixed, 2);
+
+                if (style.color) res += color::bold_blue;
+                append_fold(res, " (runtime -> ", runtime_str, " ms)\n");
+                if (style.color) res += color::reset;
+
+                // Gather call graph data in a digestible format
+                mat.root_apply_recursively([&](CallsiteId callsite_id, NodeId node_id, std::size_t depth) {
+                    if (callsite_id == CallsiteId::empty) return;
+
+                    const auto&  callsite   = mat.callsite(callsite_id);
+                    const auto&  time       = mat.time(node_id);
+                    const double percentage = time / runtime;
+
+                    rows.push_back(FormattedRow{callsite, time, depth, percentage});
+                });
+
+                // Format call graph columns row by row
+                std::vector<std::array<std::string, 4>> rows_str;
+                rows_str.reserve(rows.size());
+
+                for (const auto& row : rows) {
+                    const auto percentage_num_str = format_number(row.percentage * 100, std::chars_format::fixed, 2);
+
+                    auto percentage_str = std::string(style.indent * row.depth, ' ');
+                    append_fold(percentage_str, " - ", percentage_num_str, "% ");
+
+                    auto time_str     = format_number(ms(row.time).count(), std::chars_format::fixed, 2) + " ms";
+                    auto label_str    = std::string(row.callsite.label);
+                    auto callsite_str = format_call_site(row.callsite.file, row.callsite.line, row.callsite.func);
+
+                    rows_str.push_back({std::move(percentage_str), std::move(time_str), std::move(label_str),
+                                        std::move(callsite_str)});
+                }
+
+                // Gather column widths for alignment
+                std::size_t width_percentage = 0, width_time = 0, width_label = 0, width_callsite = 0;
+                for (const auto& row : rows_str) {
+                    width_percentage = max(width_percentage, row[0].size());
+                    width_time       = max(width_time, row[1].size());
+                    width_label      = max(width_label, row[2].size());
+                    width_callsite   = max(width_callsite, row[3].size());
+                }
+
+                assert(rows.size() == rows_str.size());
+
+                // Format resulting string with colors & alignment
+                for (std::size_t i = 0; i < rows.size(); ++i) {
+                    const bool color_row_red     = style.color && rows[i].percentage > style.cutoff_red;
+                    const bool color_row_yellow  = style.color && rows[i].percentage > style.cutoff_yellow;
+                    const bool color_row_gray    = style.color && rows[i].percentage < style.cutoff_gray;
+                    const bool color_was_applied = color_row_red || color_row_yellow || color_row_gray;
+
+                    if (color_row_red) res += color::red;
+                    else if (color_row_yellow) res += color::yellow;
+                    else if (color_row_gray) res += color::gray;
+
+                    append_aligned_left(res, rows_str[i][0], width_percentage, '-');
+                    append_fold(res, " | ");
+                    append_aligned_right(res, rows_str[i][1], width_time);
+                    append_fold(res, " | ");
+                    append_aligned_right(res, rows_str[i][2], width_label);
+                    append_fold(res, " | ");
+                    append_aligned_left(res, rows_str[i][3], width_callsite);
+                    append_fold(res, " |");
+
+                    if (color_was_applied) res += color::reset;
+
+                    res += '\n';
+                }
+            }
+        }
+
+        return res;
+    }
+
+    void call_graph_add(std::thread::id thread_id) {
+        const std::lock_guard lock(this->call_graph_mutex);
+
+        const auto [it, emplaced] = this->call_graph_info.try_emplace(thread_id);
+
+        // Emplacement took place =>
+        // This is the first time inserting this thread id, add human-readable mapping that grows by 1 for each new
+        // thread, additional checks are here to ensure that main thread is always '0' and other threads are always
+        // '1+' even if main thread wasn't the first one to register a profiler. This is important because formatting
+        // prints zero-thread as '[main]' and we don't want this title to go to some other thread
+        if (emplaced) it->second.readable_id = (thread_id == this->main_thread_id) ? 0 : ++this->thread_counter;
+
+        // Add a default-constructed call graph matrix to lifetimes,
+        // - if this thread ID was emplaced      then this is a non-reused thread ID
+        // - if this thread ID was already there then this is a     reused thread ID
+        // regardless, our actions are the same
+        it->second.lifetimes.emplace_back();
+    }
+
+    void call_graph_upload(std::thread::id thread_id, NodeMatrix&& info, bool joined) {
+        const std::lock_guard lock(this->call_graph_mutex);
+
+        auto& lifetime  = this->call_graph_info.at(thread_id).lifetimes.back();
+        lifetime.mat    = std::move(info);
+        lifetime.joined = joined;
+    }
+
+public:
+    void upload_this_thread(); // depends on the 'ThreadCallGraph', defined later
+
+    void print_at_exit(bool value) noexcept {
+        const std::lock_guard lock(this->setter_mutex);
+        // useless most of the time, but allows public API to be completely thread-safe
+
+        this->print_at_destruction = value;
+    }
+
+    std::string format_results(const Style& style = Style{}) {
+        this->upload_this_thread();
+        // Call graph from current thread is not yet uploaded by its 'thread_local' destructor, we need to
+        // explicitly pull it which we can easily do since current thread can't contest its own resources
+
+        return this->format_available_results(style);
+    }
+
+    ~Profiler() {
+        if (!this->print_at_destruction) return; // printing was manually disabled
+        if (this->results_are_empty()) return;   // no profiling was ever invoked
+        std::cout << format_available_results();
+    }
+};
+
+inline Profiler profiler;
+
+// =========================
+// --- Thread Call Graph ---
+// =========================
+
+struct ThreadCallGraph {
+    // header-inline-thread_local, gets created whenever we create a new thread anywhere,
+    // this class is responsible for managing some thread-specific things on top of our
+    // core graph traversal structure and provides an actual high-level API for graph traversal
+
+    NodeMatrix      mat;
+    NodeId          current_node_id  = NodeId::empty;
+    time_point      entry_time_point = clock::now();
+    std::thread::id thread_id        = std::this_thread::get_id();
+
+    NodeId create_root_node() {
+        const NodeId prev_node_id = this->current_node_id;
+        this->current_node_id     = NodeId::root; // advance to a new node
+
+        this->mat.grow_nodes();
+        this->mat.prev_id(this->current_node_id) = prev_node_id;
+        // link new node backwards, since this is a root the prev. one is empty and doesn't need to link forwards
+
+        return this->current_node_id;
+    }
+
+    NodeId create_node(CallsiteId callsite_id) {
+        const NodeId prev_node_id = this->current_node_id;
+        this->current_node_id     = NodeId(this->mat.cols()); // advance to a new node
+
+        this->mat.grow_nodes();
+        this->mat.prev_id(this->current_node_id)     = prev_node_id;          // link new node backwards
+        this->mat.next_id(callsite_id, prev_node_id) = this->current_node_id; // link prev. node forwards
+
+        return this->current_node_id;
+    }
+
+    void upload_results(bool joined) {
+        this->mat.time(NodeId::root) = clock::now() - this->entry_time_point;
+        // root node doesn't get time updates from timers, we need to collect total runtime manually
+
+        profiler.call_graph_upload(this->thread_id, NodeMatrix(this->mat), joined); // deep copy & mutex lock, slow
+    }
+
+public:
+    ThreadCallGraph() {
+        profiler.call_graph_add(this->thread_id);
+
+        this->create_root_node();
+    }
+
+    ~ThreadCallGraph() { this->upload_results(true); }
+
+    NodeId traverse_forward(CallsiteId callsite_id) {
+        const NodeId next_node_id = this->mat.next_id(callsite_id, this->current_node_id);
+        // 1 dense matrix lookup to advance the node forward, 1 branch to check its existence
+        // 'callsite_id' is always valid due to callsite & timer initialization order
+
+        // - node missing  => create new node and return its id
+        if (next_node_id == NodeId::empty) return this->create_node(callsite_id);
+
+        // - node exists   =>  return existing id
+        return this->current_node_id = next_node_id;
+    }
+
+    void traverse_back() { this->current_node_id = this->mat.prev_id(this->current_node_id); }
+
+    void record_time(duration time) { this->mat.time(this->current_node_id) += time; }
+
+    CallsiteId callsite_add(const CallsiteInfo& info) { // adds new callsite & returns its id
+        const CallsiteId new_callsite_id = CallsiteId(this->mat.rows());
+
+        this->mat.grow_callsites();
+        this->mat.callsite(new_callsite_id) = info;
+
+        return new_callsite_id;
+    }
+};
+
+inline thread_local ThreadCallGraph thread_call_graph;
+
+inline void Profiler::upload_this_thread() { thread_call_graph.upload_results(false); }
+
+// =======================
+// --- Callsite Marker ---
+// =======================
+
+struct Callsite {
+    // local-thread_local, small marker binding a numeric ID to a callsite
+
+    CallsiteId callsite_id;
+
+public:
+    Callsite(const CallsiteInfo& info) { this->callsite_id = thread_call_graph.callsite_add(info); }
+
+    CallsiteId get_id() const noexcept { return this->callsite_id; }
+};
+
+// =============
+// --- Timer ---
+// =============
+
+class Timer {
+    time_point entry = clock::now();
+
+public:
+    Timer(CallsiteId callsite_id) { thread_call_graph.traverse_forward(callsite_id); }
+
+    void finish() const {
+        thread_call_graph.record_time(clock::now() - this->entry);
+        thread_call_graph.traverse_back();
+    }
+};
+
+struct ScopeTimer : public Timer { // just like regular timer, but finishes at the end of the scope
+    ScopeTimer(CallsiteId callsite_id) : Timer(callsite_id) {}
+
+    constexpr operator bool() const noexcept { return true; }
+    // allows us to use create scope timers inside 'if constexpr' & have applies-to-next-expression semantics for macro
+
+    ~ScopeTimer() { this->finish(); }
+};
+
+} // namespace utl::profiler::impl
+
+// =====================
+// --- Helper macros ---
+// =====================
+
+#define utl_profiler_concat_tokens(a, b) a##b
+#define utl_profiler_concat_tokens_wrapper(a, b) utl_profiler_concat_tokens(a, b)
+#define utl_profiler_uuid(varname_) utl_profiler_concat_tokens_wrapper(varname_, __LINE__)
+// creates token 'varname_##__LINE__' from 'varname_', necessary
+// to work around some macro expansion order shenanigans
+
+// ______________________ PUBLIC API ______________________
+
+// ==========================================
+// --- Definitions with profiling enabled ---
+// ==========================================
+
+namespace utl::profiler {
+
+using impl::Profiler;
+using impl::profiler;
+using impl::Style;
 
 } // namespace utl::profiler
 
+#define UTL_PROFILER_SCOPE(label_)                                                                                     \
+    constexpr bool utl_profiler_uuid(utl_profiler_macro_guard_) = true;                                                \
+    static_assert(utl_profiler_uuid(utl_profiler_macro_guard_), "UTL_PROFILER is a multi-line macro.");                \
+                                                                                                                       \
+    const thread_local utl::profiler::impl::Callsite utl_profiler_uuid(utl_profiler_callsite_)(                        \
+        utl::profiler::impl::CallsiteInfo{__FILE__, __func__, label_, __LINE__});                                      \
+                                                                                                                       \
+    const utl::profiler::impl::ScopeTimer utl_profiler_uuid(utl_profiler_scope_timer_) {                               \
+        utl_profiler_uuid(utl_profiler_callsite_).get_id()                                                             \
+    }
+
+// all variable names are concatenated with a line number to prevent shadowing when then there are multiple nested
+// profilers, this isn't a 100% foolproof solution, but it works reasonably well. Shadowed variables don't have any
+// effect on functionality, but might cause warnings from some static analysis tools
+//
+// 'constexpr bool' and 'static_assert()' are here to improve error messages when this macro is misused as an
+// expression, when someone writes 'if (...) UTL_PROFILER_SCOPE(...) func()' instead of many ugly errors they
+// will see a macro expansion that contains a 'static_assert()' with a proper message
+
+#define UTL_PROFILER(label_)                                                                                           \
+    constexpr bool utl_profiler_uuid(utl_profiler_macro_guard_) = true;                                                \
+    static_assert(utl_profiler_uuid(utl_profiler_macro_guard_), "UTL_PROFILER is a multi-line macro.");                \
+                                                                                                                       \
+    const thread_local utl::profiler::impl::Callsite utl_profiler_uuid(utl_profiler_callsite_)(                        \
+        utl::profiler::impl::CallsiteInfo{__FILE__, __func__, label_, __LINE__});                                      \
+                                                                                                                       \
+    if constexpr (const utl::profiler::impl::ScopeTimer utl_profiler_uuid(utl_profiler_scope_timer_){                  \
+                      utl_profiler_uuid(utl_profiler_callsite_).get_id()})
+
+// 'if constexpr (timer)' allows this macro to "capture" the scope of the following expression
+
+#define UTL_PROFILER_BEGIN(segment_, label_)                                                                           \
+    const thread_local utl::profiler::impl::Callsite utl_profiler_callsite_##segment_(                                 \
+        utl::profiler::impl::CallsiteInfo{__FILE__, __func__, label_, __LINE__});                                      \
+                                                                                                                       \
+    const utl::profiler::impl::Timer utl_profiler_timer_##segment_ { utl_profiler_callsite_##segment_.get_id() }
+
+#define UTL_PROFILER_END(segment_) utl_profiler_timer_##segment_.finish()
+
+// ===========================================
+// --- Definitions with profiling disabled ---
+// ===========================================
+
+// No-op mocks of the public API and minimal necessary includes
+
+#else
+
+#include <cstddef> // size_t
+#include <string>  // string
+
+namespace utl::profiler {
+struct Style {
+    std::size_t indent = 2;
+    bool        color  = true;
+
+    double cutoff_red    = 0.40;
+    double cutoff_yellow = 0.20;
+    double cutoff_gray   = 0.01;
+};
+
+struct Profiler {
+    void print_at_exit(bool) noexcept {}
+
+    void upload_this_thread() {}
+
+    std::string format_results(const Style = Style{}) { return "<profiling is disabled>"; }
+};
+} // namespace utl::profiler
+
+#define UTL_PROFILER_SCOPE(label_) static_assert(true)
+#define UTL_PROFILER(label_)
+#define UTL_PROFILER_BEGIN(segment_, label_) static_assert(true)
+#define UTL_PROFILER_END(segment_) static_assert(true)
+
+// 'static_assert(true)' emulates the "semicolon after the macro" requirement
+
 #endif
-#endif // macro-module UTL_PROFILER
+
+#endif
+#endif // module utl::profiler

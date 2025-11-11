@@ -1,112 +1,463 @@
+[<img src ="images/badge_language_cpp_17.svg">](https://en.cppreference.com/w/cpp/17.html)
+[<img src ="images/badge_license_mit.svg">](LICENSE.md)
+[<img src ="images/badge_semver.svg">](guide_versioning.md)
+[<img src ="images/badge_docs.svg">](https://dmitribogdanov.github.io/UTL/)
+[<img src ="images/badge_header_only.svg">](https://en.wikipedia.org/wiki/Header-only)
+[<img src ="images/badge_no_dependencies.svg">](https://github.com/DmitriBogdanov/UTL/tree/master/include/UTL)
+
+[<img src ="images/badge_workflow_windows.svg">](https://github.com/DmitriBogdanov/UTL/actions/workflows/windows.yml)
+[<img src ="images/badge_workflow_ubuntu.svg">](https://github.com/DmitriBogdanov/UTL/actions/workflows/ubuntu.yml)
+[<img src ="images/badge_workflow_macos.svg">](https://github.com/DmitriBogdanov/UTL/actions/workflows/macos.yml)
+[<img src ="images/badge_workflow_freebsd.svg">](https://github.com/DmitriBogdanov/UTL/actions/workflows/freebsd.yml)
+
 # utl::table
 
 [<- to README.md](..)
 
 [<- to implementation.hpp](../include/UTL/table.hpp)
 
-**table** implements LaTeX-like table drawing methods. Useful in benchmarks and prototyping of algorithms to represent results as a table.
+**utl::table** is a small header for exporting data to various tabular formats, it supports:
+
+- ASCII
+- [Markdown](https://en.wikipedia.org/wiki/Markdown)
+- [LaTeX](https://en.wikipedia.org/wiki/LaTeX)
+- [Mathematica](https://en.wikipedia.org/wiki/Wolfram_(software))
+- [CSV](https://en.wikipedia.org/wiki/Comma-separated_values)
+
+Useful numerical work with visualization and reports. Main design goals:
+
+- Concise API
+- Good performance
+- Locale-independent
+
+Below is a quick usage showcase:
+
+| Code                                        | Formats to                                    |
+| ------------------------------------------- | --------------------------------------------- |
+| ![Image](images/table_code_ascii.png)       | ![Image](images/table_output_ascii.png)       |
+| ![Image](images/table_code_markdown.png)    | ![Image](images/table_output_markdown.png)    |
+| ![Image](images/table_code_latex.png)       | ![Image](images/table_output_latex.png)       |
+| ![Image](images/table_code_mathematica.png) | ![Image](images/table_output_mathematica.png) |
+| ![Image](images/table_code_csv.png)         | ![Image](images/table_output_csv.png)         |
 
 ## Definitions
 
 ```cpp
-// Table setup
-void create(std::initializer_list<_uint> &&widths);
+// Table formats
+struct ASCII {
+    explicit ASCII(std::size_t cols);
+    
+    template <class... T>
+    void cell(T&&... args);
+    
+    void hline();
+    
+    std::string format() const;
+};
 
-// (optional)
-void set_formats(std::initializer_list<ColumnFormat> &&formats);
-void set_ostream(std::ostream &new_ostream);
+struct Markdown {
+    explicit Markdown(std::vector<std::string> title);
+    
+    template <class... T>
+    void cell(T&&... args);
+    
+    std::string format();
+};
 
-// Drawing
-template<typename T, typename... Types>
-void cell(T value, const Types... other_values); // draw cells with values
+struct LaTeX {
+    explicit LaTeX(std::size_t cols);
+    
+    template <class... T>
+    void cell(T&&... args);
+    
+    void hline();
+    
+    std::string format();
+};
 
-void hline(); // draw horizontal line
+struct Mathematica {
+    explicit Mathematica(std::size_t cols);
+    
+    template <class... T>
+    void cell(T&&... args);
+    
+    void hline();
+    
+    std::string format();
+};
 
-// Format flags
-ColumnFormat NONE;                          // default
-ColumnFormat FIXED(uint decimals = 3);      // fixed      floats with given precision
-ColumnFormat DEFAULT(uint decimals = 6);    // default    floats with given precision
-ColumnFormat SCIENTIFIC(uint decimals = 3); // scientific floats with given precision
-ColumnFormat BOOL;                          // bools as text
+struct CSV {
+    explicit CSV(std::size_t cols) : matrix(cols);
+    
+    template <class... T>
+    void cell(T&&... args);
+    
+    std::string format();
+};
+
+// Number formatting
+template <class T>
+struct Number {
+    constexpr explicit Number(
+        T                 value,
+        std::chars_format format    = std::chars_format::general,
+        int               precision = 3
+    ) noexcept;
+};
 ```
 
 ## Methods
 
-### Table setup
+### Table formats: ASCII
 
 > ```cpp
-> table::create(std::initializer_list<_uint> &&widths);
+> explicit ASCII(std::size_t cols);
 > ```
 
-Sets up table with given column widths. Similar to LaTeX `|c{1cm}|c{1cm}|c{1cm}|` syntax.
+Constructs **ASCII** table with `cols` columns.
 
 > ```cpp
-> table::set_formats(std::initializer_list<ColumnFormat> &&formats);
+> template <class... T>
+> void cell(T&&... args);
 > ```
 
-Sets up column [std::ios](https://en.cppreference.com/w/cpp/io/ios_base/flags) flags. Mainly used with build-in `table::` flags to change float formatting.
+Adds one or several cells to the table with `args` as their contents.
+
+`T` can be an instance of any numeric, boolean, or string-convertible type.
+
+**Note:** The table will automatically escape any control chars in the string (such as `\r`, `\n` and etc.) so it can be properly rendered in the terminal.
 
 > ```cpp
-> table::set_ostream(std::ostream &new_ostream);
+> void hline();
 > ```
 
-Redirects output to given `std::ostream`. By default `std::cout` is used.
-
-### Drawing
+Adds horizontal line to the table.
 
 > ```cpp
-> table::cell(T value, const Types... other_values);
+> std::string format();
 > ```
 
-Draws cells with given values, accepts any number of arguments and can be used to draw entire rows in a single line (see examples). Similar to LaTeX `val1 & val2 & val3 \\` except line breaks are placed automatically.
+Formats table into a string.
+
+**Note:** In case last row of the table "wasn't finished", it automatically gets completed with empty cells. This behavior holds true for every format.
+
+### Table formats: Markdown
 
 > ```cpp
-> table::hline();
+> explicit Markdown(std::vector<std::string> title);
 > ```
 
-Draws a horizontal line. Similar to LaTeX `\hline`.
-
-### Format flags
+Constructs **Markdown** table with given `title`. This results in `title.size()` columns.
 
 > ```cpp
-> table::NONE;
-> table::FIXED(uint decimals = 3);
-> table::DEFAULT(uint decimals = 6);
-> table::SCIENTIFIC(uint decimals = 3);
-> table::BOOL;
+> template <class... T>
+> void cell(T&&... args);
 > ```
 
-Predefined format flags. `NONE` sets no flags. `FIXED(n)`, `DEFAULT(n)` and `SCIENTIFIC(n)` set corresponding float representations and precision `n`. `BOOL` makes bools render as `true`, `false`.
+Adds one or several cells to the table with `args` as their contents.
 
-## Examples 
+`T` can be an instance of any numeric, boolean, or string-convertible type.
 
-### Drawing a table
+**Note:** Since Markdown is implementation-defined, there are no specific restrictions imposed on the strings in the table. For example, some markdown flavors might want to export HTML cells, while other would consider such syntax to be invalid.
 
-[ [Run this code](https://godbolt.org/#g:!((g:!((g:!((h:codeEditor,i:(filename:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,selection:(endColumn:14,endLineNumber:18,positionColumn:14,positionLineNumber:18,selectionStartColumn:14,selectionStartLineNumber:18,startColumn:14,startLineNumber:18),source:'%23include+%3Chttps://raw.githubusercontent.com/DmitriBogdanov/UTL/master/single_include/UTL.hpp%3E%0A%0Aint+main()+%7B%0A++++using+namespace+utl%3B%0A%0A++++table::create(%7B+16,+16,+16,+16,+20+%7D)%3B%0A++++table::set_formats(%7B+table::NONE,+table::DEFAULT(),+table::FIXED(2),table::SCIENTIFIC(3),+table::BOOL+%7D)%3B%0A%0A++++table::hline()%3B%0A++++table::cell(%22Method%22,+%22Threads%22,+%22Speedup%22,+%22Error%22,+%22Err.+within+range%22)%3B%0A++++table::hline()%3B%0A++++table::cell(%22Gauss%22,+16,+11.845236,+1.96e-4,+false)%3B%0A++++table::cell(%22Jacobi%22,+16,+15.512512,+1.37e-5,+false)%3B%0A++++table::cell(%22Seidel%22,+16,+13.412321,+1.74e-6,+true)%3B%0A++++table::cell(%22Relaxation%22,+16,+13.926783,+1.17e-6,+true)%3B%0A++++table::hline()%3B%0A%0A++++return+0%3B%0A%7D%0A'),l:'5',n:'0',o:'C%2B%2B+source+%231',t:'0')),k:71.71783148269105,l:'4',n:'0',o:'',s:0,t:'0'),(g:!((g:!((h:compiler,i:(compiler:clang1600,filters:(b:'0',binary:'1',binaryObject:'1',commentOnly:'0',debugCalls:'1',demangle:'0',directives:'0',execute:'0',intel:'0',libraryCode:'0',trim:'1'),flagsViewOpen:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,libs:!(),options:'-std%3Dc%2B%2B17+-O2',overrides:!(),selection:(endColumn:1,endLineNumber:1,positionColumn:1,positionLineNumber:1,selectionStartColumn:1,selectionStartLineNumber:1,startColumn:1,startLineNumber:1),source:1),l:'5',n:'0',o:'+x86-64+clang+16.0.0+(Editor+%231)',t:'0')),header:(),l:'4',m:50,n:'0',o:'',s:0,t:'0'),(g:!((h:output,i:(compilerName:'x86-64+clang+16.0.0',editorid:1,fontScale:14,fontUsePx:'0',j:1,wrap:'1'),l:'5',n:'0',o:'Output+of+x86-64+clang+16.0.0+(Compiler+%231)',t:'0')),k:46.69421860597116,l:'4',m:50,n:'0',o:'',s:0,t:'0')),k:28.282168517308946,l:'3',n:'0',o:'',t:'0')),l:'2',n:'0',o:'',t:'0')),version:4) ]
+> ```cpp
+> std::string format();
+> ```
+
+Formats table into a string.
+
+### Table formats: LaTeX
+
+> ```cpp
+> explicit LaTeX(std::size_t cols);
+> ```
+
+Constructs **LaTeX** table with `cols` columns.
+
+> ```cpp
+> template <class... T>
+> void cell(T&&... args);
+> ```
+
+Adds one or several cells to the table with `args` as their contents.
+
+`T` can be an instance of any numeric, boolean, or string-convertible type.
+
+**Note 1:** To allow export of hand-written LaTeX expressions, there are no specific restrictions on imposed strings in the table.
+
+**Note 2:** Integer and floating point numbers will be formatted as proper LaTeX formulas. This includes numbers in scientific and hex notation.
+
+> ```cpp
+> void hline();
+> ```
+
+Adds horizontal line to the table.
+
+> ```cpp
+> std::string format();
+> ```
+
+Formats table into a string.
+
+### Table formats: Mathematica
+
+> ```cpp
+> explicit Mathematica(std::size_t cols);
+> ```
+
+Constructs **Mathematica** table with `cols` columns.
+
+> ```cpp
+> template <class... T>
+> void cell(T&&... args);
+> ```
+
+Adds one or several cells to the table with `args` as their contents.
+
+`T` can be an instance of any numeric, boolean, or string-convertible type.
+
+**Note 1:** Mathematica strings can include almost any Unicode character. Double-quotes in the string are automatically escaped.
+
+**Note 2:** Floating point numbers in scientific notation are formatted according to the Mathematica specification.
+
+> ```cpp
+> void hline();
+> ```
+
+Adds horizontal line to the table.
+
+> ```cpp
+> std::string format();
+> ```
+
+Formats table into a string.
+
+### Table formats: CSV
+
+> ```cpp
+> explicit CSV(std::size_t cols);
+> ```
+
+Constructs **CSV** table with `cols` columns.
+
+> ```cpp
+> template <class... T>
+> void cell(T&&... args);
+> ```
+
+Adds one or several cells to the table with `args` as their contents.
+
+`T` can be an instance of any numeric, boolean, or string-convertible type.
+
+**Note:** CSV is a format without standardized specification. This library refers to commonly supported [RFC-4180](https://www.rfc-editor.org/info/rfc4180) guidelines for format and special character handling.
+
+> ```cpp
+> void hline();
+> ```
+
+Adds horizontal line to the table.
+
+> ```cpp
+> std::string format();
+> ```
+
+Formats table into a string.
+
+### Number formatting
+
+> ```cpp
+> template <class T>
+> struct Number {
+>     constexpr explicit Number(
+>         T                 value,
+>         std::chars_format format    = std::chars_format::general,
+>         int               precision = 3
+>     ) noexcept;
+> };
+> ```
+
+A thin wrapper around the floating-point `value` used to specify its format. See corresponding [example](#floating-point-formatting).
+
+## Examples
+
+### ASCII table
+
+[ [Run this code](https://godbolt.org/z/WG48hPnq4) ] [ [Open source file](../examples/module_table/ascii_table.cpp) ]
+
 ```cpp
-using namespace utl;
+utl::table::ASCII tb(4);
 
-table::create({ 16, 16, 16, 16, 20 });
-table::set_formats({ table::NONE, table::DEFAULT(), table::FIXED(2),table::SCIENTIFIC(3), table::BOOL });
+tb.hline();
+tb.cell("Task", "Time", "Error", "Done");
+tb.hline();
+tb.cell("Work 1", 1.35, 3.7e-5, true );
+tb.cell("Work 2", 1.35, 2.5e-8, false);
+tb.hline();
 
-table::hline();
-table::cell("Method", "Threads", "Speedup", "Error", "Err. within range");
-table::hline();
-table::cell("Gauss", 16, 11.845236, 1.96e-4, false);
-table::cell("Jacobi", 16, 15.512512, 1.37e-5, false);
-table::cell("Seidel", 16, 13.412321, 1.74e-6, true);
-table::cell("Relaxation", 16, 13.926783, 1.17e-6, true);
-table::hline();
+std::cout << tb.format();
 ```
 
 Output:
+
 ```
-|----------------|----------------|----------------|----------------|--------------------|
-|          Method|         Threads|         Speedup|           Error|   Err. within range|
-|----------------|----------------|----------------|----------------|--------------------|
-|           Gauss|              16|           11.85|       1.960e-04|               false|
-|          Jacobi|              16|           15.51|       1.370e-05|               false|
-|          Seidel|              16|           13.41|       1.740e-06|                true|
-|      Relaxation|              16|           13.93|       1.170e-06|                true|
-|----------------|----------------|----------------|----------------|--------------------|
+|--------|------|---------|-------|
+| Task   | Time | Error   | Done  |
+|--------|------|---------|-------|
+| Work 1 | 1.35 | 3.7e-05 | true  |
+| Work 2 | 1.35 | 2.5e-08 | false |
+|--------|------|---------|-------|
+```
+
+### Markdown table
+
+[ [Run this code](https://godbolt.org/z/3TGb9b4c3) ] [ [Open source file](../examples/module_table/markdown_table.cpp) ]
+
+```cpp
+utl::table::Markdown tb({"Task", "Time", "Error", "Done"});
+
+tb.cell("Work 1", 1.35, 3.7e-5, true );
+tb.cell("Work 2", 1.35, 2.5e-8, false);
+
+std::cout << tb.format();
+```
+
+Output:
+
+```
+| Task   | Time | Error   | Done    |
+| ------ | ---- | ------- | ------- |
+| Work 1 | 1.35 | 3.7e-05 | `true`  |
+| Work 2 | 1.35 | 2.5e-08 | `false` |
+```
+
+### LaTeX table
+
+[ [Run this code](https://godbolt.org/z/8cje1dKh1) ] [ [Open source file](../examples/module_table/latex_table.cpp) ]
+
+```cpp
+utl::table::LaTeX tb(4);
+
+tb.hline();
+tb.cell("Task", "Time", "Error", "Done");
+tb.hline();
+tb.cell("Work 1", 1.35, 3.7e-5, true );
+tb.cell("Work 2", 1.35, 2.5e-8, false);
+tb.hline();
+
+std::cout << tb.format();
+```
+
+Output:
+
+```
+\begin{tabular}{|c|c|c|c|}
+\hline
+    Task   & Time   & Error               & Done  \\
+\hline
+    Work 1 & $1.35$ & $3.7 \cdot 10^{-5}$ & true  \\
+    Work 2 & $1.35$ & $2.5 \cdot 10^{-8}$ & false \\
+\hline
+\end{tabular}
+```
+
+### Mathematica table
+
+[ [Run this code](https://godbolt.org/z/3dKsK1G9G) ] [ [Open source file](../examples/module_table/mathematica_table.cpp) ]
+
+```cpp
+utl::table::Mathematica tb(4);
+
+tb.hline();
+tb.cell("Task", "Time", "Error", "Done");
+tb.hline();
+tb.cell("Work 1", 1.35, 3.7e-5, true );
+tb.cell("Work 2", 1.35, 2.5e-8, false);
+tb.hline();
+
+std::cout << tb.format();
+```
+
+Output:
+
+```
+Grid[{
+    { "Task"  , "Time", "Error" , "Done" },
+    { "Work 1", 1.35  , 3.7*^-05, True   },
+    { "Work 2", 1.35  , 2.5*^-08, False  }
+}, Dividers -> {All, {True, True, False, True}}]
+```
+
+### CSV table
+
+[ [Run this code](https://godbolt.org/z/rEhxozzMY) ] [ [Open source file](../examples/module_table/csv_table.cpp) ]
+
+```cpp
+utl::table::CSV tb(4);
+
+tb.cell("Task", "Time", "Error", "Done");
+tb.cell("Work 1", 1.35, 3.7e-5, true );
+tb.cell("Work 2", 1.35, 2.5e-8, false);
+
+std::cout << tb.format();
+```
+
+Output:
+
+```
+"Task","Time","Error","Done"
+"Work 1",1.35,3.7e-05,true
+"Work 2",1.35,2.5e-08,false
+```
+
+### Floating-point formatting
+
+[ [Run this code](https://godbolt.org/z/TMxqM7ez4) ] [ [Open source file](../examples/module_table/floating_point_formatting.cpp) ]
+
+```cpp
+using namespace utl;
+
+const auto format_number = [](double x) { return table::Number{x, std::chars_format::scientific, 1}; };
+
+table::Markdown tb({"Method", "Error"});
+
+tb.cell("Jacobi", format_number(3.475e-4));
+tb.cell("Seidel", format_number(6.732e-6));
+
+std::cout << tb.format();
+```
+
+Output:
+
+```
+| Method | Error   |
+| ------ | ------- |
+| Jacobi | 3.5e-04 |
+| Seidel | 6.7e-06 |
+```
+
+### Building tables cell-by-cell
+
+[ [Run this code](https://godbolt.org/z/hP617d11W) ] [ [Open source file](../examples/module_table/building_tables_cell_by_cell.cpp) ] 
+
+```cpp
+utl::table::Markdown tb({"Method", "Error", "Converged"});
+
+// 1 call to 'cell()' doesn't necessarily have to fill the entire row at once
+tb.cell("Jacobi");
+tb.cell(3.475e-4);
+tb.cell(false);
+
+tb.cell("Seidel");
+tb.cell(6.732e-6, true);
+
+std::cout << tb.format();
+```
+
+Output:
+
+```
+| Method | Error     | Converged |
+| ------ | --------- | --------- |
+| Jacobi | 0.0003475 | `false`   |
+| Seidel | 6.732e-06 | `true`    |
 ```

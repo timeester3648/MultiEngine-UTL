@@ -8,43 +8,46 @@
 //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-#if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_ENUM_REFLECT)
-#ifndef UTLHEADERGUARD_ENUM_REFLECT
-#define UTLHEADERGUARD_ENUM_REFLECT
+#if !defined(UTL_PICK_MODULES) || defined(UTL_MODULE_ENUM_REFLECT)
+
+#ifndef utl_enum_reflect_headerguard
+#define utl_enum_reflect_headerguard
+
+#define UTL_ENUM_REFLECT_VERSION_MAJOR 1
+#define UTL_ENUM_REFLECT_VERSION_MINOR 0
+#define UTL_ENUM_REFLECT_VERSION_PATCH 2
 
 // _______________________ INCLUDES _______________________
 
-#include <array>       // array<>
-#include <cstddef>     // size_t
+#include <array>       // IWYU pragma: keep (used in a macro) | array<>, size_t
 #include <stdexcept>   // out_of_range
 #include <string>      // string
 #include <string_view> // string_view
-#include <type_traits> // underlying_type_t<>, enable_if_t<>, is_enum_v<>
-#include <utility>     // pair<>
 #include <tuple>       // tuple_size_v<>
+#include <type_traits> // underlying_type_t<>, enable_if_t<>, is_enum_v<>
+#include <utility>     // IWYU pragma: keep (used in a macro) | pair<>
 
 // ____________________ DEVELOPER DOCS ____________________
 
 // Reflection mechanism is based entirely around the map macro and a single struct with partial specialization for the
 // reflected enum. Map macro itself is quire non-trivial, but completely standard, a good explanation of how it works
-// can be found here: [https://github.com/swansontec/map-macro].
+// can be found here: https://github.com/swansontec/map-macro
 //
 // Once we have a map macro all reflection is a matter of simply mapping __VA_ARGS__ into a few "metadata"
 // arrays which we will then traverse to perform string conversions.
 //
 // Partial specialization allows for a pretty concise implementation and provides nice error messages due to
-// static_assert on incorrect template arguments.
+// 'static_assert()' on incorrect template arguments.
 //
 // An alternative frequently used way to do enum reflection is through constexpr parsing of strings returned by
 // compiler-specific '__PRETTY_FUNCTION__' and '__FUNCSIG__', it has a benefit of not requiring the reflection
-// macro however it hammers compile times and improses restrictions on enum values. Some issues such as binary
+// macro however it hammers compile times and imposes restrictions on enum values. Some issues such as binary
 // bloat and bitflag-enums can be worked around through proper implementation and some conditional metadata
-// templates, however such approach seems to be quite complex and unreliable (due to being compiler-specific),
-// better leave it to continuously supported libs like 'magic_enum'.
+// templates, however such approach tends to be quite complex.
 
 // ____________________ IMPLEMENTATION ____________________
 
-namespace utl::enum_reflect {
+namespace utl::enum_reflect::impl {
 
 // =================
 // --- Map macro ---
@@ -87,19 +90,16 @@ namespace utl::enum_reflect {
 
 // Note: 'erfl' is short for 'enum_reflect'
 
-// =======================
-// --- Enum reflection ---
-// =======================
-
-// --- Implementation ---
-// ----------------------
+// ============================
+// --- Reflection mechanism ---
+// ============================
 
 template <class>
-constexpr bool _always_false_v = false;
+constexpr bool always_false_v = false;
 
-template <class E>
-struct _meta {
-    static_assert(_always_false_v<E>,
+template <class Enum>
+struct Meta {
+    static_assert(always_false_v<Enum>,
                   "Provided enum does not have a defined reflection. Use 'UTL_ENUM_REFLECT' macro to define one.");
     // makes instantiation of this template a compile-time error
 };
@@ -107,13 +107,12 @@ struct _meta {
 // Helper macros for codegen
 #define utl_erfl_make_value(arg_) type::arg_
 #define utl_erfl_make_name(arg_) std::string_view(#arg_)
-#define utl_erfl_make_entry(arg_)                                                                                      \
-    std::pair { std::string_view(#arg_), type::arg_ }
+#define utl_erfl_make_entry(arg_) std::make_pair(std::string_view(#arg_), type::arg_)
 
 #define UTL_ENUM_REFLECT(enum_name_, ...)                                                                              \
     template <>                                                                                                        \
-    struct utl::enum_reflect::_meta<enum_name_> {                                                                      \
-        using type            = enum_name_;                                                                            \
+    struct utl::enum_reflect::impl::Meta<enum_name_> {                                                                 \
+        using type = enum_name_;                                                                                       \
                                                                                                                        \
         constexpr static std::string_view type_name = #enum_name_;                                                     \
                                                                                                                        \
@@ -122,55 +121,77 @@ struct _meta {
         constexpr static auto entries = std::array{utl_erfl_map_list(utl_erfl_make_entry, __VA_ARGS__)};               \
     }
 
-// --- Public API ---
-// ------------------
+// ======================
+// --- Reflection API ---
+// ======================
 
-template <class E>
-constexpr auto type_name = _meta<E>::type_name;
+template <class Enum>
+constexpr auto type_name = Meta<Enum>::type_name;
 
-template <class E>
-constexpr auto names = _meta<E>::names;
+template <class Enum>
+constexpr auto names = Meta<Enum>::names;
 
-template <class E>
-constexpr auto values = _meta<E>::values;
+template <class Enum>
+constexpr auto values = Meta<Enum>::values;
 
-template <class E>
-constexpr auto entries = _meta<E>::entries;
+template <class Enum>
+constexpr auto entries = Meta<Enum>::entries;
 
-template <class E>
-constexpr auto size = std::tuple_size_v<decltype(values<E>)>;
+template <class Enum>
+constexpr auto size = std::tuple_size_v<decltype(values<Enum>)>;
 
-template <class E, std::enable_if_t<std::is_enum_v<E>, bool> = true>
-[[nodiscard]] constexpr auto to_underlying(E value) noexcept {
-    return static_cast<std::underlying_type_t<E>>(value);
+template <class Enum, std::enable_if_t<std::is_enum_v<Enum>, bool> = true>
+[[nodiscard]] constexpr auto to_underlying(Enum value) noexcept {
+    return static_cast<std::underlying_type_t<Enum>>(value);
     // doesn't really require reflection, but might as well have it here,
-    // in C++23 gets replaced by builtin 'std::to_underlying'
+    // in C++23 gets replaced by 'std::to_underlying'
 }
 
-template <class E>
-[[nodiscard]] constexpr bool is_valid(E value) noexcept {
-    for (const auto& e : values<E>)
+template <class Enum>
+[[nodiscard]] constexpr bool is_valid(Enum value) noexcept {
+    for (const auto& e : values<Enum>)
         if (value == e) return true;
     return false;
 }
 
-template <class E>
-[[nodiscard]] constexpr std::string_view to_string(E val) {
-    for (const auto& [name, value] : entries<E>)
+template <class Enum>
+[[nodiscard]] constexpr std::string_view to_string(Enum val) {
+    for (const auto& [name, value] : entries<Enum>)
         if (val == value) return name;
 
-    throw std::out_of_range("enum_reflect::to_string<" + std::string(type_name<E>) + ">(): value " +
+    throw std::out_of_range("enum_reflect::to_string<" + std::string(type_name<Enum>) + ">(): value " +
                             std::to_string(to_underlying(val)) + " is not a part of enumeration.");
 }
 
-template <class E>
-[[nodiscard]] constexpr E from_string(std::string_view str) {
-    for (const auto& [name, value] : entries<E>)
+template <class Enum>
+[[nodiscard]] constexpr Enum from_string(std::string_view str) {
+    for (const auto& [name, value] : entries<Enum>)
         if (str == name) return value;
 
-    throw std::out_of_range("enum_reflect::from_string<" + std::string(type_name<E>) + ">(): name \"" +
+    throw std::out_of_range("enum_reflect::from_string<" + std::string(type_name<Enum>) + ">(): name \"" +
                             std::string(str) + "\" is not a part of enumeration.");
 }
+
+} // namespace utl::enum_reflect::impl
+
+// ______________________ PUBLIC API ______________________
+
+namespace utl::enum_reflect {
+
+// macro -> UTL_ENUM_REFLECT
+
+using impl::type_name;
+using impl::size;
+
+using impl::names;
+using impl::values;
+using impl::entries;
+
+using impl::is_valid;
+using impl::to_underlying;
+
+using impl::to_string;
+using impl::from_string;
 
 } // namespace utl::enum_reflect
 

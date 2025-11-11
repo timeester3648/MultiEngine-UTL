@@ -1,4 +1,4 @@
-# ---------------------------------- CONTENTS -----------------------------------
+# __________________________________ CONTENTS ___________________________________
 #   
 #   This script contains shortcuts for building, running
 #   and testing the project. All action keywords can be
@@ -6,146 +6,153 @@
 #
 #   See "docs/guide_building_project.md" for the whole building guide.
 #   
-# ------------------------------------ GUIDE ------------------------------------
+# ____________________________________ GUIDE ____________________________________
 #   
 #   Usage format:
 #     > bash actions.sh [ACTIONS]
 #   
 #   Actions:
-#     clear  - Clears "build/" folder
-#     config - Configures CMake with appropriate args
-#     build  - Builds the project (requires configured CMake)
-#     run    - Runs main executable (requires successful build)
-#     test   - Runs CTest tests
+#     clear    - Clears "build/" folder
+#     config   - Configures CMake with appropriate args
+#     build    - Builds the project (requires configured CMake)
+#     test     - Runs CTest tests (requires successful build)
+#     coverage - Runs CTest coverage analysis (requires executed tests)
+#     check    - Runs cppcheck static analysis (requires successful build)
 #   
 #   Usage example:
 #     > bash actions.sh clear config build test
-#   
-# -------------------------------------------------------------------------------
+# _______________________________________________________________________________
 
-# -----------------------
-# ---- Configuration ----
-# -----------------------
-directory_source="source/"
-directory_build="build/"
-directory_tests="${directory_build}tests/"
-
-path_executable="${directory_build}benchmarks/benchmark_json"
-
-compiler="g++" # clang++-11
-test_flags="--rerun-failed --output-on-failure --timeout 60"
-build_jobs="6"
-header_merger_script="cmake/create_single_header.sh"
-
-# -----------------------
+# =======================
 # ------ Functions ------
-# -----------------------
-check_command_exists() {
-    if ! command -v $1 &> /dev/null
-    then
-        echo "Command [ $1 ] could not be found."
-        exit 1
-    fi
-}
+# =======================
 
-clear_files() {
-    if [ -d "$directory_build" ]; then
-        rm --recursive $directory_build
-        echo "Cleared directory [ $directory_build ]."
+source bash/variables.sh
+source bash/functions.sh
+
+command_clear() {
+    # Clear 'build/'
+    if [ -d "${directory_build}" ]; then
+        rm -r "${directory_build}" # Note: 'rm --recursive' is a GNU-style extension and isn't supported on MacOS
+        printf "Cleared directory [ \"${directory_build}\" ].\n"
     else
-        echo "Directory [ $directory_build ] is clear."
+        printf "Directory [ \"${directory_build}\" ] is clear.\n"
     fi
-}
-
-cmake_config() {
-    check_command_exists "cmake"
-    check_command_exists "$compiler"
-    cmake -D CMAKE_CXX_COMPILER=$compiler -B $directory_build -S .
-}
-
-create_single_header() {
-    if [ -f "$header_merger_script" ]; then
-        echo "Merging single header include..."
-        bash "$header_merger_script"
-        echo "Merge complete."
+    
+    # Clear cppcheck cache
+    if [ -d "${cppcheck_cache_directory}" ]; then
+        rm -r "${cppcheck_cache_directory}"
+        printf "Cleared directory [ \"${cppcheck_cache_directory}\" ].\n"
     else
-        echo "# Error: Could not find \"$header_merger_script\"."
+        printf "Directory [ \"${cppcheck_cache_directory}\" ] is clear.\n"
     fi
 }
 
-cmake_build() {
-    check_command_exists "cmake"
-    cmake --build $directory_build --parallel $build_jobs
+command_config() {
+    require_command_exists "cmake"
+    cmake --preset "${preset}"
 }
 
-cmake_test() {
-    check_command_exists "ctest"
-    cd $directory_tests
-    ctest $test_flags
+command_build() {
+    # Invoke script to merge headers for single-include
+    if [ -f "${script_create_single_header}" ]; then
+        printf "${ansi_green}Merging single header include...${ansi_reset}\n"
+        bash "$script_create_single_header"
+        printf "${ansi_green}Merge complete.${ansi_reset}\n"
+    else
+        printf "${ansi_red}# Error: Could not find \"${script_create_single_header}\".${ansi_reset}\n"
+    fi
+    
+    # Run CMake build
+    require_command_exists "cmake"
+    cmake --build --preset "${preset}"
+}
+
+command_test() {
+    require_command_exists "ctest"
+    ctest --preset "${preset}"
+    
+}
+
+command_coverage() {
+    require_command_exists "ctest"
+    # This is a separate step because CTest gets confused about coverage report location
+    # when we run it from the test directory, it tries to look for 'build/DartConfiguration.tcl'
+    cd "${directory_build}"
+    ctest ${coverage_flags}
     cd ..
 }
 
-executable_run() {
-    ./$path_executable
+command_check() {
+    # Invoke script to run static analyzers
+    if [ -f "${script_run_static_analysis}" ]; then
+        printf "${ansi_green}Running static analyzers...${ansi_reset}\n"
+        bash "${script_run_static_analysis}"
+        printf "${ansi_green}Analysis complete.${ansi_reset}\n"
+    else
+        printf "${ansi_red}# Error: Could not find \"${script_run_static_analysis}\".${ansi_reset}\n"
+    fi
 }
 
-executable_profile() {
-    check_command_exists "valgrind"
-    check_command_exists "callgrind_annotate"
-    check_command_exists "kcachegrind"
-    valgrind --tool=callgrind --dump-line=yes --callgrind-out-file="${directory_temp}callgrind.latest" ./$path_executable
-    callgrind_annotate --auto=yes --include="source/" "${directory_temp}callgrind.latest" > "${directory_temp}callgrind.annotate.txt"
-    kcachegrind "./${directory_temp}callgrind.latest"
+command_docs() {
+    require_command_exists "mkdocs"
+    mkdocs serve
 }
 
-# -----------------------
+# =======================
 # --- Action selector ---
-# -----------------------
+# =======================
+
 valid_command=false
 
 for var in "$@"
 do
     valid_command=false
     
-    if [ "$var" = "clear" ]; then
-        echo "# Action: Clear Files"
-        clear_files
+    if [ "${var}" = "clear" ]; then
+        printf "${ansi_purple}# Action: Clear Files${ansi_reset}\n"
+        command_clear
         valid_command=true
     fi
 
-    if [ "$var" = "config" ]; then
-        echo "# Action: CMake Configure"
-        cmake_config
+    if [ "${var}" = "config" ]; then
+        printf "${ansi_purple}# Action: CMake Configure${ansi_reset}\n"
+        command_config
         valid_command=true
     fi
 
-    if [ "$var" = "build" ]; then
-        echo "# Action: CMake Build"
-        create_single_header
-        cmake_build
+    if [ "${var}" = "build" ]; then
+        printf "${ansi_purple}# Action: CMake Build${ansi_reset}\n"
+        command_build
         valid_command=true
     fi
     
-    if [ "$var" = "test" ]; then
-        echo "# Action: CMake Test"
-        cmake_test
-        valid_command=true
-    fi
-
-    if [ "$var" = "run" ]; then
-        echo "# Action: run"
-        executable_run
+    if [ "${var}" = "test" ]; then
+        printf "${ansi_purple}# Action: CMake Test${ansi_reset}\n"
+        command_test
         valid_command=true
     fi
     
-    if [ "$var" = "profile" ]; then
-        echo "# Action: profile"
-        executable_profile
+    if [ "${var}" = "coverage" ]; then
+        printf "${ansi_purple}# Action: Run Coverage Analysis${ansi_reset}\n"
+        command_coverage
         valid_command=true
     fi
     
-    if [ $valid_command = false ]; then
-        echo "# Error: Invalid action name -> ${var}"
+    if [ "${var}" = "check" ]; then
+        printf "${ansi_purple}# Action: Run Static Analysis${ansi_reset}\n"
+        command_check
+        valid_command=true
+    fi
+    
+    if [ "${var}" = "docs" ]; then
+        printf "${ansi_purple}# Action: Build local documentation${ansi_reset}\n"
+        command_docs
+        valid_command=true
+    fi
+    
+    if [ ${valid_command} = false ]; then
+        printf "${ansi_red}# Error: Invalid action name -> ${var}${ansi_reset}\n"
         break
     fi
 

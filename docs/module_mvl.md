@@ -1,18 +1,30 @@
+[<img src ="images/badge_language_cpp_17.svg">](https://en.cppreference.com/w/cpp/17.html)
+[<img src ="images/badge_license_mit.svg">](LICENSE.md)
+[<img src ="images/badge_semver.svg">](guide_versioning.md)
+[<img src ="images/badge_docs.svg">](https://dmitribogdanov.github.io/UTL/)
+[<img src ="images/badge_header_only.svg">](https://en.wikipedia.org/wiki/Header-only)
+[<img src ="images/badge_no_dependencies.svg">](https://github.com/DmitriBogdanov/UTL/tree/master/include/UTL)
+
+[<img src ="images/badge_workflow_windows.svg">](https://github.com/DmitriBogdanov/UTL/actions/workflows/windows.yml)
+[<img src ="images/badge_workflow_ubuntu.svg">](https://github.com/DmitriBogdanov/UTL/actions/workflows/ubuntu.yml)
+[<img src ="images/badge_workflow_macos.svg">](https://github.com/DmitriBogdanov/UTL/actions/workflows/macos.yml)
+[<img src ="images/badge_workflow_freebsd.svg">](https://github.com/DmitriBogdanov/UTL/actions/workflows/freebsd.yml)
+
 # utl::mvl **(experimental)**
 
 [<- to README.md](..)
 
 [<- to implementation.hpp](../include/UTL/mvl.hpp)
 
-**mvl** (aka **M**atrix **V**iew **L**ibrary) implements generic classes for dense/strided/sparse vectors, matrices and views.
+**utl::mvl** (aka **M**atrix **V**iew **L**ibrary) implements generic classes for dense/strided/sparse vectors, matrices and views.
 
 Unlike most existing matrix implementations, **mvl** focuses on data-oriented matrices that support arbitrary element types and can be used similarly to [std::vector](https://en.cppreference.com/w/cpp/container/vector). It's main goal is the simplicity of API and interoperability with most existing implementations.
 
 > [!Important]
 > Due to rather extensive API, seeing [usage examples](#declaring-and-indexing-a-matrix) first might be helpful.
 
-> [!Tip]
-> Use GitHub's built-in [table of contents](https://github.blog/changelog/2021-04-13-table-of-contents-support-in-markdown-files/) to navigate this page.
+> [!Warning]
+> This module is currently **experimental**. It is generally functional, however there are no guarantees about its API, stability and documentation coverage.
 
 ## Class structure
 
@@ -44,7 +56,7 @@ This approach provides a generic way of working with matrices that is mostly agn
 
 ## Performance & linear algebra operations
 
-**mvl** classes are intented to be lightweight wrappers that allow convenient data manipulation without any performance tradeoffs on basic operations (loops, indexing, standard algorithms, etc.), this is achieved through conditional compilation and compile-time resolution of all indexing formulas. See [benchmarks](TODO:) for details.
+**mvl** classes are intended to be lightweight wrappers that allow convenient data manipulation without any performance tradeoffs on basic operations (loops, indexing, standard algorithms, etc.), this is achieved through conditional compilation and compile-time resolution of all indexing formulas. See [benchmarks](TODO:) for details.
 
 Due to its arbitrary-data approach, linear algebra operations are intentionally **NOT** implemented by **mvl**. Numeric computation is a separate field and is much better handled by existing libraries like [XTensor](https://xtensor.readthedocs.io), [Eigen](https://eigen.tuxfamily.org) and [Blaze](https://bitbucket.org/blaze-lib/blaze). In cases where matrix computation is needed, it's heavily recommended to use matrices provided by those libraries as a main implementation, and whenever **mvl** functions are needed, those can be wrapped in **mvl** view. For example:
 
@@ -700,7 +712,7 @@ Sorts elements of the underlying array according to `operator<` or a custom comp
 
 Types returned by blocking subview methods of the tensor.
 
-Dense and strided matrices will use apropriately strided views to efficiently represent blocking, while sparse matrices returns sparse views.
+Dense and strided matrices will use appropriately strided views to efficiently represent blocking, while sparse matrices returns sparse views.
 
 All subviews inherit `T`, `Dimension` and `Checking` configuration from the parent.
 
@@ -876,7 +888,7 @@ Operator is only compiled if `value_type` of both tensors is the same and suppor
 > template <class L, class R> L& operator+=(L&& left, R&& right);
 > template <class L, class R> L& operator-=(L&& left, R&& right);
 
-**TODO:** This behaviour is not yet finalized, there are still some considerations to make.
+**TODO:** This behavior is not yet finalized, there are still some considerations to make.
 
 ### Tensor IO formats
 
@@ -937,7 +949,7 @@ self& operator=(const GenericTensor<...>&  other);
 
 Converting copy constructor/assignment operator for tensors that have different types.
 
-Copy-conversion freely converts over the boundaries of `type`, `ownership`, `checking` and `layout`. It may use non-trivial logic to perform a "logical copy" for matrices with different APIs, such as, for example, convert sparse matrix to dense by cloning all the sparse contents and setting the other elements to default value, or, for example, construct sparse matrix from dense by filtering out all default-initialized elements and using the remainder as sparse contents (see an [example](#example-7-working-with-sparse-matrices) of working with sparse matrices).
+Copy-conversion freely converts over the boundaries of `type`, `ownership`, `checking` and `layout`. It may use non-trivial logic to perform a "logical copy" for matrices with different APIs, such as, for example, convert sparse matrix to dense by cloning all the sparse contents and setting the other elements to default value, or, for example, construct sparse matrix from dense by filtering out all default-initialized elements and using the remainder as sparse contents (see an [example](#working-with-sparse-matrices) of working with sparse matrices).
 
 ```cpp
 template <Checking other_checking>
@@ -1017,7 +1029,7 @@ Constructs a `rows` by `cols` matrix with given strides and all elements initial
 
 **Note 1:** See ["Basic getters" section](#basic-getters) to learn how row- and col- strides work in `mvl`.
 
-**Note 2:** Strides are usually used in the context of views. In case of an owning matrix strides function as an additional padding between elements, while rarely directly useful, in some cases it can be used to reduce cache misses caused by a particulary "unlucky" alignment of rows relative to a cache size.
+**Note 2:** Strides are usually used in the context of views. In case of an owning matrix strides function as an additional padding between elements, while rarely directly useful, in some cases it can be used to reduce cache misses caused by a particularly "unlucky" alignment of rows relative to a cache size.
 
 ```cpp
 explicit GenericTensor(size_type rows, size_type cols, size_type row_stride, size_type col_stride, Callable<value_type(size_type, size_type)> init_func);
@@ -1095,8 +1107,6 @@ struct SparseEntry2D {
 
 ### Declaring and indexing a matrix
 
-[ [Run this code](https://godbolt.org/#g:!((g:!((g:!((h:codeEditor,i:(filename:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,selection:(endColumn:57,endLineNumber:20,positionColumn:57,positionLineNumber:20,selectionStartColumn:57,selectionStartLineNumber:20,startColumn:57,startLineNumber:20),source:'%23include+%3Chttps://raw.githubusercontent.com/DmitriBogdanov/UTL/master/single_include/UTL.hpp%3E%0A%0Aint+main(int+argc,+char+**argv)+%7B%0A%0A++++using+namespace+utl%3B%0A%0A++++//+Declare+regular+dense+matrix%0A++++mvl::Matrix%3Cint%3E+A+%3D+%7B%0A++++++++%7B+1,+2,+3+%7D,%0A++++++++%7B+4,+5,+6+%7D%0A++++%7D%3B%0A%0A++++//+2D+indexation%0A++++assert(+A(0,+1)+%3D%3D+2+)%3B%0A%0A++++//+1D+indexation%0A++++assert(+A%5B2%5D+%3D%3D+3+)%3B%0A%0A++++//+Range-based+loops%0A++++for+(const+auto+%26element+:+A)+assert(+element+%3E+0+)%3B%0A%0A++++//+std::vector-like+API+%26+iterators%0A++++assert(++A.front()+++++++%3D%3D+1+)%3B%0A++++assert(++A.back()++++++++%3D%3D+6+)%3B%0A++++assert(+*A.cbegin()++++++%3D%3D+1+)%3B%0A++++assert(+*(A.cend()+-+1)++%3D%3D+6+)%3B%0A%0A++++//+Basic+getters%0A++++assert(+A.rows()++%3D%3D+2+++++)%3B%0A++++assert(+A.cols()++%3D%3D+3+++++)%3B%0A++++assert(+A.size()++%3D%3D+6+++++)%3B%0A++++assert(+A.empty()+%3D%3D+false+)%3B%0A%0A++++//+Declare+matrix+with+enabled+bound-checking%0A++++mvl::Matrix%3Cint,+mvl::Checking::BOUNDS%3E+B+%3D+A%3B%0A%0A++++//+B(3,+2)+%3D+1%3B+//+will+throw+with+a+message+%22i+(which+is+3)+%3E%3D+this-%3Erows()+(which+is+2)%22%0A%0A++++return+0%3B%0A%7D%0A'),l:'5',n:'0',o:'C%2B%2B+source+%231',t:'0')),k:71.71783148269105,l:'4',n:'0',o:'',s:0,t:'0'),(g:!((g:!((h:compiler,i:(compiler:clang1600,filters:(b:'0',binary:'1',binaryObject:'1',commentOnly:'0',debugCalls:'1',demangle:'0',directives:'0',execute:'0',intel:'0',libraryCode:'0',trim:'1',verboseDemangling:'0'),flagsViewOpen:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,libs:!(),options:'-std%3Dc%2B%2B17+-O2',overrides:!(),selection:(endColumn:1,endLineNumber:1,positionColumn:1,positionLineNumber:1,selectionStartColumn:1,selectionStartLineNumber:1,startColumn:1,startLineNumber:1),source:1),l:'5',n:'0',o:'+x86-64+clang+16.0.0+(Editor+%231)',t:'0')),header:(),l:'4',m:50,n:'0',o:'',s:0,t:'0'),(g:!((h:output,i:(compilerName:'x86-64+clang+16.0.0',editorid:1,fontScale:14,fontUsePx:'0',j:1,wrap:'1'),l:'5',n:'0',o:'Output+of+x86-64+clang+16.0.0+(Compiler+%231)',t:'0')),k:46.69421860597116,l:'4',m:50,n:'0',o:'',s:0,t:'0')),k:28.282168517308946,l:'3',n:'0',o:'',t:'0')),l:'2',n:'0',o:'',t:'0')),version:4) ]
-
 ```cpp
 using namespace utl;
 
@@ -1135,8 +1145,6 @@ mvl::Matrix<int, mvl::Checking::BOUNDS> B = A;
 
 ### IO formats
 
-[ [Run this code](https://godbolt.org/#g:!((g:!((g:!((h:codeEditor,i:(filename:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,selection:(endColumn:25,endLineNumber:5,positionColumn:25,positionLineNumber:5,selectionStartColumn:25,selectionStartLineNumber:5,startColumn:25,startLineNumber:5),source:'%23include+%3Chttps://raw.githubusercontent.com/DmitriBogdanov/UTL/master/single_include/UTL.hpp%3E%0A%0Aint+main(int+argc,+char+**argv)+%7B%0A%0A++++using+namespace+utl%3B%0A%0A++++//+Create+sparse+matrix+from+triplets%0A++++mvl::SparseMatrix%3Cdouble%3E+mat(3,+4,%0A++++%7B%0A++++++++%7B0,+0,+3.14++++%7D,%0A++++++++%7B0,+1,+4.24++++%7D,%0A++++++++%7B1,+1,+7.15++++%7D,%0A++++++++%7B2,+2,+2.38++++%7D,%0A++++++++%7B2,+3,+734.835+%7D%0A++++%7D)%3B%0A%0A++++//+Showcase+different+IO+formats%0A++++std::cout%0A++++++++//+Human-readable+formats%0A++++++++%3C%3C+%22%5Cn%23%23+as_vector()+%23%23%5Cn%5Cn%22+++++%3C%3C+mvl::format::as_vector(++++mat)%0A++++++++%3C%3C+%22%5Cn%23%23+as_matrix()+%23%23%5Cn%5Cn%22+++++%3C%3C+mvl::format::as_matrix(++++mat)%0A++++++++%3C%3C+%22%5Cn%23%23+as_dictionary()+%23%23%5Cn%5Cn%22+%3C%3C+mvl::format::as_dictionary(mat)%0A++++++++//+Export+formats%0A++++++++%3C%3C+%22%5Cn%23%23+as_raw_text()+%23%23%5Cn%5Cn%22+++%3C%3C+mvl::format::as_raw_text(++mat)%0A++++++++%3C%3C+%22%5Cn%23%23+as_json_array()+%23%23%5Cn%5Cn%22+%3C%3C+mvl::format::as_json_array(mat)%3B%0A%0A++++//+Human-readable+formats+will+aumatically+collapse+matrices+above+certain+size+to+following+format:%0A++++//+%3E+Tensor+%5Bsize+%3D+250000%5D+(500+x+500):%0A++++//+%3E+++%3Chidden+due+to+large+size%3E%0A%0A++++return+0%3B%0A%7D%0A'),l:'5',n:'0',o:'C%2B%2B+source+%231',t:'0')),k:71.71783148269105,l:'4',n:'0',o:'',s:0,t:'0'),(g:!((g:!((h:compiler,i:(compiler:clang1600,filters:(b:'0',binary:'1',binaryObject:'1',commentOnly:'0',debugCalls:'1',demangle:'0',directives:'0',execute:'0',intel:'0',libraryCode:'0',trim:'1',verboseDemangling:'0'),flagsViewOpen:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,libs:!(),options:'-std%3Dc%2B%2B17+-O2',overrides:!(),selection:(endColumn:1,endLineNumber:1,positionColumn:1,positionLineNumber:1,selectionStartColumn:1,selectionStartLineNumber:1,startColumn:1,startLineNumber:1),source:1),l:'5',n:'0',o:'+x86-64+clang+16.0.0+(Editor+%231)',t:'0')),header:(),l:'4',m:50,n:'0',o:'',s:0,t:'0'),(g:!((h:output,i:(compilerName:'x86-64+clang+16.0.0',editorid:1,fontScale:14,fontUsePx:'0',j:1,wrap:'1'),l:'5',n:'0',o:'Output+of+x86-64+clang+16.0.0+(Compiler+%231)',t:'0')),k:46.69421860597116,l:'4',m:50,n:'0',o:'',s:0,t:'0')),k:28.282168517308946,l:'3',n:'0',o:'',t:'0')),l:'2',n:'0',o:'',t:'0')),version:4) ]
-
 ```cpp
 using namespace utl;
 
@@ -1160,7 +1168,7 @@ std::cout
     << "\n## as_raw_text() ##\n\n"   << mvl::format::as_raw_text(  mat)
     << "\n## as_json_array() ##\n\n" << mvl::format::as_json_array(mat);
 
-// Human-readable formats will aumatically collapse matrices above certain size to following format:
+// Human-readable formats will automatically collapse matrices above certain size to following format:
 // > Tensor [size = 250000] (500 x 500):
 // >   <hidden due to large size>
 ```
@@ -1205,8 +1213,6 @@ Tensor [size = 5] (3 x 4):
 
 ### Initializing a matrix by chaining operations
 
-[ [Run this code](https://godbolt.org/#g:!((g:!((g:!((h:codeEditor,i:(filename:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,selection:(endColumn:66,endLineNumber:12,positionColumn:66,positionLineNumber:12,selectionStartColumn:66,selectionStartLineNumber:12,startColumn:66,startLineNumber:12),source:'%23include+%3Chttps://raw.githubusercontent.com/DmitriBogdanov/UTL/master/single_include/UTL.hpp%3E%0A%0Aint+main(int+argc,+char+**argv)+%7B%0A%0A++++using+namespace+utl%3B%0A%0A++++std::random_device+++++++++rd%3B++++%0A++++std::default_random_engine+gen(rd())%3B%0A++++std::normal_distribution+++dist(0.,+1.)%3B%0A%0A++++const+auto+rand_value+%3D+%5B%26%5D()++++++++%7B+return+dist(gen)%3B+++%7D%3B%0A++++const+auto+abs++++++++%3D+%5B%26%5D(double+x)%7B+return+std::abs(x)%3B+%7D%3B%0A%0A++++//+Build+5x5+matrix+where+%7Ba_ij%7D+%3D+%7CN(0,+1)%7C%0A++++//+!'.move()!'+avoids+a+copy+when+assigning+!'A!'%0A++++auto+A+%3D+mvl::Matrix%3Cdouble%3E(5,+5).fill(rand_value).transform(abs).move()%3B%0A%0A++++std::cout+%3C%3C+mvl::format::as_matrix(A)%3B%0A%0A++++return+0%3B%0A%7D%0A'),l:'5',n:'0',o:'C%2B%2B+source+%231',t:'0')),k:71.71783148269105,l:'4',n:'0',o:'',s:0,t:'0'),(g:!((g:!((h:compiler,i:(compiler:clang1600,filters:(b:'0',binary:'1',binaryObject:'1',commentOnly:'0',debugCalls:'1',demangle:'0',directives:'0',execute:'0',intel:'0',libraryCode:'0',trim:'1',verboseDemangling:'0'),flagsViewOpen:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,libs:!(),options:'-std%3Dc%2B%2B17+-O2',overrides:!(),selection:(endColumn:1,endLineNumber:1,positionColumn:1,positionLineNumber:1,selectionStartColumn:1,selectionStartLineNumber:1,startColumn:1,startLineNumber:1),source:1),l:'5',n:'0',o:'+x86-64+clang+16.0.0+(Editor+%231)',t:'0')),header:(),l:'4',m:50,n:'0',o:'',s:0,t:'0'),(g:!((h:output,i:(compilerName:'x86-64+clang+16.0.0',editorid:1,fontScale:14,fontUsePx:'0',j:1,wrap:'1'),l:'5',n:'0',o:'Output+of+x86-64+clang+16.0.0+(Compiler+%231)',t:'0')),k:46.69421860597116,l:'4',m:50,n:'0',o:'',s:0,t:'0')),k:28.282168517308946,l:'3',n:'0',o:'',t:'0')),l:'2',n:'0',o:'',t:'0')),version:4) ]
-
 ```cpp
 using namespace utl;
 
@@ -1236,8 +1242,6 @@ Tensor [size = 25] (5 x 5):
 
 ### Wrapping external data into views
 
-[ [Run this code](https://godbolt.org/#g:!((g:!((g:!((h:codeEditor,i:(filename:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,selection:(endColumn:29,endLineNumber:12,positionColumn:29,positionLineNumber:12,selectionStartColumn:29,selectionStartLineNumber:12,startColumn:29,startLineNumber:12),source:'%23include+%3Chttps://raw.githubusercontent.com/DmitriBogdanov/UTL/master/single_include/UTL.hpp%3E%0A%0Aint+main(int+argc,+char+**argv)+%7B%0A%0A++++using+namespace+utl%3B%0A%0A++++//+Some+raw+data%0A++++//+(for+example,+received+from+an+external+!'C!'+library)%0A++++//+(let!'s+also+assume+it!'s+immutable+and+uses+col-major+layout+for+added+challenge)%0A++++const+float++data%5B%5D+%3D+%7B+1.f,+2.f,+3.f,+4.f,+5.f,+6.f+%7D%3B%0A++++const+size_t+rows+++%3D+2%3B%0A++++const+size_t+cols+++%3D+3%3B%0A%0A++++//+Wrap+data+into+MVL+view+and+use+it+as+a+regular+matrix%0A++++mvl::ConstMatrixView%3Cfloat,+mvl::Checking::NONE,+mvl::Layout::CR%3E+A(%0A++++++++rows,+cols,+data%0A++++)%3B%0A%0A++++//+This+makes+MVL+easily+compatible+with+almost+every+3rd+party%0A++++//+matrix+library,+views+merely+wrap+around+external+data+and+expose%0A++++//+MVL+matrix+functionality+with+no+copying/conversion+overhead%0A%0A++++return+0%3B%0A%7D%0A'),l:'5',n:'0',o:'C%2B%2B+source+%231',t:'0')),k:71.71783148269105,l:'4',n:'0',o:'',s:0,t:'0'),(g:!((g:!((h:compiler,i:(compiler:clang1600,filters:(b:'0',binary:'1',binaryObject:'1',commentOnly:'0',debugCalls:'1',demangle:'0',directives:'0',execute:'0',intel:'0',libraryCode:'0',trim:'1',verboseDemangling:'0'),flagsViewOpen:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,libs:!(),options:'-std%3Dc%2B%2B17+-O2',overrides:!(),selection:(endColumn:1,endLineNumber:1,positionColumn:1,positionLineNumber:1,selectionStartColumn:1,selectionStartLineNumber:1,startColumn:1,startLineNumber:1),source:1),l:'5',n:'0',o:'+x86-64+clang+16.0.0+(Editor+%231)',t:'0')),header:(),l:'4',m:50,n:'0',o:'',s:0,t:'0'),(g:!((h:output,i:(compilerName:'x86-64+clang+16.0.0',editorid:1,fontScale:14,fontUsePx:'0',j:1,wrap:'1'),l:'5',n:'0',o:'Output+of+x86-64+clang+16.0.0+(Compiler+%231)',t:'0')),k:46.69421860597116,l:'4',m:50,n:'0',o:'',s:0,t:'0')),k:28.282168517308946,l:'3',n:'0',o:'',t:'0')),l:'2',n:'0',o:'',t:'0')),version:4) ]
-
 ```cpp
 using namespace utl;
 
@@ -1259,8 +1263,6 @@ mvl::ConstMatrixView<float, mvl::Checking::NONE, mvl::Layout::CR> A(
 ```
 
 ### Usage with `utl::math`
-
-[ [Run this code](https://godbolt.org/#g:!((g:!((g:!((h:codeEditor,i:(filename:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,selection:(endColumn:123,endLineNumber:28,positionColumn:1,positionLineNumber:5,selectionStartColumn:123,selectionStartLineNumber:28,startColumn:1,startLineNumber:5),source:'%23include+%3Chttps://raw.githubusercontent.com/DmitriBogdanov/UTL/master/single_include/UTL.hpp%3E%0A%0Aint+main(int+argc,+char+**argv)+%7B%0A%0A++++using+namespace+utl%3B%0A%0A++++//+Create+7x7+identity+matrix%0A++++auto+A+%3D+mvl::Matrix%3Cdouble%3E(7,+7,+math::kronecker_delta%3Csize_t%3E)%3B%0A%0A++++//+Compute+%7C%7CA%7C%7C_inf+norm%0A++++const+auto+norm+%3D+A.clone().transform(math::abs%3Cdouble%3E).sum()%3B%0A++++++++%0A++++//+Compute+tr(A)%0A++++const+auto+tr+%3D+A.diagonal().sum()%3B%0A%0A++++//+Split+matrix+into+block+views%0A++++auto+upper_half+%3D+A.block(0,+0,++++++++++++0,+A.size()+/+2+-+1+)%3B%0A++++auto+lower_half+%3D+A.block(0,+0,+A.size()+/+2,+A.size()+-+1+++++)%3B%0A%0A++++//+Set+diagonal+to+%7B+1,+2,+3,+...+,+N+%7D%0A++++A.diagonal().for_each(%5B%5D(double+%26elem,+size_t+i,+size_t)%7B+elem+%3D+i+%2B+1%3B+%7D)%3B%0A%0A++++//+Evenly+mesh+%5B0,+PI%5D+x+%5B0,+2+PI%5D+with+100+intervals+on+each+side%0A++++//+and+save+the+2D+grid+as+a+matrix%0A++++using+vertex_t+%3D+std::pair%3Cdouble,+double%3E%3B%0A++++auto++x++++++++%3D+math::linspace(0.,+math::PI,+++++math::Intervals(100))%3B%0A++++auto++y++++++++%3D+math::linspace(0.,+math::PI_TWO,+math::Intervals(100))%3B%0A++++auto++grid+++++%3D+mvl::Matrix%3Cvertex_t%3E(x.size(),+y.size(),+%5B%26%5D(size_t+i,+size_t+j)%7B+return+vertex_t%7B+x%5Bi%5D,+y%5Bj%5D+%7D%3B+%7D)%3B%0A%0A++++return+0%3B%0A%7D%0A'),l:'5',n:'0',o:'C%2B%2B+source+%231',t:'0')),k:71.71783148269105,l:'4',n:'0',o:'',s:0,t:'0'),(g:!((g:!((h:compiler,i:(compiler:clang1600,filters:(b:'0',binary:'1',binaryObject:'1',commentOnly:'0',debugCalls:'1',demangle:'0',directives:'0',execute:'0',intel:'0',libraryCode:'0',trim:'1',verboseDemangling:'0'),flagsViewOpen:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,libs:!(),options:'-std%3Dc%2B%2B17+-O2',overrides:!(),selection:(endColumn:1,endLineNumber:1,positionColumn:1,positionLineNumber:1,selectionStartColumn:1,selectionStartLineNumber:1,startColumn:1,startLineNumber:1),source:1),l:'5',n:'0',o:'+x86-64+clang+16.0.0+(Editor+%231)',t:'0')),header:(),l:'4',m:50,n:'0',o:'',s:0,t:'0'),(g:!((h:output,i:(compilerName:'x86-64+clang+16.0.0',editorid:1,fontScale:14,fontUsePx:'0',j:1,wrap:'1'),l:'5',n:'0',o:'Output+of+x86-64+clang+16.0.0+(Compiler+%231)',t:'0')),k:46.69421860597116,l:'4',m:50,n:'0',o:'',s:0,t:'0')),k:28.282168517308946,l:'3',n:'0',o:'',t:'0')),l:'2',n:'0',o:'',t:'0')),version:4) ]
 
 ```cpp
 using namespace utl;
@@ -1291,8 +1293,6 @@ auto  grid     = mvl::Matrix<vertex_t>(x.size(), y.size(), [&](size_t i, size_t 
 
 ### Working with images
 
-[ [Run this code](https://godbolt.org/#g:!((g:!((g:!((h:codeEditor,i:(filename:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,selection:(endColumn:25,endLineNumber:5,positionColumn:25,positionLineNumber:5,selectionStartColumn:25,selectionStartLineNumber:5,startColumn:25,startLineNumber:5),source:'%23include+%3Chttps://raw.githubusercontent.com/DmitriBogdanov/UTL/master/single_include/UTL.hpp%3E%0A%0Aint+main(int+argc,+char+**argv)+%7B%0A%0A++++using+namespace+utl%3B%0A%0A++++//+Raw+image+RGB+data%0A++++//+(outputted+by+most+image+decoders)%0A++++const+uint8_t*+data+++++%3D+%7B+/*+...+*/+%7D%3B%0A++++const+size_t+++channels+%3D+3%3B%0A++++const+size_t+++w++++++++%3D+300%3B%0A++++const+size_t+++h++++++++%3D+200%3B%0A%0A++++//+View+into+R-G-B+channels+of+an+image+as+individual+matrices%0A++++mvl::ConstStridedMatrixView%3Cuint8_t%3E+R(w,+h,+0,+channels,+data+%2B+0)%3B%0A++++mvl::ConstStridedMatrixView%3Cuint8_t%3E+G(w,+h,+0,+channels,+data+%2B+1)%3B%0A++++mvl::ConstStridedMatrixView%3Cuint8_t%3E+B(w,+h,+0,+channels,+data+%2B+2)%3B%0A%0A++++//+Convert+image+to+grayscale+using+linear+formula%0A++++mvl::Matrix%3Cuint8_t%3E+grayscale(w,+h,+%5B%26%5D(size_t+i,+size_t+j)%7B%0A++++++++return+0.2126+*+R(i,+j)++%2B+0.7152+*+G(i,+j)+%2B+0.0722+*+B(i,+j)%3B%0A++++%7D)%3B%0A%0A++++return+0%3B%0A%7D%0A'),l:'5',n:'0',o:'C%2B%2B+source+%231',t:'0')),k:71.71783148269105,l:'4',n:'0',o:'',s:0,t:'0'),(g:!((g:!((h:compiler,i:(compiler:clang1600,filters:(b:'0',binary:'1',binaryObject:'1',commentOnly:'0',debugCalls:'1',demangle:'0',directives:'0',execute:'0',intel:'0',libraryCode:'0',trim:'1',verboseDemangling:'0'),flagsViewOpen:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,libs:!(),options:'-std%3Dc%2B%2B17+-O2',overrides:!(),selection:(endColumn:1,endLineNumber:1,positionColumn:1,positionLineNumber:1,selectionStartColumn:1,selectionStartLineNumber:1,startColumn:1,startLineNumber:1),source:1),l:'5',n:'0',o:'+x86-64+clang+16.0.0+(Editor+%231)',t:'0')),header:(),l:'4',m:50,n:'0',o:'',s:0,t:'0'),(g:!((h:output,i:(compilerName:'x86-64+clang+16.0.0',editorid:1,fontScale:14,fontUsePx:'0',j:1,wrap:'1'),l:'5',n:'0',o:'Output+of+x86-64+clang+16.0.0+(Compiler+%231)',t:'0')),k:46.69421860597116,l:'4',m:50,n:'0',o:'',s:0,t:'0')),k:28.282168517308946,l:'3',n:'0',o:'',t:'0')),l:'2',n:'0',o:'',t:'0')),version:4) ]
-
 ```cpp
 using namespace utl;
 
@@ -1315,8 +1315,6 @@ mvl::Matrix<uint8_t> grayscale(w, h, [&](size_t i, size_t j){
 ```
 
 ### Working with sparse matrices
-
-[ [Run this code](https://godbolt.org/#z:OYLghAFBqd5QCxAYwPYBMCmBRdBLAF1QCcAaPECAMzwBtMA7AQwFtMQByARg9KtQYEAysib0QXACx8BBAKoBnTAAUAHpwAMvAFYTStJg1DIApACYAQuYukl9ZATwDKjdAGFUtAK4sGIAKykrgAyeAyYAHI%2BAEaYxAGkAA6oCoRODB7evgnJqY4CoeFRLLHxgXaYDulCBEzEBJk%2BfuWY9vkMNXUEhZExcQkKtfWN2eVD3WG9Jf3%2BAJS2qF7EyOwc5gDMYcjeWADUJutuCAQEiQogAPQXxEwA7gB0wIQIXtFeSsuyjAT3aCwXABEWIRiHgLKhgOhDKgAG4XOQAFWCFxYTEGcQuqSM9AA%2Blsdph4Uj7ghEokDtgTBoAIJU6lhAi7VFhCCzfYAdisNN2PN27zCwF2zDYCkSTBWfIItAOXOpvP23N5V12bmImCYBEwu1FdSUTI1oNUuyoxFQLF2BFBiXoBAUdPlLBhtBAICEYuISgAsga8KoDm4GRTdtSIOtSLswxzZfL5SZORpwwndlw4wDSPaYzy4xYuOHc7szKn04rM9mzOHyxHUxms%2ByAbMZXSa7tlUdKgBrC0IDXa9161GW327NCCJhhBS7Qy7VqYNiCZtoj4ECDB36yMcMBR4hhYVQQfNcNkHAHHi3ELxa3YN9bR3mLuLL1cj2rj7e7/cVo/rE/f41iPXXrKzatgIMIPr2upagOhoWqguxYJumDNo6zogN6g5%2BocgbrNgmY8ghSg4nKp60jewEXCqoHgQRUE%2BkaRAQR6SElkyToum6kHoYa/rYbhOpMUR%2By/jRRGNjSzaDOgLpoF4BDNrGhz%2BvsZiFv4bgMBsGzBrsED8UoR5mOsmlqRpJnmGYeGWTG/pKShLr8MQA4umiOLQb6K6ZtSDYsQpbhKeZJhmYZWlyrpfZaiOYH1Jg6CwfBjD6cpRnBWZQUWTZhysahDlOSALluXu8WIUR3lynhGVuMpqnqZphnaRANHDlR0WxQxemYAZyVGalNUqUJfmZXZIA5RqzlbgVYWQSVYm0nWdIcPMzocP4vB%2BBwWikKgnB%2BZY1jaosyxahsPCkAQmgLfM7YgOyXD3Dd7IABzrFID1mAAbAAnFwGiBEtkiredm2cLw5wJmd60LaQcCwDAiAoGaiR0HE5CUH8iP0PE2yGMAXBvRoCY0LQmoepQ0SA9EYR1AAnpwJ0U8wxBUwA8tE2iVODJ1/HOBBMwwtA0xDpBYG8wBuGItDnNwvBYKi2KrBt%2BBqlUYGSxtmCqJUsny7wDKtIDtB4NENyMx4WCA4OLC07wUXRCkmAArO2MG0Y53zFQBjAAoABqeCYLcTOJIwVsyIIIhiOwUgh/IShqIDui5gYLumLtlj6Ib5yQPMqCJO0ksALSSceydWJYXDsrsedM2YvCwnEoJYBnrK2DOVTOBArgjH4uYhJMxSlHouRpAIncDykQ8MD0ff9LmFStx04wjzPLftJ09ST308QzwvnhNHogxdOv0yb/MCgHSsEiLZwK2kGtG1bRwuyqA9b1529kjDongq4/cGg/zpuCEBIElQ8vBwZaFmPMBA6osDxCbn9Xglt/AJlvjXYGtgQBg1dlDWGEAkCLFOLJFGEA0ZI2IBEVgqwn4vzfh/bGyY3o/x/rwGKgD656H4KHUQ4hI4cOjiodQgt46kFuDcRIVtL7LQBoLe%2BTNZKJFkrsVAVBH7P1fu/LGRh6GMI0DpDwLB0ZxGAbMUBrtLogEkAwz6kgzBcGfj9D6N1cb6E4P9UgiDkGA3viDDBp1TGkCumYB69xAk2Leg9fwZd1gaAeh9CxziODrCkXfNBYCLrxOrjfTxKS/FRVSM4SQQA) ]
 
 ```cpp
 using namespace utl;
@@ -1367,12 +1365,13 @@ Tensor [size = 3] (3 x 3):
   [ - - 3 ]
 ```
 
-## Work in progress
+## Roadmap for v1.0.0 release
 
-- `Benchmarks` section (basic ones already done, better style and coverage needed)
-- Specializations with `Dimension::VECTOR` (lots of repetitive work, nothing conceptually new)
-- A way of indexing a sparse matrix like a dense one and setting a "default element" that is different from default-initialized (there exists a solution with next to no additional overhead, but it requires some careful thought on the API)
-- Operators `+`, `-`, `*`, `+=`, `-=`, `*=` (currently considering whether providing these is in spirit of the library)
-- Some additional algorithms like `sample()`, `shuffle()`, `clamp()` (simply not implemented yet)
-- Matrix concatenation functions (simply not implemented yet)
-- More examples
+- Allow usage of static matrix extents
+- Vector specializations
+- Sparse matrices with a different "default element"
+- Binary element-wise operators `+`, `-`, `*`, `+=`, `-=`, `*=` and etc.
+- Matrix multiplication
+- Matrix concatenation
+- Additional algorithms: `sample()`, `shuffle()`, `clamp()` and etc.
+- Benchmarks

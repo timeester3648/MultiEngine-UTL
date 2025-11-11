@@ -1,5 +1,722 @@
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ DmitriBogdanov/UTL ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //
+// Module:        utl::assertion
+// Documentation: https://github.com/DmitriBogdanov/UTL/blob/master/docs/module_assertion.md
+// Source repo:   https://github.com/DmitriBogdanov/UTL
+//
+// This project is licensed under the MIT License
+//
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+#if !defined(UTL_PICK_MODULES) || defined(UTL_MODULE_ASSERTION)
+
+#ifndef utl_assertion_headerguard
+#define utl_assertion_headerguard
+
+#define UTL_ASSERTION_VERSION_MAJOR 1
+#define UTL_ASSERTION_VERSION_MINOR 0
+#define UTL_ASSERTION_VERSION_PATCH 4
+
+// _______________________ INCLUDES _______________________
+
+#include <array>       // array<>
+#include <cstdlib>     // abort()
+#include <functional>  // function<>
+#include <iostream>    // cerr
+#include <mutex>       // mutex, scoped_lock
+#include <sstream>     // ostringstream
+#include <string>      // string
+#include <string_view> // string_view
+#include <utility>     // forward(), move()
+
+// ____________________ DEVELOPER DOCS ____________________
+
+// The key to nice assertion messages is expression decomposition, we want to print something like:
+//    | Error: assertion {x + y < z} evaluated to {4 < 3}
+// instead of a regular message with no diagnostics.
+//
+// Lets consider some expression, for example 'x + y > z * 4'. Ideally, we want to non-intrusively decompose this
+// expression into its individual parts so we can print the values of all variables ('x', 'y' and 'z').
+//
+// In a general case this is not possible in C++, however if we restrict expressions to the form:
+//    | {lhs} {comparison} {rhs}
+// where 'lhs' and 'rhs' are some values evaluated before the 'comparison', then we can use a certain trick
+// based on operator precedence to extract and print 'lhs' / 'rhs' / 'comparison'. For the example above we have:
+//    | x + y <= z * 4
+//    | ^^^^^    ^^^^^
+//    | {lhs}    {rhs}
+//
+// Now let's declare:
+//    - 'Info'          object which carries assertion info (callsite, message, etc.)
+//    - 'UnaryCapture'  object which carries 'info' + 'lhs'
+//    - 'BinaryCapture' object which carries 'info' + 'lhs' + 'rhs'
+// and write:
+//    | info < x + y <= z * 4
+// which is a non-intrusive expression which will look like
+//    | info < {expr}
+// when evaluated in a general macro.
+//
+// We can declare custom 'operator<()' that wraps 'info' + 'lhs' into an 'UnaryCapture', and custom set of comparisons
+// turning 'UnaryCapture' + 'rhs' into a 'BinaryCapture'. Due to the operator precedence 'lhs' / 'rhs' will be evaluated
+// before the comparisons so we can always capture them. This might produce some warnings, but we can silence them.
+//
+// After this the captured expression can be forwarded to a relatively standard assertion handler, which will use
+// this decomposition for pretty printing and more debug info. Performance-wise the cost should be minimal since
+// this is effectively the same thing as expression templates, but simpler.
+
+// ____________________ IMPLEMENTATION ____________________
+
+namespace utl::assertion::impl {
+
+// ===============
+// --- Utility ---
+// ===============
+
+template <class T>
+[[nodiscard]] std::string stringify(const T& value) {
+    return (std::ostringstream{} << value).str(); // in C++20 can be done much faster with std::format
+}
+
+template <class... Args>
+void append_fold(std::string& str, const Args&... args) {
+    ((str += args), ...);
+} // faster than 'std::ostringstream'
+
+[[nodiscard]] inline std::string_view trim_to_filename(std::string_view path) {
+    const std::size_t last_slash = path.find_last_of("/\\");
+    return path.substr(last_slash + 1);
+}
+
+namespace colors {
+
+constexpr std::string_view cyan         = "\033[36m";
+constexpr std::string_view bold_red     = "\033[31;1m";
+constexpr std::string_view bold_blue    = "\033[34;1m";
+constexpr std::string_view bold_magenta = "\033[35;1m";
+constexpr std::string_view reset        = "\033[0m";
+
+} // namespace colors
+
+// SFINAE to restrict assertion captures to printable types. It doesn't affect functionality
+// since non-printable types would cause compile error regardless, but we can use it to
+// improve LSP highlighting and error message by failing the instantiation early
+template <class T, class = void>
+struct is_printable : std::false_type {};
+
+template <class T>
+struct is_printable<T, std::void_t<decltype(std::declval<std::ostringstream>() << std::declval<T>())>>
+    : std::true_type {};
+
+// =============================
+// --- Decomposed operations ---
+// =============================
+
+enum class Operation : std::size_t {
+    EQ  = 0, // ==
+    NEQ = 1, // !=
+    LEQ = 2, // <=
+    GEQ = 3, // >=
+    L   = 4, // <
+    G   = 5  // >
+};
+
+constexpr std::array<const char*, 6> op_names = {" == ", " != ", " <= ", " >= ", " < ", " > "};
+
+// ======================
+// --- Assertion info ---
+// ======================
+
+// Lightweight struct that captures the assertion context internally
+struct Info {
+    const char* file;
+    int         line;
+    const char* func;
+
+    const char* expression;
+    const char* context;
+};
+
+// Once we hit a slow failure path we can convert internal info to a nicer format for public API
+class FailureInfo {
+    std::string evaluated_string;
+    // since evaluated string is constructed at runtime we have to store it here,
+    // while exposing string_view in a public API for the sake of uniformity
+
+public:
+    FailureInfo(const Info& info, std::string evaluated_string)
+        : evaluated_string(std::move(evaluated_string)), file(info.file), line(static_cast<std::size_t>(info.line)),
+          func(info.func), expression(info.expression), evaluated(this->evaluated_string), context(info.context) {}
+
+    std::string_view file;
+    std::size_t      line;
+    std::string_view func;
+
+    std::string_view expression;
+    std::string_view evaluated;
+    std::string_view context;
+
+    [[nodiscard]] std::string to_string(bool color = false) const {
+        constexpr auto indent_single = "    ";
+        constexpr auto indent_double = "        ";
+
+        const auto color_assert    = color ? colors::bold_red : "";
+        const auto color_file      = color ? colors::bold_blue : "";
+        const auto color_func      = color ? colors::bold_magenta : "";
+        const auto color_text      = color ? colors::bold_red : "";
+        const auto color_expr      = color ? colors::cyan : "";
+        const auto color_evaluated = color ? colors::cyan : "";
+        const auto color_context   = color ? colors::cyan : "";
+        const auto color_reset     = color ? colors::reset : "";
+
+        std::string res;
+
+#ifdef UTL_ASSERTION_ENABLE_FULL_PATHS
+        const auto displayed_file = this->file;
+#else
+        const auto displayed_file = trim_to_filename(this->file);
+#endif
+
+        // "Assertion failed at {file}:{line}: {func}"
+        append_fold(res, color_assert, "Assertion failed at ", color_reset);
+        append_fold(res, color_file, displayed_file, ":", std::to_string(this->line), color_reset);
+        append_fold(res, color_assert, ": ", color_reset, color_func, this->func, color_reset, '\n');
+        // "Where condition: {expr}"
+        append_fold(res, indent_single, color_text, "Where condition:", color_reset, color_reset, '\n');
+        append_fold(res, indent_double, color_expr, this->expression, color_reset, '\n');
+        // "Evaluated to: {eval}"
+        append_fold(res, indent_single, color_text, "Evaluated to:", color_reset, '\n');
+        append_fold(res, indent_double, color_evaluated, this->evaluated, color_reset, '\n');
+        // "Context: {message}"
+        append_fold(res, indent_single, color_text, "Context:", color_reset, '\n');
+        append_fold(res, color_context, indent_double, this->context, color_reset, '\n');
+
+        // Note: Trimming path to
+
+        return res;
+    }
+};
+
+// =======================
+// --- Failure handler ---
+// =======================
+
+inline void standard_handler(const FailureInfo& info) {
+    std::cerr << info.to_string(true) << std::endl;
+    std::abort();
+}
+
+class GlobalHandler {
+    std::function<void(const FailureInfo&)> handler = standard_handler;
+    std::mutex                              mutex;
+    // regular 'assert()' doesn't need thread safety since it always aborts, in a general case
+    // with custom handlers however thread safety on failure should be provided
+
+public:
+    static GlobalHandler& instance() {
+        static GlobalHandler handler;
+        return handler;
+    }
+
+    void set(std::function<void(const FailureInfo&)> new_handler) {
+        const std::scoped_lock lock(this->mutex);
+
+        this->handler = std::move(new_handler);
+    }
+
+    void invoke(const FailureInfo& info) {
+        const std::scoped_lock lock(this->mutex);
+
+        this->handler(info);
+    }
+};
+
+inline void set_handler(std::function<void(const FailureInfo&)> new_handler) {
+    GlobalHandler::instance().set(std::move(new_handler));
+}
+
+// =====================
+// --- Unary capture ---
+// =====================
+
+template <class T>
+struct UnaryCapture {
+    static_assert(is_printable<T>::value,
+                  "Decomposed expression values should be printable with 'std::ostream::operator<<()'.");
+
+    const Info& info;
+
+    T value;
+
+    FailureInfo get_failure_info() const {
+        if constexpr (std::is_same_v<std::decay_t<T>, bool>) {
+            return {this->info, "false"}; // makes boolean case look nicer
+        } else if constexpr (std::is_pointer_v<std::decay_t<T>>) {
+            return {this->info, "nullptr (converts to false)"}; // makes pointer case look nicer
+        } else {
+            std::string evaluated = stringify(this->value) + " (converts to false)";
+            return {this->info, std::move(evaluated)};
+        }
+    }
+};
+
+template <class T>
+UnaryCapture<T> operator<(const Info& info, T&& value) noexcept(noexcept(T(std::forward<T>(value)))) {
+    return {info, std::forward<T>(value)};
+} // Note: Successful assertions should be 'noexcept' if possible, this also applies to the binary case
+
+template <class T>
+void handle_capture(UnaryCapture<T>&& capture) {
+    if (static_cast<bool>(capture.value)) return; // some compilers might complain without explicit casting
+    GlobalHandler::instance().invoke(capture.get_failure_info());
+}
+
+// ======================
+// --- Binary capture ---
+// ======================
+
+template <class T, class U, Operation Op>
+struct BinaryCapture {
+    static_assert(is_printable<T>::value && is_printable<U>::value,
+                  "Decomposed expression values should be printable with 'std::ostream::operator<<()'.");
+
+    const Info& info;
+
+    T lhs;
+    U rhs;
+
+    FailureInfo get_failure_info() const {
+        constexpr std::size_t op_index = static_cast<std::size_t>(Op);
+
+        std::string evaluated = stringify(this->lhs) + op_names[op_index] + stringify(this->rhs);
+        return {this->info, std::move(evaluated)};
+    }
+};
+
+// Macro to avoid 6x code repetition
+#define utl_assertion_define_binary_capture_op(op_enum_, op_)                                                          \
+    template <class T, class U>                                                                                        \
+    BinaryCapture<T, U, op_enum_> operator op_(UnaryCapture<T>&& lhs, U&& rhs) noexcept(                               \
+        std::is_nothrow_move_constructible_v<T> && noexcept(U(std::forward<U>(rhs)))) {                                \
+                                                                                                                       \
+        return {lhs.info, std::move(lhs).value, std::forward<U>(rhs)};                                                 \
+    }                                                                                                                  \
+                                                                                                                       \
+    template <class T, class U>                                                                                        \
+    void handle_capture(BinaryCapture<T, U, op_enum_>&& capture) {                                                     \
+        if (capture.lhs op_ capture.rhs) return;                                                                       \
+        GlobalHandler::instance().invoke(capture.get_failure_info());                                                  \
+    }                                                                                                                  \
+                                                                                                                       \
+    static_assert(true)
+
+utl_assertion_define_binary_capture_op(Operation::EQ, ==);
+utl_assertion_define_binary_capture_op(Operation::NEQ, !=);
+utl_assertion_define_binary_capture_op(Operation::LEQ, <=);
+utl_assertion_define_binary_capture_op(Operation::GEQ, >=);
+utl_assertion_define_binary_capture_op(Operation::L, <);
+utl_assertion_define_binary_capture_op(Operation::G, >);
+
+#undef utl_assertion_define_binary_capture_op
+
+// =======================
+// --- Pretty function ---
+// =======================
+
+// Makes assertion diagnostics a bit nicer
+#if defined(__clang__) || defined(__GNUC__)
+#define utl_check_pretty_function __PRETTY_FUNCTION__
+#elif defined(_MSC_VER)
+#define utl_check_pretty_function __FUNCSIG__
+#else
+#define utl_check_pretty_function __func__
+#endif
+
+// ======================================
+// --- Macros with optional arguments ---
+// ======================================
+
+// Standard-compliant macro to achieve macro overloading. This could be achieved easier with a common
+// GCC/clang/MSVC extension that removes a trailing '__VA_ARGS__' comma, or with C++20 '__VA_OPT__'.
+// Here we have a pedantic implementation for up to 3 args based on the notes of Jason Deng & Kuukunen,
+// see: https://stackoverflow.com/questions/3046889/optional-parameters-with-c-macros
+
+#define utl_assertion_func_chooser(_f0, _f1, _f2, _f3, ...) _f3
+#define utl_assertion_func_composer(enclosed_args_) utl_assertion_func_chooser enclosed_args_
+#define utl_assertion_choose_from_arg_count(F, ...) utl_assertion_func_composer((__VA_ARGS__, F##_3, F##_2, F##_1, ))
+#define utl_assertion_narg_expander(f_) , , , f_##_0
+#define utl_assertion_macro_chooser(f_, ...)                                                                           \
+    utl_assertion_choose_from_arg_count(f_, utl_assertion_narg_expander __VA_ARGS__(f_))
+
+#define utl_assertion_overloaded_macro(f_, ...) utl_assertion_macro_chooser(f_, __VA_ARGS__)(__VA_ARGS__)
+
+// ===================================
+// --- Assert macro implementation ---
+// ===================================
+
+#define utl_assertion_impl_2(expr_, context_)                                                                          \
+    utl::assertion::impl::handle_capture(                                                                              \
+        utl::assertion::impl::Info{__FILE__, __LINE__, utl_check_pretty_function, #expr_, context_} < expr_)
+
+#define utl_assertion_impl_1(expr_) utl_assertion_impl_2(expr_, "<no context provided>")
+
+#define utl_assertion_impl_0() static_assert(false, "Cannot invoke an assertion with no arguments.")
+
+} // namespace utl::assertion::impl
+
+// ______________________ PUBLIC API ______________________
+
+// =======================
+// --- Assertion macro ---
+// =======================
+
+// Disable false positive warning about operator precedence,
+// while error-prone for the regular use cases 'expr < lhs < rhs'
+// in this context is exactly what we want since this is the only way
+// of implementing the desired expression decomposition.
+#ifdef __clang__
+#pragma clang diagnostic ignored "-Wparentheses"
+#pragma clang diagnostic push
+#elif __GNUC__
+#pragma GCC diagnostic ignored "-Wparentheses"
+#pragma GCC diagnostic push
+#endif
+
+#if !defined(NDEBUG) || defined(UTL_ASSERTION_ENABLE_IN_RELEASE)
+#define UTL_ASSERTION(...) utl_assertion_overloaded_macro(utl_assertion_impl, __VA_ARGS__)
+#else
+#define UTL_ASSERTION(...) static_assert(true)
+#endif
+
+// Turn the warnings back on
+#ifdef __clang__
+#pragma clang diagnostic pop
+#elif __GNUC__
+#pragma GCC diagnostic pop
+#endif
+
+// =========================
+// --- Optional shortcut ---
+// =========================
+
+#ifdef UTL_ASSERTION_ENABLE_SHORTCUT
+#define ASSERT(...) UTL_ASSERTION(__VA_ARGS__)
+#endif
+
+// =====================
+// --- Non-macro API ---
+// =====================
+
+namespace utl::assertion {
+
+using impl::FailureInfo;
+
+using impl::set_handler;
+
+} // namespace utl::assertion
+
+#endif
+#endif // module utl::assertion
+
+
+
+
+
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ DmitriBogdanov/UTL ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+//
+// Module:        utl::bit
+// Documentation: https://github.com/DmitriBogdanov/UTL/blob/master/docs/module_bit.md
+// Source repo:   https://github.com/DmitriBogdanov/UTL
+//
+// This project is licensed under the MIT License
+//
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+#if !defined(UTL_PICK_MODULES) || defined(UTL_MODULE_BIT)
+
+#ifndef utl_bit_headerguard
+#define utl_bit_headerguard
+
+#define UTL_BIT_VERSION_MAJOR 1
+#define UTL_BIT_VERSION_MINOR 0
+#define UTL_BIT_VERSION_PATCH 2
+
+// _______________________ INCLUDES _______________________
+
+#include <cassert>          // assert()
+#include <climits>          // CHAR_BIT
+#include <cstddef>          // size_t
+#include <initializer_list> // initializer_list<>
+#include <limits>           // numeric_limits<>::digits
+#include <type_traits>      // enable_if_t<>, is_integral_v<>, is_enum_v<>
+
+// ____________________ DEVELOPER DOCS ____________________
+
+// With C++20 following functions will be added into std:
+// - 'std::bit_width()' replaces 'bit::width()'
+// - 'std::rotl()'      replaces 'bit::rotl()'
+// - 'std::rotr()'      replaces 'bit::rotr()'
+// the only difference is that std functions accept unsigned integers only,
+// while 'bit::' accepts both signed & unsigned by treating signed as unsigned
+// during bitwise operations, see notes below on why we can do it.
+//
+// Note that documented order of segments slightly differs from the actual
+// implementation since we need to have some group operations defined upfront.
+
+// ____________________ IMPLEMENTATION ____________________
+
+namespace utl::bit::impl {
+
+// Ensure target is two's complement, this includes pretty much every platform ever to
+// the point that C++20 standardizes two's complement encoding as a requirement,
+// this check exists purely to be pedantic and document our assumptions strictly
+static_assert((-1 & 3) == 3);
+// before C++20 following options could technically be the case:
+//    1. (-1 & 3) == 1 => target is sign & magnitude encoded
+//    2. (-1 & 3) == 2 => target is one's complement
+//    3. (-1 & 3) == 3 => target is two's complement
+// other integer encodings are not possible in the standard
+
+// Note 1:
+// The reason we specify two's complement encoding is because in it
+// signed <-> unsigned casting preserves the bit pattern
+
+// Note 2:
+// Shifting negative numbers is technically considered UB, in practice every compiler implements
+// signed bitshift as '(signed)( (unsigned)x << shift )' however they still act as if calling shift
+// on a negative 'x < 0' is UB and therefore can never happen which can lead to weirdness with what
+// compiler considers to be dead code elimination. This is why we do the casting explicitly and
+// use custom 'lshift()' and 'rshift()' to avoid possible UB.
+// see https://stackoverflow.com/a/29710927/28607141
+
+// =============
+// --- Utils ---
+// =============
+
+// --- SFINAE helpers ---
+// ----------------------
+
+template <bool Cond>
+using require = std::enable_if_t<Cond, bool>; // makes SFINAE a bit less cumbersome
+
+template <class T>
+using require_integral = require<std::is_integral_v<T>>;
+
+template <class T>
+using require_enum = require<std::is_enum_v<T>>;
+
+// --- Getters ---
+// ---------------
+
+constexpr std::size_t byte_size = CHAR_BIT;
+
+template <class T>
+constexpr std::size_t size_of = sizeof(T) * byte_size;
+
+// ============================
+// --- Group Bit Operations ---
+// ============================
+
+// Left shift,
+// unlike regular '<<' works properly with negative values, see notes above
+// undefined behavior if 'shift >= bit_sizeof<T>'
+template <class T, require_integral<T> = true>
+[[nodiscard]] constexpr T lshift(T value, std::size_t shift) noexcept {
+    assert(shift < size_of<T>);
+    return static_cast<T>(static_cast<std::make_unsigned_t<T>>(value) << shift);
+}
+
+// Right shift,
+// unlike regular '>>' works properly with negative values, see notes above
+// undefined behavior if 'shift >= bit_sizeof<T>'
+template <class T, require_integral<T> = true>
+[[nodiscard]] constexpr T rshift(T value, std::size_t shift) noexcept {
+    assert(shift < size_of<T>);
+    return static_cast<T>(static_cast<std::make_unsigned_t<T>>(value) >> shift);
+}
+
+// Circular left rotate,
+// undefined behavior if 'shift >= bit_sizeof<T>'
+template <class T, require_integral<T> = true>
+[[nodiscard]] constexpr T rotl(T value, std::size_t shift) noexcept {
+    assert(shift < size_of<T>);
+    return lshift(value, shift) | rshift(value, std::numeric_limits<T>::digits - shift);
+}
+
+// Circular right rotate,
+// undefined behavior if 'shift >= bit_sizeof<T>'
+template <class T, require_integral<T> = true>
+[[nodiscard]] constexpr T rotr(T value, std::size_t shift) noexcept {
+    assert(shift < size_of<T>);
+    return lshift(value, std::numeric_limits<T>::digits - shift) | rshift(value, shift);
+}
+
+// ================
+// --- Counters ---
+//  ===============
+
+// Equivalent to C++20 'std::bit_width', but works with signed integers
+template <class T, require_integral<T> = true>
+[[nodiscard]] constexpr std::size_t width(T value) noexcept {
+    auto        uvalue = static_cast<std::make_unsigned_t<T>>(value);
+    std::size_t count  = 0;
+    while (uvalue) ++count, uvalue >>= 1;
+    return count;
+    // can be done faster if we write in a "nasty" way, see https://graphics.stanford.edu/~seander/bithacks.html
+    // this isn't done because at the end of the day the truly fast way of doing it is though intrinsics directly,
+    // better keep the non-intrinsic implementation clean & generic and hope that compiler realizes what we're doing
+}
+
+template <class T, require_integral<T> = true>
+[[nodiscard]] constexpr std::size_t popcount(T value) noexcept {
+    constexpr auto bitmask_1 = static_cast<T>(0x5555555555555555UL);
+    constexpr auto bitmask_2 = static_cast<T>(0x3333333333333333UL);
+    constexpr auto bitmask_3 = static_cast<T>(0x0F0F0F0F0F0F0F0FUL);
+
+    constexpr auto bitmask_16 = static_cast<T>(0x00FF00FF00FF00FFUL);
+    constexpr auto bitmask_32 = static_cast<T>(0x0000FFFF0000FFFFUL);
+    constexpr auto bitmask_64 = static_cast<T>(0x00000000FFFFFFFFUL);
+
+    value = (value & bitmask_1) + (rshift(value, 1) & bitmask_1);
+    value = (value & bitmask_2) + (rshift(value, 2) & bitmask_2);
+    value = (value & bitmask_3) + (rshift(value, 4) & bitmask_3);
+
+    if constexpr (sizeof(T) > 1) value = (value & bitmask_16) + (rshift(value, 8) & bitmask_16);
+    if constexpr (sizeof(T) > 2) value = (value & bitmask_32) + (rshift(value, 16) & bitmask_32);
+    if constexpr (sizeof(T) > 4) value = (value & bitmask_64) + (rshift(value, 32) & bitmask_64);
+
+    return value;
+    // GCC seems to be smart enough to replace this with a built-in
+}
+
+// =================================
+// --- Individual Bit Operations ---
+// =================================
+
+// Get individual bits,
+// undefined behavior if 'bit >= bit_sizeof<T>'
+template <class T, require_integral<T> = true>
+[[nodiscard]] constexpr bool get(T value, std::size_t bit) noexcept {
+    assert(bit < size_of<T>);
+    return rshift(value, bit) & T(1);
+}
+
+// Set individual bits,
+// undefined behavior if 'bit >= bit_sizeof<T>'
+template <class T, require_integral<T> = true>
+constexpr T set(T value, std::size_t bit) noexcept {
+    assert(bit < size_of<T>);
+    return value | lshift(T(1), bit);
+}
+
+// Clear individual bits,
+// undefined behavior if 'bit >= bit_sizeof<T>'
+template <class T, require_integral<T> = true>
+constexpr T clear(T value, std::size_t bit) noexcept {
+    assert(bit < size_of<T>);
+    return value & ~lshift(T(1), bit);
+}
+
+// Flip individual bits,
+// undefined behavior if 'bit >= bit_sizeof<T>'
+template <class T, require_integral<T> = true>
+constexpr T flip(T value, std::size_t bit) noexcept {
+    assert(bit < size_of<T>);
+    return value ^ lshift(T(1), bit);
+}
+
+// =====================
+// --- Enum Bitflags ---
+// =====================
+
+template <class E, require_enum<E> = true>
+[[nodiscard]] constexpr auto to_underlying(E value) noexcept {
+    return static_cast<std::underlying_type_t<E>>(value); // in C++23 gets replaced by 'std::to_underlying()'
+}
+
+template <class T, require_integral<T> = true>
+[[nodiscard]] constexpr auto to_bool(T value) noexcept {
+    return static_cast<bool>(value);
+}
+
+// Thin wrapper around an enum that gives it bitflag semantics
+template <class E, require_enum<E> = true>
+class Flags {
+    std::underlying_type_t<E> data{};
+
+    constexpr Flags(std::underlying_type_t<E> value) noexcept : data(value) {}
+
+public:
+    // clang-format off
+    constexpr Flags(E flag) noexcept : data(to_underlying(flag)) {}
+    constexpr Flags(std::initializer_list<E> flag_list) noexcept { for (auto flag : flag_list) this->add(flag); }
+    
+    constexpr operator bool() const noexcept { return to_bool(this->data); }
+    
+    [[nodiscard]] constexpr E get() const noexcept { return static_cast<E>(this->data); }
+
+    [[nodiscard]] constexpr bool contains(E      flag) const noexcept { return to_bool(this->data & to_underlying(flag)); }
+    [[nodiscard]] constexpr bool contains(Flags other) const noexcept { return to_bool(this->data & other.data         ); }
+
+    constexpr Flags& add(E      flag) noexcept { this->data |= to_underlying(flag); return *this; }
+    constexpr Flags& add(Flags other) noexcept { this->data |= other.data;          return *this; }
+
+    constexpr Flags& remove(E      flag) noexcept { this->data &= ~to_underlying(flag); return *this; }
+    constexpr Flags& remove(Flags other) noexcept { this->data &= ~other.data;          return *this; }
+
+    [[nodiscard]] constexpr Flags operator~() const noexcept { return Flags{~this->data}; };
+    
+    [[nodiscard]] constexpr Flags operator|(Flags other) const noexcept { return Flags{this->data | other.data}; }
+    [[nodiscard]] constexpr Flags operator&(Flags other) const noexcept { return Flags{this->data & other.data}; }
+    
+    constexpr Flags& operator|=(Flags other) noexcept { this->data |= other.data; return *this; }
+    constexpr Flags& operator&=(Flags other) noexcept { this->data &= other.data; return *this; }
+    
+    [[nodiscard]] constexpr bool operator==(Flags other) noexcept { return this->data == other.data; }
+    [[nodiscard]] constexpr bool operator!=(Flags other) noexcept { return this->data != other.data; }
+    [[nodiscard]] constexpr bool operator<=(Flags other) noexcept { return this->data <= other.data; }
+    [[nodiscard]] constexpr bool operator>=(Flags other) noexcept { return this->data >= other.data; }
+    [[nodiscard]] constexpr bool operator< (Flags other) noexcept { return this->data <  other.data; }
+    [[nodiscard]] constexpr bool operator> (Flags other) noexcept { return this->data >  other.data; }
+    // clang-format on
+};
+
+} // namespace utl::bit::impl
+
+// ______________________ PUBLIC API ______________________
+
+namespace utl::bit {
+
+using impl::get;
+using impl::set;
+using impl::clear;
+using impl::flip;
+
+using impl::lshift;
+using impl::rshift;
+using impl::rotl;
+using impl::rotr;
+
+using impl::byte_size;
+using impl::size_of;
+
+using impl::width;
+using impl::popcount;
+
+using impl::Flags;
+
+} // namespace utl::bit
+
+#endif
+#endif // module utl::bit
+
+
+
+
+
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ DmitriBogdanov/UTL ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+//
 // Module:        utl::enum_reflect
 // Documentation: https://github.com/DmitriBogdanov/UTL/blob/master/docs/module_enum_reflect.md
 // Source repo:   https://github.com/DmitriBogdanov/UTL
@@ -8,43 +725,46 @@
 //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-#if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_ENUM_REFLECT)
-#ifndef UTLHEADERGUARD_ENUM_REFLECT
-#define UTLHEADERGUARD_ENUM_REFLECT
+#if !defined(UTL_PICK_MODULES) || defined(UTL_MODULE_ENUM_REFLECT)
+
+#ifndef utl_enum_reflect_headerguard
+#define utl_enum_reflect_headerguard
+
+#define UTL_ENUM_REFLECT_VERSION_MAJOR 1
+#define UTL_ENUM_REFLECT_VERSION_MINOR 0
+#define UTL_ENUM_REFLECT_VERSION_PATCH 2
 
 // _______________________ INCLUDES _______________________
 
-#include <array>       // array<>
-#include <cstddef>     // size_t
+#include <array>       // IWYU pragma: keep (used in a macro) | array<>, size_t
 #include <stdexcept>   // out_of_range
 #include <string>      // string
 #include <string_view> // string_view
-#include <type_traits> // underlying_type_t<>, enable_if_t<>, is_enum_v<>
-#include <utility>     // pair<>
 #include <tuple>       // tuple_size_v<>
+#include <type_traits> // underlying_type_t<>, enable_if_t<>, is_enum_v<>
+#include <utility>     // IWYU pragma: keep (used in a macro) | pair<>
 
 // ____________________ DEVELOPER DOCS ____________________
 
 // Reflection mechanism is based entirely around the map macro and a single struct with partial specialization for the
 // reflected enum. Map macro itself is quire non-trivial, but completely standard, a good explanation of how it works
-// can be found here: [https://github.com/swansontec/map-macro].
+// can be found here: https://github.com/swansontec/map-macro
 //
 // Once we have a map macro all reflection is a matter of simply mapping __VA_ARGS__ into a few "metadata"
 // arrays which we will then traverse to perform string conversions.
 //
 // Partial specialization allows for a pretty concise implementation and provides nice error messages due to
-// static_assert on incorrect template arguments.
+// 'static_assert()' on incorrect template arguments.
 //
 // An alternative frequently used way to do enum reflection is through constexpr parsing of strings returned by
 // compiler-specific '__PRETTY_FUNCTION__' and '__FUNCSIG__', it has a benefit of not requiring the reflection
-// macro however it hammers compile times and improses restrictions on enum values. Some issues such as binary
+// macro however it hammers compile times and imposes restrictions on enum values. Some issues such as binary
 // bloat and bitflag-enums can be worked around through proper implementation and some conditional metadata
-// templates, however such approach seems to be quite complex and unreliable (due to being compiler-specific),
-// better leave it to continuously supported libs like 'magic_enum'.
+// templates, however such approach tends to be quite complex.
 
 // ____________________ IMPLEMENTATION ____________________
 
-namespace utl::enum_reflect {
+namespace utl::enum_reflect::impl {
 
 // =================
 // --- Map macro ---
@@ -87,19 +807,16 @@ namespace utl::enum_reflect {
 
 // Note: 'erfl' is short for 'enum_reflect'
 
-// =======================
-// --- Enum reflection ---
-// =======================
-
-// --- Implementation ---
-// ----------------------
+// ============================
+// --- Reflection mechanism ---
+// ============================
 
 template <class>
-constexpr bool _always_false_v = false;
+constexpr bool always_false_v = false;
 
-template <class E>
-struct _meta {
-    static_assert(_always_false_v<E>,
+template <class Enum>
+struct Meta {
+    static_assert(always_false_v<Enum>,
                   "Provided enum does not have a defined reflection. Use 'UTL_ENUM_REFLECT' macro to define one.");
     // makes instantiation of this template a compile-time error
 };
@@ -107,13 +824,12 @@ struct _meta {
 // Helper macros for codegen
 #define utl_erfl_make_value(arg_) type::arg_
 #define utl_erfl_make_name(arg_) std::string_view(#arg_)
-#define utl_erfl_make_entry(arg_)                                                                                      \
-    std::pair { std::string_view(#arg_), type::arg_ }
+#define utl_erfl_make_entry(arg_) std::make_pair(std::string_view(#arg_), type::arg_)
 
 #define UTL_ENUM_REFLECT(enum_name_, ...)                                                                              \
     template <>                                                                                                        \
-    struct utl::enum_reflect::_meta<enum_name_> {                                                                      \
-        using type            = enum_name_;                                                                            \
+    struct utl::enum_reflect::impl::Meta<enum_name_> {                                                                 \
+        using type = enum_name_;                                                                                       \
                                                                                                                        \
         constexpr static std::string_view type_name = #enum_name_;                                                     \
                                                                                                                        \
@@ -122,55 +838,77 @@ struct _meta {
         constexpr static auto entries = std::array{utl_erfl_map_list(utl_erfl_make_entry, __VA_ARGS__)};               \
     }
 
-// --- Public API ---
-// ------------------
+// ======================
+// --- Reflection API ---
+// ======================
 
-template <class E>
-constexpr auto type_name = _meta<E>::type_name;
+template <class Enum>
+constexpr auto type_name = Meta<Enum>::type_name;
 
-template <class E>
-constexpr auto names = _meta<E>::names;
+template <class Enum>
+constexpr auto names = Meta<Enum>::names;
 
-template <class E>
-constexpr auto values = _meta<E>::values;
+template <class Enum>
+constexpr auto values = Meta<Enum>::values;
 
-template <class E>
-constexpr auto entries = _meta<E>::entries;
+template <class Enum>
+constexpr auto entries = Meta<Enum>::entries;
 
-template <class E>
-constexpr auto size = std::tuple_size_v<decltype(values<E>)>;
+template <class Enum>
+constexpr auto size = std::tuple_size_v<decltype(values<Enum>)>;
 
-template <class E, std::enable_if_t<std::is_enum_v<E>, bool> = true>
-[[nodiscard]] constexpr auto to_underlying(E value) noexcept {
-    return static_cast<std::underlying_type_t<E>>(value);
+template <class Enum, std::enable_if_t<std::is_enum_v<Enum>, bool> = true>
+[[nodiscard]] constexpr auto to_underlying(Enum value) noexcept {
+    return static_cast<std::underlying_type_t<Enum>>(value);
     // doesn't really require reflection, but might as well have it here,
-    // in C++23 gets replaced by builtin 'std::to_underlying'
+    // in C++23 gets replaced by 'std::to_underlying'
 }
 
-template <class E>
-[[nodiscard]] constexpr bool is_valid(E value) noexcept {
-    for (const auto& e : values<E>)
+template <class Enum>
+[[nodiscard]] constexpr bool is_valid(Enum value) noexcept {
+    for (const auto& e : values<Enum>)
         if (value == e) return true;
     return false;
 }
 
-template <class E>
-[[nodiscard]] constexpr std::string_view to_string(E val) {
-    for (const auto& [name, value] : entries<E>)
+template <class Enum>
+[[nodiscard]] constexpr std::string_view to_string(Enum val) {
+    for (const auto& [name, value] : entries<Enum>)
         if (val == value) return name;
 
-    throw std::out_of_range("enum_reflect::to_string<" + std::string(type_name<E>) + ">(): value " +
+    throw std::out_of_range("enum_reflect::to_string<" + std::string(type_name<Enum>) + ">(): value " +
                             std::to_string(to_underlying(val)) + " is not a part of enumeration.");
 }
 
-template <class E>
-[[nodiscard]] constexpr E from_string(std::string_view str) {
-    for (const auto& [name, value] : entries<E>)
+template <class Enum>
+[[nodiscard]] constexpr Enum from_string(std::string_view str) {
+    for (const auto& [name, value] : entries<Enum>)
         if (str == name) return value;
 
-    throw std::out_of_range("enum_reflect::from_string<" + std::string(type_name<E>) + ">(): name \"" +
+    throw std::out_of_range("enum_reflect::from_string<" + std::string(type_name<Enum>) + ">(): name \"" +
                             std::string(str) + "\" is not a part of enumeration.");
 }
+
+} // namespace utl::enum_reflect::impl
+
+// ______________________ PUBLIC API ______________________
+
+namespace utl::enum_reflect {
+
+// macro -> UTL_ENUM_REFLECT
+
+using impl::type_name;
+using impl::size;
+
+using impl::names;
+using impl::values;
+using impl::entries;
+
+using impl::is_valid;
+using impl::to_underlying;
+
+using impl::to_string;
+using impl::from_string;
 
 } // namespace utl::enum_reflect
 
@@ -192,179 +930,199 @@ template <class E>
 //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-#include <climits>
-#if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_INTEGRAL)
-#ifndef UTLHEADERGUARD_INTEGRAL
-#define UTLHEADERGUARD_INTEGRAL
+#if !defined(UTL_PICK_MODULES) || defined(UTL_MODULE_INTEGRAL)
+
+#ifndef utl_integral_headerguard
+#define utl_integral_headerguard
+
+#define UTL_INTEGRAL_VERSION_MAJOR 1
+#define UTL_INTEGRAL_VERSION_MINOR 0
+#define UTL_INTEGRAL_VERSION_PATCH 3
 
 // _______________________ INCLUDES _______________________
 
-#include <array>       // array<>
 #include <cassert>     // assert()
 #include <climits>     // CHAR_BIT
 #include <cstddef>     // size_t
 #include <cstdint>     // uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t
-#include <exception>   //
 #include <limits>      // numeric_limits<>::digits, numeric_limits<>::min(), numeric_limits<>::max()
-#include <stdexcept>   // std::domain_error
-#include <string>      // string, to_string()
+#include <stdexcept>   // domain_error
 #include <type_traits> // enable_if_t<>, is_integral_v<>, is_unsigned_v<>, make_unsigned_t<>
 
 // ____________________ DEVELOPER DOCS ____________________
 
-// NOTE: DOCS
+// With C++20 following functions will be added into 'std::':
+//    - cmp_equal()
+//    - cmp_not_equal()
+//    - cmp_less()
+//    - cmp_greater()
+//    - cmp_less_equal()
+//    - cmp_greater_equal()
+//
+// With C++26 following functions will be added into 'std::':
+//    - add_sat()
+//    - sub_sat()
+//    - mul_sat()
+//    - div_sat()
+//    - saturate_cast()
 
 // ____________________ IMPLEMENTATION ____________________
 
-namespace utl::integral {
+namespace utl::integral::impl {
 
-// --- Implementation utils ---
-// ----------------------------
+// ======================
+// --- SFINAE helpers ---
+// ======================
 
 template <bool Cond>
-using _require = std::enable_if_t<Cond, bool>; // makes SFINAE a bit less cumbersome
+using require = std::enable_if_t<Cond, bool>; // makes SFINAE a bit less cumbersome
 
 template <class T>
-using _require_integral = _require<std::is_integral_v<T>>;
+using require_integral = require<std::is_integral_v<T>>;
 
 template <class T>
-using _require_uint = _require<std::is_integral_v<T> && std::is_unsigned_v<T>>;
+using require_uint = require<std::is_integral_v<T> && std::is_unsigned_v<T>>;
 
-using _ull = unsigned long long;
+using ull = unsigned long long;
 
-// --- Bit twiddling ---
-// ---------------------
+// =================================
+// --- Rounding integer division ---
+// =================================
 
-using bit_type = bool;
+// Rounding integer division functions that can properly handle all signed
+// values and don't run into overflow issues are surprisingly tricky to
+// implement, most implementation found online are blatantly erroneous,
+// some good details on the topic can be found in <intdiv> C++26 proposal,
+// see https://gist.github.com/Eisenwave/2a7d7a4e74e99bbb513984107a6c63ef
 
-template <class T>
-constexpr std::size_t bit_sizeof = sizeof(T) * CHAR_BIT;
-
-// Note:
-// With C++20 following functions will be added into 'std::':
-// - bit_width()
-// - rotl()
-// - rotr()
-
-namespace bits {
-
-// Get individual bits,
-// undefined behavior if 'bit >= bit_sizeof<T>'
-template <class T, _require_integral<T> = true>
-[[nodiscard]] constexpr T get(T value, std::size_t bit) noexcept {
-    assert(bit < bit_sizeof<T>);
-    return static_cast<bit_type>((value >> bit) & T(1));
-}
-
-// Set individual bits,
-// undefined behavior if 'bit >= bit_sizeof<T>'
-template <class T, _require_integral<T> = true>
-constexpr void set(T& value, std::size_t bit, bit_type state) noexcept {
-    assert(bit < bit_sizeof<T>);
-    value |= (T(state) << bit);
-}
-
-template <class T, _require_uint<T> = true>
-[[nodiscard]] constexpr std::size_t bit_width(T value) noexcept {
-    std::size_t count = 0;
-    while (value) ++count, value >>= 1;
-    return count;
-}
-
-// Circular left rotate,
-// undefined behavior if 'shift >= bit_sizeof<T>'
-template <class T, _require_integral<T> = true>
-[[nodiscard]] constexpr T rotl(T value, std::size_t shift) noexcept {
-    assert(shift < bit_sizeof<T>);
-    return (value << shift) | (value >> (std::numeric_limits<T>::digits - shift));
-}
-
-// Circular right rotate,
-// undefined behavior if 'shift >= bit_sizeof<T>'
-template <class T, _require_integral<T> = true>
-[[nodiscard]] constexpr T rotr(T value, std::size_t shift) noexcept {
-    assert(shift < bit_sizeof<T>);
-    return (value << (std::numeric_limits<T>::digits - shift)) | (value >> shift);
-}
-
-} // namespace bits
-
-// --- Integral math functions ---
-// -------------------------------
-
-// Note:
-// With C++20 following functions will be added into 'std::':
-// - cmp_equal()
-// - cmp_not_equal
-// - cmp_less
-// - cmp_greater
-// - cmp_less_equal
-// - cmp_greater_equal
-
-using sign_type = int;
-
-namespace math {
-
-// {-1, 0, 1} variation of sign()
-template <class T>
-[[nodiscard]] constexpr sign_type sign(T value) noexcept {
-    return (value > 0) ? 1 : (value == 0) ? 0 : -1;
-}
-
-template <class T>
-[[nodiscard]] constexpr sign_type sign_product(T lhs, T rhs) noexcept {
-    if (lhs == T(0) || rhs == T(0)) return 0;
-    if ((lhs < T(0) && rhs < T(0)) || (lhs > T(0) && rhs > T(0))) return 1;
-    return -1;
-}
-
-// ceil(lhs / rhs)
-template <class T, _require_integral<T> = true>
-[[nodiscard]] constexpr T divide_ceil(T dividend, T divisor) noexcept {
-    assert(divisor != T(0));
-
-    const bool quotient_positive = (dividend < T(0)) == (divisor < T(0));
-    return dividend / divisor + (dividend % divisor != T(0) && quotient_positive);
-}
-
-// floor(lhs / rhs)
-template <class T, _require_integral<T> = true>
-[[nodiscard]] constexpr T divide_floor(T dividend, T divisor) noexcept {
+template <class T, require_integral<T> = true>
+[[nodiscard]] constexpr T div_floor(T dividend, T divisor) noexcept {
     assert(divisor != T(0));
 
     const bool quotient_negative = (dividend < T(0)) != (divisor < T(0));
     return dividend / divisor - (dividend % divisor != T(0) && quotient_negative);
 }
 
-template <class T, _require_integral<T> = true>
-[[nodiscard]] constexpr bool addition_overflows(T lhs, T rhs) noexcept {
+template <class T, require_integral<T> = true>
+[[nodiscard]] constexpr T div_ceil(T dividend, T divisor) noexcept {
+    assert(divisor != T(0));
+
+    const bool quotient_positive = (dividend < T(0)) == (divisor < T(0));
+    return dividend / divisor + (dividend % divisor != T(0) && quotient_positive);
+}
+
+template <class T, require_integral<T> = true>
+[[nodiscard]] constexpr T div_down(T dividend, T divisor) noexcept {
+    assert(divisor != T(0));
+
+    return dividend / divisor;
+}
+
+template <class T, require_integral<T> = true>
+[[nodiscard]] constexpr T div_up(T dividend, T divisor) noexcept {
+    assert(divisor != T(0));
+
+    const T quotient_sign = (dividend < T(0) ? T(-1) : T(1)) * (divisor < T(0) ? T(-1) : T(1));
+    return dividend / divisor + (dividend % divisor != T(0)) * quotient_sign;
+}
+
+// ======================
+// --- Saturated math ---
+// ======================
+
+template <class T, require_integral<T> = true>
+[[nodiscard]] constexpr bool add_overflows(T lhs, T rhs) noexcept {
     if (rhs > T(0) && lhs > std::numeric_limits<T>::max() - rhs) return false;
     if (rhs < T(0) && lhs < std::numeric_limits<T>::min() - rhs) return false;
     return true;
 }
 
-template <class T, _require_integral<T> = true>
-[[nodiscard]] constexpr bool substraction_underflows(T lhs, T rhs) noexcept {
+template <class T, require_integral<T> = true>
+[[nodiscard]] constexpr bool sub_overflows(T lhs, T rhs) noexcept {
     if (rhs < T(0) && lhs > std::numeric_limits<T>::max() + rhs) return false;
     if (rhs > T(0) && lhs < std::numeric_limits<T>::min() + rhs) return false;
     return true;
 }
 
-template <class T, _require_integral<T> = true>
-[[nodiscard]] constexpr T saturated_add(T lhs, T rhs) noexcept {
+template <class T, require_integral<T> = true>
+[[nodiscard]] constexpr bool mul_overflows(T lhs, T rhs) noexcept {
+    constexpr auto max = std::numeric_limits<T>::max();
+    constexpr auto min = std::numeric_limits<T>::min();
+
+    if (lhs < T(0) && rhs < T(0) && rhs < max / lhs) return true;
+    if (lhs < T(0) && rhs > T(0) && lhs < min / rhs) return true;
+    if (lhs > T(0) && rhs < T(0) && rhs < min / lhs) return true;
+    if (lhs > T(0) && rhs > T(0) && lhs > max / rhs) return true;
+    return false;
+
+    // Note 1:
+    // There is no portable way to implement truly performant saturated multiplication, C++26 standard
+    // saturated functions are implemented in terms of '__builtin_mul_overflow' and '__mulh'
+    // intrinsics which can speed this up quite significantly due to not having any division
+
+    // Note 2:
+    // We have to use different branches depending on the lhs/rhs signs and swap division order due to asymmetry
+    // in signed integer range, for example, for 32-bit int 'min = -2147483648', while 'max = 2147483647',
+    // -2147483648 * -1  =>  positive  =>  can overflow max  =>  mul overflows, 'max / rhs' overflows, 'max / lhs' fine
+    // -2147483648 *  1  =>  negative  =>  can overflow min  =>  mul      fine, 'min / rhs'      fine, 'min / lhs' fine
+    //  2147483647 * -1  =>  negative  =>  can overflow min  =>  mul      fine, 'min / rhs'      fine, 'min / lhs' fine
+    //  2147483647 *  1  =>  positive  =>  can overflow max  =>  mul      fine, 'max / rhs'      fine, 'max / lhs' fine
+
+    return false;
+}
+
+template <class T, require_integral<T> = true>
+[[nodiscard]] constexpr bool div_overflows(T lhs, T rhs) noexcept {
+    assert(rhs != T(0));
+
+    // Unsigned division can't overflow
+    if constexpr (std::is_unsigned_v<T>) return false;
+    // Signed division overflows only for 'min / -1', this case is illustrated in 'mul_overflows()' comments
+    else return lhs == std::numeric_limits<T>::min() && rhs == T(-1);
+}
+
+template <class T, require_integral<T> = true>
+[[nodiscard]] constexpr T add_sat(T lhs, T rhs) noexcept {
     if (rhs > T(0) && lhs > std::numeric_limits<T>::max() - rhs) return std::numeric_limits<T>::max();
     if (rhs < T(0) && lhs < std::numeric_limits<T>::min() - rhs) return std::numeric_limits<T>::min();
     return lhs + rhs;
 }
 
-template <class T, _require_integral<T> = true>
-[[nodiscard]] constexpr T saturated_substract(T lhs, T rhs) noexcept {
+template <class T, require_integral<T> = true>
+[[nodiscard]] constexpr T sub_sat(T lhs, T rhs) noexcept {
     if (rhs < T(0) && lhs > std::numeric_limits<T>::max() + rhs) return std::numeric_limits<T>::max();
     if (rhs > T(0) && lhs < std::numeric_limits<T>::min() + rhs) return std::numeric_limits<T>::min();
     return lhs - rhs;
 }
 
-// Integer comparators that properly handle differently signed integers
+template <class T, require_integral<T> = true>
+[[nodiscard]] constexpr T mul_sat(T lhs, T rhs) noexcept {
+    constexpr auto max = std::numeric_limits<T>::max();
+    constexpr auto min = std::numeric_limits<T>::min();
+
+    if (lhs < 0 && rhs < 0 && rhs < max / lhs) return max;
+    if (lhs < 0 && rhs > 0 && lhs < min / rhs) return min;
+    if (lhs > 0 && rhs < 0 && rhs < min / lhs) return min;
+    if (lhs > 0 && rhs > 0 && lhs > max / rhs) return max;
+    return lhs * rhs;
+} // see 'mul_overflows()' comments for a detailed explanation
+
+template <class T, require_integral<T> = true>
+[[nodiscard]] constexpr T div_sat(T lhs, T rhs) noexcept {
+    assert(rhs != T(0));
+
+    // Unsigned division can't overflow
+    if constexpr (std::is_unsigned_v<T>) return lhs / rhs;
+    // Signed division overflows only for 'min / -1', this case is illustrated in 'mul_overflows()' comments
+    else return (lhs == std::numeric_limits<T>::min() && rhs == T(-1)) ? std::numeric_limits<T>::max() : lhs / rhs;
+}
+
+// =========================================
+// --- Heterogeneous integer comparators ---
+// =========================================
+
+// Integer comparators that properly handle differently signed integers, becomes part of 'std' in C++20
+
 template <class T1, class T2>
 [[nodiscard]] constexpr bool cmp_equal(T1 lhs, T2 rhs) noexcept {
     if constexpr (std::is_signed_v<T1> == std::is_signed_v<T2>) return lhs == rhs;
@@ -406,344 +1164,125 @@ template <class To, class From>
            cmp_less_equal(value, std::numeric_limits<To>::max());
 }
 
-// Integer-to-integer cast that throws if conversion overflow/underflows the result,
+// =============
+// --- Casts ---
+// =============
+
+// Integer-to-integer cast that throws if conversion would overflow/underflow the result,
 // no '[[nodiscard]]' because cast may be used for the side effect of throwing
-template <class To, class From, _require_integral<To> = true, _require_integral<From> = true>
+template <class To, class From, require_integral<To> = true, require_integral<From> = true>
 constexpr To narrow_cast(From value) {
     if (!in_range<To>(value)) throw std::domain_error("narrow_cast() overflows the result.");
     return static_cast<To>(value);
 }
 
-// Utility used to reverse indexation logic, mostly useful when working with unsigned indeces
-template <class T, _require_integral<T> = true>
-[[nodiscard]] constexpr T reverse_idx(T idx, T size) noexcept {
-    return size - T(1) - idx;
+template <class To, class From, require_integral<To> = true, require_integral<From> = true>
+[[nodiscard]] constexpr To saturate_cast(From value) noexcept {
+    constexpr auto to_min      = std::numeric_limits<To>::min();
+    constexpr auto to_max      = std::numeric_limits<To>::max();
+    constexpr int  to_digits   = std::numeric_limits<To>::digits;
+    constexpr int  from_digits = std::numeric_limits<From>::digits;
+
+    // signed -> signed
+    if constexpr (std::is_signed_v<From> && std::is_signed_v<To>) {
+        // value outside of type range => clamp to range
+        if constexpr (to_digits < from_digits) {
+            if (value < static_cast<From>(to_min)) return to_min;
+            if (value > static_cast<From>(to_max)) return to_max;
+        }
+    }
+    // signed -> unsigned
+    else if constexpr (std::is_unsigned_v<To>) {
+        // value negative => clamp to 0
+        if (value < static_cast<From>(to_min)) return to_min;
+        // value too big after casting => clamp to max
+        // note that we rely on operator '>' being able to compare unsigned types of different sizes,
+        // a more explicit way would be to compare 'std::common_type_t<std::make_unsigned_t<From>, To>,
+        // but it doesn't really achieve anything except verbosity
+        else if (std::make_unsigned_t<From>(value) > to_max) return to_max;
+    }
+    // unsigned -> signed
+    else if constexpr (std::is_unsigned_v<From>) {
+        // value too big => clamp to max
+        // like before 'make_unsigned_t' is here to make both sides of comparison unsigned
+        if (value > std::make_unsigned_t<To>(to_max)) return to_max;
+    }
+
+    // unsigned -> unsigned
+    // + everything that didn't trigger a runtime saturating condition
+    return static_cast<To>(value);
 }
 
-} // namespace math
+template <class T, require_integral<T> = true>
+constexpr auto to_signed(T value) { // no '[[nodiscard]]' because cast may be used for the side effect of throwing
+    return narrow_cast<std::make_signed_t<T>>(value);
+}
 
+template <class T, require_integral<T> = true>
+constexpr auto to_unsigned(T value) { // no '[[nodiscard]]' because cast may be used for the side effect of throwing
+    return narrow_cast<std::make_unsigned_t<T>>(value);
+}
+
+// ================
 // --- Literals ---
-// ----------------
+// ================
 
 namespace literals {
 
 // Literals for all fixed-size and commonly used integer types, 'narrow_cast()'
 // ensures there is no overflow during initialization from 'unsigned long long'
 // clang-format off
-[[nodiscard]] constexpr auto operator"" _i8( _ull v) noexcept { return math::narrow_cast<std::int8_t  >(v); }
-[[nodiscard]] constexpr auto operator"" _u8( _ull v) noexcept { return math::narrow_cast<std::uint8_t >(v); }
-[[nodiscard]] constexpr auto operator"" _i16(_ull v) noexcept { return math::narrow_cast<std::int16_t >(v); }
-[[nodiscard]] constexpr auto operator"" _u16(_ull v) noexcept { return math::narrow_cast<std::uint16_t>(v); }
-[[nodiscard]] constexpr auto operator"" _i32(_ull v) noexcept { return math::narrow_cast<std::int32_t >(v); }
-[[nodiscard]] constexpr auto operator"" _u32(_ull v) noexcept { return math::narrow_cast<std::uint32_t>(v); }
-[[nodiscard]] constexpr auto operator"" _i64(_ull v) noexcept { return math::narrow_cast<std::int64_t >(v); }
-[[nodiscard]] constexpr auto operator"" _u64(_ull v) noexcept { return math::narrow_cast<std::uint64_t>(v); }
-[[nodiscard]] constexpr auto operator"" _sz( _ull v) noexcept { return math::narrow_cast<std::size_t  >(v); }
+[[nodiscard]] constexpr auto operator""_i8  (ull v) noexcept { return narrow_cast<std::int8_t   >(v); }
+[[nodiscard]] constexpr auto operator""_u8  (ull v) noexcept { return narrow_cast<std::uint8_t  >(v); }
+[[nodiscard]] constexpr auto operator""_i16 (ull v) noexcept { return narrow_cast<std::int16_t  >(v); }
+[[nodiscard]] constexpr auto operator""_u16 (ull v) noexcept { return narrow_cast<std::uint16_t >(v); }
+[[nodiscard]] constexpr auto operator""_i32 (ull v) noexcept { return narrow_cast<std::int32_t  >(v); }
+[[nodiscard]] constexpr auto operator""_u32 (ull v) noexcept { return narrow_cast<std::uint32_t >(v); }
+[[nodiscard]] constexpr auto operator""_i64 (ull v) noexcept { return narrow_cast<std::int64_t  >(v); }
+[[nodiscard]] constexpr auto operator""_u64 (ull v) noexcept { return narrow_cast<std::uint64_t >(v); }
+[[nodiscard]] constexpr auto operator""_sz  (ull v) noexcept { return narrow_cast<std::size_t   >(v); }
+[[nodiscard]] constexpr auto operator""_ptrd(ull v) noexcept { return narrow_cast<std::ptrdiff_t>(v); }
 // clang-format on
 
 } // namespace literals
 
-// --- Big int ---
-// ---------------
+} // namespace utl::integral::impl
 
-// 'Bit' int emulates an integer type sufficiently large to represent <SIZE> bits,
-// highly advised to use with 'SIZE' in multiples of '64'
+// ______________________ PUBLIC API ______________________
 
-template <std::size_t bits_to_fit>
-struct BigUint {
-    using self                             = BigUint;
-    using word_type                        = std::uint64_t;
-    constexpr static std::size_t size      = bits_to_fit;
-    constexpr static std::size_t word_size = std::numeric_limits<word_type>::digits;
-    constexpr static std::size_t words     = math::divide_ceil(size, word_size);
-    constexpr static std::size_t bits      = words * word_size;
-    using storage_type                     = std::array<word_type, words>;
+namespace utl::integral {
 
-    storage_type s{};
+using impl::div_floor;
+using impl::div_ceil;
+using impl::div_down;
+using impl::div_up;
 
-    constexpr BigUint()                    = default;
-    constexpr BigUint(const self&)         = default;
-    constexpr BigUint(self&&)              = default;
-    constexpr self& operator=(const self&) = default;
-    constexpr self& operator=(self&&)      = default;
+using impl::add_overflows;
+using impl::sub_overflows;
+using impl::mul_overflows;
+using impl::div_overflows;
 
-    constexpr explicit BigUint(word_type number) noexcept { this->word(0) = number; }
+using impl::add_sat;
+using impl::sub_sat;
+using impl::mul_sat;
+using impl::div_sat;
 
-    template <std::size_t chars>
-    constexpr explicit BigUint(const char (&str)[chars]) noexcept {
-        for (std::size_t i = 0; i < self::size; ++i)
-            this->bit_set(math::reverse_idx(i, self::size), str[i] == '0' ? false : true);
-    }
+using impl::cmp_equal;
+using impl::cmp_not_equal;
+using impl::cmp_less;
+using impl::cmp_greater;
+using impl::cmp_less_equal;
+using impl::cmp_greater_equal;
 
-    // --- Getters ---
-    // ---------------
+using impl::in_range;
 
-    constexpr word_type& word(std::size_t idx) noexcept {
-        assert(idx < self::words);
-        return this->s[idx];
-    }
-    constexpr const word_type& word(std::size_t idx) const noexcept {
-        assert(idx < self::words);
-        return this->s[idx];
-    }
-    constexpr bit_type bit_get(std::size_t bit) const noexcept {
-        assert(bit < self::bits);
-        const std::size_t word_idx = bit / self::word_size;
-        const std::size_t bit_idx  = bit % self::word_size;
-        return bits::get(this->word(word_idx), bit_idx);
-    }
-    constexpr void bit_set(std::size_t bit, bit_type value) noexcept {
-        assert(bit < self::bits);
-        const std::size_t word_idx = bit / self::word_size;
-        const std::size_t bit_idx  = bit % self::word_size;
-        return bits::set(this->word(word_idx), bit_idx, value);
-    }
-    constexpr std::size_t significant_bits() const noexcept {
-        for (std::size_t i = 0; i < self::words; ++i) {
-            const std::size_t reverse_i     = math::reverse_idx(i, self::words);
-            const std::size_t word_sig_bits = bits::bit_width(this->word(reverse_i));
-            if (word_sig_bits != 0) return i * self::word_size + word_sig_bits;
-        }
-        return 0;
-    }
+using impl::narrow_cast;
+using impl::saturate_cast;
 
-    constexpr explicit operator bool() const noexcept {
-        for (const auto& e : this->s)
-            if (e != 0) return true;
-        return false;
-    }
+using impl::to_signed;
+using impl::to_unsigned;
 
-    // --- Bit-wise operators ---
-    // --------------------------
-
-    constexpr self operator<<(std::size_t shift) const noexcept {
-        if (shift == 0) return *this;
-
-        // Implementation based on libstd++ 'std::bitset' l-shift operator
-        const std::size_t wshift = shift / self::word_size;
-        const std::size_t offset = shift % self::word_size;
-        self              res    = *this;
-
-        if (offset == 0) {
-            for (std::size_t i = self::words - 1; i >= wshift; --i) res.word(i) = res.word(i - wshift);
-        } else {
-            const std::size_t suboffset = self::word_size - offset;
-            for (std::size_t i = self::words - 1; i > wshift; --i)
-                res.word(i) = ((res.word(i - wshift) << offset) | (res.word(i - wshift - 1) >> suboffset));
-            res.word(wshift) = res.word(0) << offset;
-        }
-
-        // Zero-fill shifted-from region
-        for (std::size_t i = 0; i < wshift; ++i) res.word(i) = word_type(0);
-
-        // [?] Zero-fill shifted-to region outside 'size'
-
-        return res;
-    }
-
-    constexpr self operator>>(std::size_t shift) const noexcept {
-        if (shift == 0) return *this;
-
-        // Implementation based on libstd++ 'std::bitset' r-shift operator
-        const std::size_t wshift = shift / self::word_size;
-        const std::size_t offset = shift % self::word_size;
-        const std::size_t limit  = self::words - wshift - 1;
-        self              res    = *this;
-
-        if (offset == 0) {
-            for (std::size_t i = 0; i <= limit; ++i) res.word(i) = res.word(i + wshift);
-        } else {
-            const std::size_t suboffset = self::word_size - offset;
-            for (std::size_t i = 0; i < limit; ++i)
-                res.word(i) = ((res.word(i + wshift) >> offset) | (res.word(i + wshift + 1) << suboffset));
-            res.word(limit) = res.word(self::words - 1) >> offset;
-        }
-
-        // Zero-fill shifted-from region
-        for (std::size_t i = limit + 1; i < self::words; ++i) res.word(i) = word_type(0);
-
-        return res;
-    }
-
-    constexpr self operator&(const self& other) const noexcept {
-        self res = *this;
-        for (std::size_t i = 0; i < self::words; ++i) res.word(i) &= other.word(i);
-        return res;
-    }
-    constexpr self operator|(const self& other) const noexcept {
-        self res = *this;
-        for (std::size_t i = 0; i < self::words; ++i) res.word(i) |= other.word(i);
-        return res;
-    }
-    constexpr self operator^(const self& other) const noexcept {
-        self res = *this;
-        for (std::size_t i = 0; i < self::words; ++i) res.word(i) ^= other.word(i);
-        return res;
-    }
-    constexpr self operator~() const noexcept {
-        self res = *this;
-        for (auto& e : res.s) e = ~e;
-        return res;
-    };
-
-    // --- Arithmetic operators ---
-    // ----------------------------
-
-    constexpr self operator+(const self& other) const noexcept {
-        self res   = *this ^ other;
-        self carry = *this & other;
-        while (carry) {
-            self shifted_carry = carry << 1;
-            carry              = res & shifted_carry;
-            res ^= shifted_carry;
-        }
-        return res;
-    }
-
-    constexpr self operator-(const self& other) const noexcept {
-        self x = *this;
-        self y = other;
-        return x + (~y + self(1));
-    }
-
-    constexpr self operator*(const self& other) const noexcept {
-        self x = *this;
-        self y = other;
-        self res{};
-        while (y) {
-            if (y.bit_get(0)) res += x;
-            x <<= 1;
-            y >>= 1;
-        }
-        return res;
-    }
-
-    constexpr std::pair<self, self> long_divide(const self& other) const noexcept {
-        assert(other); // prevent division by zero
-
-        // Standard long division algorithm from [https://en.wikipedia.org/wiki/Division_algorithm]
-        const self& numerator   = *this;
-        self        denominator = other;
-        self        quotient{};
-        self        remainder{};
-        std::size_t sig_bits = numerator.significant_bits();
-
-        for (std::size_t i = 0; i < sig_bits; ++i) {
-            remainder <<= 1;
-            remainder.bit_set(0, numerator.bit_get(math::reverse_idx(i, sig_bits)));
-            if (remainder >= denominator) {
-                remainder -= denominator;
-                quotient.bit_set(math::reverse_idx(i, sig_bits), true);
-            }
-        }
-
-        return {quotient, remainder};
-    }
-
-    constexpr self operator/(const self& other) const noexcept { return this->long_divide(other).first; }
-    constexpr self operator%(const self& other) const noexcept { return this->long_divide(other).second; }
-
-    // --- Augmented assignment ---
-    // ----------------------------
-
-    constexpr self& operator<<=(std::size_t shift) { return *this = (*this << shift); }
-    constexpr self& operator>>=(std::size_t shift) { return *this = (*this >> shift); }
-    constexpr self& operator&=(const self& other) { return *this = (*this & other); }
-    constexpr self& operator|=(const self& other) { return *this = (*this | other); }
-    constexpr self& operator^=(const self& other) { return *this = (*this ^ other); }
-    constexpr self& operator+=(const self& other) { return *this = (*this + other); }
-    constexpr self& operator-=(const self& other) { return *this = (*this - other); }
-    constexpr self& operator*=(const self& other) { return *this = (*this * other); }
-    constexpr self& operator/=(const self& other) { return *this = (*this / other); }
-    constexpr self& operator%=(const self& other) { return *this = (*this % other); }
-
-    // --- Comparison ---
-    // ------------------
-
-    constexpr bool operator==(const self& other) const noexcept {
-        for (std::size_t i = 0; i < self::words; ++i)
-            if (this->word(i) != other.word(i)) return false;
-        return true;
-    }
-    constexpr bool operator<=(const self& other) const noexcept {
-        // Compare lexicographically from highest to lowest bits
-        for (std::size_t i = 0; i < self::words; ++i)
-            if (this->word(i) <= other.word(i)) return true;
-        return false;
-    }
-    constexpr bool operator<(const self& other) const noexcept {
-        // Compare lexicographically from highest to lowest bits
-        for (std::size_t i = 0; i < self::words; ++i)
-            if (this->word(i) < other.word(i)) return true;
-        return false;
-    }
-
-    constexpr bool operator!=(const self& other) const noexcept { return !(*this == other); }
-    constexpr bool operator>=(const self& other) const noexcept { return !(*this < other); }
-    constexpr bool operator>(const self& other) const noexcept { return !(*this <= other); }
-
-    // --- Serialization ---
-    // ---------------------
-
-    constexpr word_type to_int() const noexcept {
-        assert(self::words <= 1);
-        return this->s.front();
-    }
-
-    template <bool prettify>
-    std::string to_string() const {
-        constexpr auto color_red       = "\033[31m";
-        constexpr auto color_blue      = "\033[34m";
-        constexpr auto color_green     = "\033[32m";
-        constexpr auto color_magenta   = "\033[35m";
-        constexpr auto color_bold_gray = "\033[90;1m";
-        constexpr auto color_reset     = "\033[0m";
-
-        std::string str;
-
-        if constexpr (prettify) {
-            str += color_green;
-            str += "BigInt<";
-            str += std::to_string(self::size);
-            str += ">";
-            str += color_reset;
-        }
-
-        if constexpr (prettify) str += color_bold_gray;
-        str += "[";
-        if constexpr (prettify) str += color_reset;
-
-        for (std::size_t i = 0; i < self::bits; ++i) {
-            int bit = this->bit_get(math::reverse_idx(i, self::bits));
-            if constexpr (prettify) str += bit ? color_red : color_blue;
-            str += std::to_string(bit);
-            if constexpr (prettify) str += color_reset;
-        }
-
-        if constexpr (prettify) str += color_bold_gray;
-        str += "]";
-        if constexpr (prettify) str += color_reset;
-
-        if constexpr (prettify) {
-            str += color_magenta;
-            str += "(";
-            str += std::to_string(this->significant_bits());
-            str += " sig. bits)";
-            str += "( words: ";
-            for (const auto& e : s) (str += std::to_string(e)) += " ";
-            str += ")";
-            str += color_reset;
-        }
-
-        return str;
-    }
-};
-
-// CTAD so we can deduce size from integer & string literals
-BigUint(BigUint<0>::word_type)->BigUint<BigUint<0>::word_size>;
-
-template <std::size_t chars>
-BigUint(const char (&str)[chars]) -> BigUint<chars - 1>;
+namespace literals = impl::literals;
 
 } // namespace utl::integral
 
@@ -765,87 +1304,168 @@ BigUint(const char (&str)[chars]) -> BigUint<chars - 1>;
 //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-#if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_JSON)
-#ifndef UTLHEADERGUARD_JSON
-#define UTLHEADERGUARD_JSON
+#if !defined(UTL_PICK_MODULES) || defined(UTL_MODULE_JSON)
+
+#ifndef utl_json_headerguard
+#define utl_json_headerguard
+
+#define UTL_JSON_VERSION_MAJOR 1
+#define UTL_JSON_VERSION_MINOR 1
+#define UTL_JSON_VERSION_PATCH 5
 
 // _______________________ INCLUDES _______________________
 
-#include <array>            // array<>
-#include <charconv>         // to_chars(), from_chars()
+#include <array>            // array<>, size_t
+#include <charconv>         // to_chars(), from_chars(), errc
 #include <cmath>            // isfinite()
-#include <codecvt>          // codecvt_utf8<>
-#include <cstddef>          // size_t
-#include <cstdint>          // uint8_t
-#include <cuchar>           // size_t, char32_t, mbstate_t
-#include <exception>        // exception
+#include <cstdint>          // uint8_t, uint16_t, uint32_t
+#include <filesystem>       // create_directories()
 #include <fstream>          // ifstream, ofstream
 #include <initializer_list> // initializer_list<>
 #include <limits>           // numeric_limits<>::max_digits10, numeric_limits<>::max_exponent10
 #include <map>              // map<>
 #include <stdexcept>        // runtime_error
-#include <string>           // string, stoul()
+#include <string>           // string
 #include <string_view>      // string_view
-#include <system_error>     // errc()
-#include <type_traits>      // enable_if_t<>, void_t, is_convertible_v<>, is_same_v<>,
-                            // conjunction<>, disjunction<>, negation<>
+#include <type_traits>      // enable_if<>, is_convertible<>, is_same<>, conjunction<>, disjunction<>, negation<>, ...
 #include <utility>          // move(), declval<>()
 #include <variant>          // variant<>
 #include <vector>           // vector<>
 
 // ____________________ DEVELOPER DOCS ____________________
 
-// Reasonably simple (if we discound reflection) parser / serializer, doen't use any intrinsics or compiler-specific
-// stuff. Unlike some other implementation, doesn't include the tokenizing step - we parse everything in a single 1D
-// scan over the data, constructing recursive JSON struct on the fly. The main reason we can do this so easily is is
-// due to a nice quirk of JSON - parsing nodes, we can always determine node type based on a single first character,
-// see '_parser::parse_node()'.
+// Reasonably simple (discounting reflection) DOM parser / serializer, doesn't use any intrinsics or compiler-specific
+// stuff. Unlike some other implementations, doesn't include the tokenizing step - we parse everything in a single 1D
+// scan over the data, constructing recursive JSON struct on the fly. The main reason we can do this so easily is
+// due to a nice quirk of JSON: when parsing nodes, we can always determine node type based on a single first
+// character, see 'Parser::parse_node()'.
 //
 // Struct reflection is implemented through macros - alternative way would be to use templates with __PRETTY_FUNCTION__
-// (or __FUNCSIG__) and do some constexpr string parsing to perform "magic" reflection without requiring, but that
-// relies on implementation-defined format of those strings and may trash the compile times, macros work everywhere.
+// (or __FUNCSIG__) and do some constexpr string parsing to perform "magic" reflection without requiring macros, but
+// that relies on the implementation-defined format of those strings and adds quite a lot more complexity.
+// 'nlohmann_json' provides similar macros but also has a way of specializing things manually.
 //
 // Proper type traits and 'if constexpr' recursive introspection are a key to making APIs that can convert stuff
 // between JSON and other types seamlessly, which is exactly what we do here, it even accounts for reflection.
 
 // ____________________ IMPLEMENTATION ____________________
 
-namespace utl::json {
+// ======================================
+// --- libc++ 'from_chars()' fallback ---
+// ======================================
 
-// ===================
-// --- Misc. utils ---
-// ===================
+// Problem:
+//
+// libc++ is extremely behind on C++17 support and doesn't provide floating point 'std::from_chars()' until version 20
+// (which was released in 2025), we need a thread-safe locale-neutral fallback for it. This is mostly a MacOS issue.
+//
+// All float parsing functions before <charconv> are locale-dependent, the only way to have thread safety is through a
+// specific 'std::istringstream' usage with a locally imbued locale. This is extremely slow and gives up roundtrip, but
+// this is necessary to support MacOS. A "proper" solution would be to include a <charconv> reimplementation, but doing
+// this would ~quadruple the size of the library and introduce some licensing questions.
 
-// Codepoint -> UTF-8 string conversion using <codecvt> (deprecated in C++17, removed in C++26)
-// This is kinda horrible, but there doesn't seem to a better way.
-// Returns success so we can handle the error message inside the parser itself.
-inline bool _unicode_codepoint_to_utf8(std::string& destination, char32_t cp) {
-    std::array<char, 4> buffer; // here we will put UTF-8 string
-    char32_t const*     from = &cp;
-    char*               end_of_buffer;
+#if defined(_LIBCPP_VERSION) && _LIBCPP_VERSION < 200000
+#define UTL_JSON_FROM_CHARS_FALLBACK
+#endif
 
-    std::mbstate_t              state;
-    std::codecvt_utf8<char32_t> codecvt;
+#ifdef UTL_JSON_FROM_CHARS_FALLBACK
+#include <locale>  // locale::classic()
+#include <sstream> // istringstream
+#endif
 
-    if (codecvt.out(state, from, from + 1, from, buffer.data(), buffer.data() + 4, end_of_buffer)) return false;
+namespace utl::json::impl {
 
-    destination.append(buffer.data(), end_of_buffer);
+// =====================
+// --- Unicode stuff ---
+// =====================
+
+// Codepoint conversion function. We could use <codecvt> to do the same in a few lines,
+// but <codecvt> was marked for deprecation in C++17 and fully removed in C++26, as of now
+// there is no standard library replacement so we have to roll our own. This is likely to
+// be more performant too due to not having any redundant locale handling.
+//
+// The function was tested for all valid codepoints (from U+0000 to U+10FFFF)
+// against the <codecvt> implementation and proved to be exactly the same.
+//
+// Codepoint <-> UTF-8 conversion table (see https://en.wikipedia.org/wiki/UTF-8):
+//
+// | Codepoint range      | Byte 1   | Byte 2   | Byte 3   | Byte 4   |
+// |----------------------|----------|----------|----------|----------|
+// | U+0000   to U+007F   | 0eeeffff |          |          |          |
+// | U+0080   to U+07FF   | 110dddee | 10eeffff |          |          |
+// | U+0800   to U+FFFF   | 1110cccc | 10ddddee | 10eeffff |          |
+// | U+010000 to U+10FFFF | 11110abb | 10bbcccc | 10ddddee | 10eeffff |
+//
+// Characters 'a', 'b', 'c', 'd', 'e', 'f' correspond to the bits taken from the codepoint 'U+ABCDEF'
+// (each letter in a codepoint is a hex corresponding to 4 bits, 6 positions => 24 bits of info).
+// In terms of C++ 'U+ABCDEF' codepoints can be expressed as an integer hex-literal '0xABCDEF'.
+//
+inline bool codepoint_to_utf8(std::string& destination, std::uint32_t cp) {
+    // returns success so we can handle the error message inside the parser itself
+
+    std::array<char, 4> buffer;
+    std::size_t         count;
+
+    // 1-byte ASCII (codepoints U+0000 to U+007F)
+    if (cp <= 0x007F) {
+        buffer[0] = static_cast<char>(cp);
+        count     = 1;
+    }
+    // 2-byte unicode (codepoints U+0080 to U+07FF)
+    else if (cp <= 0x07FF) {
+        buffer[0] = static_cast<char>(((cp >> 6) & 0x1F) | 0xC0);
+        buffer[1] = static_cast<char>(((cp >> 0) & 0x3F) | 0x80);
+        count     = 2;
+    }
+    // 3-byte unicode (codepoints U+0800 to U+FFFF)
+    else if (cp <= 0xFFFF) {
+        buffer[0] = static_cast<char>(((cp >> 12) & 0x0F) | 0xE0);
+        buffer[1] = static_cast<char>(((cp >> 6) & 0x3F) | 0x80);
+        buffer[2] = static_cast<char>(((cp >> 0) & 0x3F) | 0x80);
+        count     = 3;
+    }
+    // 4-byte unicode (codepoints U+010000 to U+10FFFF)
+    else if (cp <= 0x10FFFF) {
+        buffer[0] = static_cast<char>(((cp >> 18) & 0x07) | 0xF0);
+        buffer[1] = static_cast<char>(((cp >> 12) & 0x3F) | 0x80);
+        buffer[2] = static_cast<char>(((cp >> 6) & 0x3F) | 0x80);
+        buffer[3] = static_cast<char>(((cp >> 0) & 0x3F) | 0x80);
+        count     = 4;
+    }
+    // invalid codepoint
+    else {
+        return false;
+    }
+
+    destination.append(buffer.data(), count);
     return true;
 }
 
-[[nodiscard]] inline std::string _read_file_to_string(const std::string& path) {
+// JSON '\u' escapes use UTF-16 surrogate pairs to encode codepoints outside of basic multilingual plane,
+// see https://unicodebook.readthedocs.io/unicode_encodings.html
+//     https://en.wikipedia.org/wiki/UTF-16
+[[nodiscard]] constexpr std::uint32_t utf16_pair_to_codepoint(std::uint16_t high, std::uint16_t low) noexcept {
+    return 0x10000 + ((high & 0x03FF) << 10) + (low & 0x03FF);
+}
+
+[[nodiscard]] inline std::string utf8_replace_non_ascii(std::string str, char replacement_char) noexcept {
+    for (auto& e : str)
+        if (static_cast<std::uint8_t>(e) > 127) e = replacement_char;
+    return str;
+}
+
+// This seems the to be the fastest way of reading a text file
+// into 'std::string' without invoking OS-specific methods
+// See this StackOverflow thread:
+// https://stackoverflow.com/questions/32169936/optimal-way-of-reading-a-complete-file-to-a-string-using-fstream
+// And attached benchmarks:
+// https://github.com/Sqeaky/CppFileToStringExperiments
+[[nodiscard]] inline std::string read_file_to_string(const std::string& path) {
     using namespace std::string_literals;
 
-    // This seems the to be the fastest way of reading a text file
-    // into 'std::string' without invoking OS-specific methods
-    // See this StackOverflow thread:
-    // [https://stackoverflow.com/questions/32169936/optimal-way-of-reading-a-complete-file-to-a-string-using-fstream]
-    // And attached benchmarks:
-    // [https://github.com/Sqeaky/CppFileToStringExperiments]
-
-    std::ifstream file(path, std::ios::ate); // open file and immediately seek to the end
+    std::ifstream file(path, std::ios::ate | std::ios::binary); // open file and immediately seek to the end
+    // opening file as binary allows us to skip pointless newline re-encoding
     if (!file.good()) throw std::runtime_error("Could not open file {"s + path + "."s);
-    // NOTE: Add a way to return errors if file doesn't exist, exceptions aren't particularly good here
 
     const auto file_size = file.tellg(); // returns cursor pos, which is the end of file
     file.seekg(std::ios::beg);           // seek to the beginning
@@ -855,11 +1475,11 @@ inline bool _unicode_codepoint_to_utf8(std::string& destination, char32_t cp) {
 }
 
 template <class T>
-[[nodiscard]] constexpr int _log_10_ceil(T num) noexcept {
-    return num < 10 ? 1 : 1 + _log_10_ceil(num / 10);
+[[nodiscard]] constexpr int log10_ceil(T num) noexcept {
+    return num < 10 ? 1 : 1 + log10_ceil(num / 10);
 }
 
-[[nodiscard]] inline std::string _pretty_error(std::size_t cursor, const std::string& chars) {
+[[nodiscard]] inline std::string pretty_error(std::size_t cursor, const std::string& chars) {
     // Special case for empty buffers
     if (chars.empty()) return "";
 
@@ -894,7 +1514,7 @@ template <class T>
 
     res += '\n';
     res += line_prefix;
-    res += line_contents;
+    res += utf8_replace_non_ascii(std::string(line_contents), '?');
     res += '\n';
     res.append(line_prefix.size(), ' ');
     res.append(cursor - line_start, '-');
@@ -902,11 +1522,19 @@ template <class T>
     res.append(line_end - cursor, '-');
     res += " [!]";
 
+    // Note:
+    // To properly align cursor in the error message we would need to count "visible characters" in a UTF-8
+    // string, properly iterating over grapheme clusters is a very complex task, usually done by a dedicated
+    // library. We could just count codepoints, but that wouldn't account for combining characters. To prevent
+    // error message from being misaligned we can just replace all non-ascii symbols with '?', this way errors
+    // might be less pretty, but they will reliably show the true location of the error.
+
     return res;
 }
 
+// ===================
 // --- Type traits ---
-// -------------------
+// ===================
 
 #define utl_json_define_trait(trait_name_, ...)                                                                        \
     template <class T, class = void>                                                                                   \
@@ -918,27 +1546,27 @@ template <class T>
     template <class T>                                                                                                 \
     constexpr bool trait_name_##_v = trait_name_<T>::value
 
-utl_json_define_trait(_has_begin, std::declval<std::decay_t<T>>().begin());
-utl_json_define_trait(_has_end, std::declval<std::decay_t<T>>().end());
-utl_json_define_trait(_has_input_it, std::next(std::declval<T>().begin()));
+utl_json_define_trait(has_begin, std::declval<std::decay_t<T>>().begin());
+utl_json_define_trait(has_end, std::declval<std::decay_t<T>>().end());
+utl_json_define_trait(has_input_it, std::next(std::declval<T>().begin()));
 
-utl_json_define_trait(_has_key_type, std::declval<typename std::decay_t<T>::key_type>());
-utl_json_define_trait(_has_mapped_type, std::declval<typename std::decay_t<T>::mapped_type>());
+utl_json_define_trait(has_key_type, std::declval<typename std::decay_t<T>::key_type>());
+utl_json_define_trait(has_mapped_type, std::declval<typename std::decay_t<T>::mapped_type>());
 
 #undef utl_json_define_trait
 
-// Workaround for 'static_assert(false)' making program ill-formed even
-// when placed inide an 'if constexpr' branch that never compiles.
-// 'static_assert(_always_false_v<T)' on the the other hand doesn't,
+// Workaround for 'static_assert(false)' making program ill-formed even when placed inside an 'if constexpr'
+// branch that never compiles. 'static_assert(always_false_v<T)' on the other hand doesn't,
 // which means we can use it to mark branches that should never compile.
 template <class>
-constexpr bool _always_false_v = false;
+constexpr bool always_false_v = false;
 
-// --- MAP macro ---
-// -----------------
+// =================
+// --- Map-macro ---
+// =================
 
-// This is an implementation of a classic MAP macro that applies some function macro
-// to all elements of __VA_ARGS__, it looks much uglier than usual because we have to prefix
+// This is an implementation of a classic map-macro that applies function-macro to all
+// elements of __VA_ARGS__, it looks much uglier than usual because we have to prefix
 // everything with verbose 'utl_json_', but that's the price of avoiding name collisions.
 //
 // Created by William Swanson in 2012 and declared as public domain.
@@ -966,7 +1594,7 @@ constexpr bool _always_false_v = false;
 #define utl_json_map_0(f, x, peek, ...) f(x) utl_json_map_next(peek, utl_json_map_1)(f, peek, __VA_ARGS__)
 #define utl_json_map_1(f, x, peek, ...) f(x) utl_json_map_next(peek, utl_json_map_0)(f, peek, __VA_ARGS__)
 
-// Resulting macro, applies the function macro `f` to each of the remaining parameters
+// Resulting macro, applies the function macro 'f' to each of the remaining parameters
 #define utl_json_map(f, ...)                                                                                           \
     utl_json_eval(utl_json_map_1(f, __VA_ARGS__, ()()(), ()()(), ()()(), 0)) static_assert(true)
 
@@ -975,27 +1603,47 @@ constexpr bool _always_false_v = false;
 // ===================================
 
 template <class T>
-using _object_type_impl = std::map<std::string, T, std::less<>>;
-// 'std::less<>' declares map as transparent, which means we can `.find()` for `std::string_view` keys
+using object_type_impl = std::map<std::string, T, std::less<>>;
+// 'std::less<>' makes map transparent, which means we can use 'find()' for 'std::string_view' keys
 template <class T>
-using _array_type_impl  = std::vector<T>;
-using _string_type_impl = std::string;
-using _number_type_impl = double;
-using _bool_type_impl   = bool;
-struct _null_type_impl {
-    [[nodiscard]] bool operator==(const _null_type_impl&) const noexcept {
+using array_type_impl  = std::vector<T>;
+using string_type_impl = std::string;
+using number_type_impl = double;
+using bool_type_impl   = bool;
+struct null_type_impl {
+    [[nodiscard]] bool operator==(const null_type_impl&) const noexcept {
         return true;
     } // so we can check 'Null == Null'
 };
 
-struct _dummy_type {};
+// Note:
+// It is critical that 'object_type_impl' can be instantiated with incomplete type 'T'.
+// This allows us to declare recursive classes like this:
+//
+//    'struct Recursive { std::map<std::string, Recursive> data; }'
+//
+// Technically, there is nothing stopping any dynamically allocated container from supporting
+// incomplete types, since dynamic allocation inherently means pointer indirection at some point,
+// which makes 'sizeof(Container)' independent of 'T'.
+//
+// This requirement was only standardized for 'std::vector' and 'std::list' due to ABI breaking concerns.
+// 'std::map' is not required to support incomplete types by the standard, however in practice it does support them
+// on all compilers that I know of. Several other JSON libraries seem to rely on the same behaviour without any issues.
+// The same cannot be said about 'std::unordered_map', which is why we don't use it.
+//
+// We could make a more pedantic choice and add a redundant level of indirection, but that both complicates
+// implementation needlessly and reduces performance. A perfect solution would be to write our own map implementation
+// tailored for JSON use cases and providing explicit support for heterogeneous lookup and incomplete types, but that
+// alone would be grander in scale than this entire parser for a mostly non-critical benefit.
+
+struct dummy_type {};
 
 // 'possible_value_type<T>::value' evaluates to:
 //    - 'T::value_type' if 'T' has 'value_type'
-//    - '_dummy_type' otherwise
+//    - 'dummy_type' otherwise
 template <class T, class = void>
 struct possible_value_type {
-    using type = _dummy_type;
+    using type = dummy_type;
 };
 
 template <class T>
@@ -1005,19 +1653,19 @@ struct possible_value_type<T, std::void_t<decltype(std::declval<typename std::de
 
 // 'possible_mapped_type<T>::value' evaluates to:
 //    - 'T::mapped_type' if 'T' has 'mapped_type'
-//    - '_dummy_type' otherwise
+//    - 'dummy_type' otherwise
 template <class T, class = void>
 struct possible_mapped_type {
-    using type = _dummy_type;
+    using type = dummy_type;
 };
 
 template <class T>
 struct possible_mapped_type<T, std::void_t<decltype(std::declval<typename std::decay_t<T>::mapped_type>())>> {
     using type = typename T::mapped_type;
 };
-// these type traits are a key to checking properties of 'T::value_type' & 'T::mapped_type' for a 'T' which may or may
-// not have them (which is exactly the case with recursive traits that we're gonna use later to deduce convertability
-// to recursive JSON). '_dummy_type' here is necessary to end the recursion of 'std::disjuction'
+// these type traits are a key to checking properties of 'T::value_type' & 'T::mapped_type' for a 'T' which may
+// or may not have them (which is exactly the case with recursive traits that we're going to use later to deduce
+// convertibility to recursive JSON). 'dummy_type' here is necessary to end the recursion of 'std::disjunction'
 
 #define utl_json_type_trait_conjunction(trait_name_, ...)                                                              \
     template <class T>                                                                                                 \
@@ -1038,31 +1686,31 @@ struct possible_mapped_type<T, std::void_t<decltype(std::declval<typename std::d
 // is because 1st option allows for recursive type traits, while 'using' syntax doesn't. We have some recursive type
 // traits here in form of 'is_json_type_convertible<>', which expands over the 'T' checking that 'T', 'T::value_type'
 // (if exists), 'T::mapped_type' (if exists) and their other layered value/mapped types are all satisfying the
-// necessary convertability trait. This allows us to make a trait which fully deduces whether some
+// necessary convertibility trait. This allows us to make a trait which fully deduces whether some
 // complex datatype can be converted to a JSON recursively.
 
-utl_json_type_trait_conjunction(is_object_like, _has_begin<T>, _has_end<T>, _has_key_type<T>, _has_mapped_type<T>);
-utl_json_type_trait_conjunction(is_array_like, _has_begin<T>, _has_end<T>, _has_input_it<T>);
+utl_json_type_trait_conjunction(is_object_like, has_begin<T>, has_end<T>, has_key_type<T>, has_mapped_type<T>);
+utl_json_type_trait_conjunction(is_array_like, has_begin<T>, has_end<T>, has_input_it<T>);
 utl_json_type_trait_conjunction(is_string_like, std::is_convertible<T, std::string_view>);
-utl_json_type_trait_conjunction(is_numeric_like, std::is_convertible<T, _number_type_impl>);
-utl_json_type_trait_conjunction(is_bool_like, std::is_same<T, _bool_type_impl>);
-utl_json_type_trait_conjunction(is_null_like, std::is_same<T, _null_type_impl>);
+utl_json_type_trait_conjunction(is_numeric_like, std::is_convertible<T, number_type_impl>);
+utl_json_type_trait_conjunction(is_bool_like, std::is_same<T, bool_type_impl>);
+utl_json_type_trait_conjunction(is_null_like, std::is_same<T, null_type_impl>);
 
-utl_json_type_trait_disjunction(_is_directly_json_convertible, is_string_like<T>, is_numeric_like<T>, is_bool_like<T>,
+utl_json_type_trait_disjunction(is_directly_json_convertible, is_string_like<T>, is_numeric_like<T>, is_bool_like<T>,
                                 is_null_like<T>);
 
 utl_json_type_trait_conjunction(
     is_json_convertible,
     std::disjunction<
         // either the type itself is convertible
-        _is_directly_json_convertible<T>,
+        is_directly_json_convertible<T>,
         // ... or it's an array of convertible elements
         std::conjunction<is_array_like<T>, is_json_convertible<typename possible_value_type<T>::type>>,
         // ... or it's an object of convertible elements
         std::conjunction<is_object_like<T>, is_json_convertible<typename possible_mapped_type<T>::type>>>,
-    // end recusion by short-circuiting conjunction with 'false' once we arrive to '_dummy_type',
-    // arriving here means the type isn't convertable to JSON
-    std::negation<std::is_same<T, _dummy_type>>);
+    // end recursion by short-circuiting conjunction with 'false' once we arrive to '_dummy_type',
+    // arriving here means the type isn't convertible to JSON
+    std::negation<std::is_same<T, dummy_type>>);
 
 #undef utl_json_type_trait_conjunction
 #undef utl_json_type_trait_disjunction
@@ -1071,19 +1719,19 @@ utl_json_type_trait_conjunction(
 // --- Node class ---
 // ==================
 
-enum class Format { PRETTY, MINIMIZED };
+enum class Format : std::uint8_t { PRETTY, MINIMIZED };
 
 class Node;
-inline void _serialize_json_to_buffer(std::string& chars, const Node& node, Format format);
+inline void serialize_json_to_buffer(std::string& chars, const Node& node, Format format);
 
 class Node {
 public:
-    using object_type = _object_type_impl<Node>;
-    using array_type  = _array_type_impl<Node>;
-    using string_type = _string_type_impl;
-    using number_type = _number_type_impl;
-    using bool_type   = _bool_type_impl;
-    using null_type   = _null_type_impl;
+    using object_type = object_type_impl<Node>;
+    using array_type  = array_type_impl<Node>;
+    using string_type = string_type_impl;
+    using number_type = number_type_impl;
+    using bool_type   = bool_type_impl;
+    using null_type   = null_type_impl;
 
 private:
     using variant_type = std::variant<null_type, object_type, array_type, string_type, number_type, bool_type>;
@@ -1141,13 +1789,13 @@ public:
         return std::get_if<T>(&this->data);
     }
 
-    // -- Object methods --
-    // --------------------
+    // -- Object methods ---
+    // ---------------------
 
     Node& operator[](std::string_view key) {
         // 'std::map<K, V>::operator[]()' and 'std::map<K, V>::at()' don't support
         // support heterogeneous lookup, we have to reimplement them manually
-        if (this->is_null()) this->data = object_type(); // only 'null' converts to object automatically on 'json[key]'
+        if (this->is_null()) this->data = object_type{}; // 'null' converts to objects automatically
         auto& object = this->get_object();
         auto  it     = object.find(key);
         if (it == object.end()) it = object.emplace(key, Node{}).first;
@@ -1182,12 +1830,33 @@ public:
     }
 
     template <class T>
-    [[nodiscard]] const T& value_or(std::string_view key, const T& else_value) {
+    [[nodiscard]] const T& value_or(std::string_view key, const T& else_value) const {
         const auto& object = this->get_object();
         const auto  it     = object.find(std::string(key));
         if (it != object.end()) return it->second.get<T>();
         return else_value;
         // same thing as 'this->contains(key) ? json.at(key).get<T>() : else_value' but without a second map lookup
+    }
+
+    // -- Array methods ---
+    // --------------------
+
+    [[nodiscard]] Node& operator[](std::size_t pos) { return this->get_array()[pos]; }
+
+    [[nodiscard]] const Node& operator[](std::size_t pos) const { return this->get_array()[pos]; }
+
+    [[nodiscard]] Node& at(std::size_t pos) { return this->get_array().at(pos); }
+
+    [[nodiscard]] const Node& at(std::size_t pos) const { return this->get_array().at(pos); }
+
+    void push_back(const Node& node) {
+        if (this->is_null()) this->data = array_type{}; // 'null' converts to arrays automatically
+        this->get_array().push_back(node);
+    }
+
+    void push_back(Node&& node) {
+        if (this->is_null()) this->data = array_type{}; // 'null' converts to arrays automatically
+        this->get_array().push_back(node);
     }
 
     // -- Assignment --
@@ -1222,9 +1891,11 @@ public:
         } else if constexpr (is_null_like_v<T>) {
             this->data.emplace<null_type>(value);
         } else if constexpr (is_numeric_like_v<T>) {
-            this->data.emplace<number_type>(value);
+            this->data.emplace<number_type>(static_cast<number_type>(value));
+            // cast silences possible 'size_t' -> 'double' conversion warnings,
+            // conversion is deliberate and documented even if it might lose the upper 9 bits
         } else {
-            static_assert(_always_false_v<T>, "Method is a non-exhaustive visitor of std::variant<>.");
+            static_assert(always_false_v<T>, "Method is a non-exhaustive visitor of std::variant<>.");
         }
 
         return *this;
@@ -1263,7 +1934,7 @@ public:
     template <class T>
     Node& operator=(std::initializer_list<T> ilist) {
         // We can't just do 'return *this = array_type(value);' because compiler doesn't realize it can
-        // convert 'std::initializer_list<T>' to 'std::vector<Node>' for all 'T' convertable to 'Node',
+        // convert 'std::initializer_list<T>' to 'std::vector<Node>' for all 'T' convertible to 'Node',
         // we have to invoke 'Node()' constructor explicitly (here it happens in 'emplace_back()')
         array_type array_value;
         array_value.reserve(ilist.size());
@@ -1307,7 +1978,6 @@ public:
     // -- Constructors --
     // ------------------
 
-    // TEMP:
     Node& operator=(const Node&) = default;
     Node& operator=(Node&&)      = default;
 
@@ -1347,12 +2017,23 @@ public:
 
     [[nodiscard]] std::string to_string(Format format = Format::PRETTY) const {
         std::string buffer;
-        _serialize_json_to_buffer(buffer, *this, format);
+        serialize_json_to_buffer(buffer, *this, format);
         return buffer;
     }
 
     void to_file(const std::string& filepath, Format format = Format::PRETTY) const {
-        auto chars = this->to_string(format);
+        const auto chars = this->to_string(format);
+
+        const std::filesystem::path path = filepath;
+        if (path.has_parent_path() && !std::filesystem::exists(path.parent_path()))
+            std::filesystem::create_directories(std::filesystem::path(filepath).parent_path());
+        // no need to do an OS call in a trivial case, some systems might also have limited permissions
+        // on directory creation and calling 'create_directories()' straight up will cause them to error
+        // even when there is no need to actually perform directory creation because it already exists
+
+        // if user doesn't want to pay for 'create_directories()' call (which seems to be inconsequential
+        // on my benchmarks) they can always use 'std::ofstream' and 'to_string()' to export manually
+
         std::ofstream(filepath).write(chars.data(), chars.size());
         // maybe a little faster than doing 'std::ofstream(filepath) << node.to_string(format)'
     }
@@ -1363,7 +2044,7 @@ public:
     template <class T>
     [[nodiscard]] T to_struct() const {
         static_assert(
-            _always_false_v<T>,
+            always_false_v<T>,
             "Provided type doesn't have a defined JSON reflection. Use 'UTL_JSON_REFLECT' macro to define one.");
         // compile-time protection against calling 'to_struct()' on types that don't have reflection,
         // we can also provide a proper error message here
@@ -1389,113 +2070,158 @@ using Null   = Node::null_type;
 // --- Lookup Tables ---
 // =====================
 
-constexpr std::uint8_t _u8(char value) { return static_cast<std::uint8_t>(value); }
+constexpr std::uint8_t u8(char value) { return static_cast<std::uint8_t>(value); }
 
-constexpr std::size_t _number_of_char_values = 256;
-// always true since 'sizeof(char) == 1' is guaranteed by the standard
+constexpr std::size_t number_of_char_values = 256;
 
-// Lookup table used to check if number should be escaped and get a replacement char on at the same time.
-// This allows us to replace multiple checks and if's with a single array lookup that.
+// Lookup table used to check if number should be escaped and get a replacement char at the same time.
+// This allows us to replace multiple checks and if's with a single array lookup.
 //
 // Instead of:
 //    if (c == '"') { chars += '"' }
 //    ...
 //    else if (c == '\t') { chars += 't' }
 // we get:
-//    if (const char replacement = _lookup_serialized_escaped_chars[_u8(c)]) { chars += replacement; }
+//    if (const char replacement = lookup_serialized_escaped_chars[u8(c)]) { chars += replacement; }
 //
-// which ends up being a bit faster.
+// which ends up being a bit faster and also nicer.
 //
 // Note:
 // It is important that we explicitly cast to 'uint8_t' when indexing, depending on the platform 'char' might
-// be either signed or unsigned, we don't want out array to be indexed at '-71'. While we can reasonably expect
-// ASCII encoding on the platfrom (which would put all char literals that we use into the 0-127 range) other chars
-// might still be negative. This shouldn't have any runtime cost as trivial int casts like this get compiled into
-// the same thing as 'reinterpret_cast<>' which means no runtime logic, the bits are just treated differently.
+// be either signed or unsigned, we don't want our array to be indexed at '-71'. While we can reasonably expect
+// ASCII encoding on the platform (which would put all char literals that we use into the 0-127 range) other chars
+// might still be negative. This shouldn't have any cost as trivial int casts like these involve no runtime logic.
 //
-constexpr std::array<char, _number_of_char_values> _lookup_serialized_escaped_chars = [] {
-    std::array<char, _number_of_char_values> res{};
+constexpr std::array<char, number_of_char_values> lookup_serialized_escaped_chars = [] {
+    std::array<char, number_of_char_values> res{};
     // default-initialized chars get initialized to '\0',
     // ('\0' == 0) is mandated by the standard, which is why we can use it inside an 'if' condition
-    res[_u8('"')]  = '"';
-    res[_u8('\\')] = '\\';
-    // res['/']  = '/'; escaping forward slash in JSON is allowed, but redundant
-    res[_u8('\b')] = 'b';
-    res[_u8('\f')] = 'f';
-    res[_u8('\n')] = 'n';
-    res[_u8('\r')] = 'r';
-    res[_u8('\t')] = 't';
+    res[u8('"')]  = '"';
+    res[u8('\\')] = '\\';
+    // res[u8('/')]  = '/'; escaping forward slash in JSON is allowed, but redundant
+    res[u8('\b')] = 'b';
+    res[u8('\f')] = 'f';
+    res[u8('\n')] = 'n';
+    res[u8('\r')] = 'r';
+    res[u8('\t')] = 't';
     return res;
 }();
 
 // Lookup table used to determine "insignificant whitespace" characters when
 // skipping whitespace during parser. Seems to be either similar or marginally
 // faster in performance than a regular condition check.
-constexpr std::array<bool, _number_of_char_values> _lookup_whitespace_chars = [] {
-    std::array<bool, _number_of_char_values> res{};
-    // "Insignificant whitespace" according to the JSON spec:
-    // [https://ecma-international.org/wp-content/uploads/ECMA-404.pdf]
-    // constitues following symbols:
-    // - Whitespace      (aka ' ' )
-    // - Tabs            (aka '\t')
-    // - Carriage return (aka '\r')
-    // - Newline         (aka '\n')
-    res[_u8(' ')]  = true;
-    res[_u8('\t')] = true;
-    res[_u8('\r')] = true;
-    res[_u8('\n')] = true;
+//
+// "Insignificant whitespace" according to the JSON spec:
+//    https://ecma-international.org/wp-content/uploads/ECMA-404.pdf
+//
+// constitutes following symbols:
+//    - Whitespace      (aka ' ' )
+//    - Tabs            (aka '\t')
+//    - Carriage return (aka '\r')
+//    - Newline         (aka '\n')
+//
+constexpr std::array<bool, number_of_char_values> lookup_whitespace_chars = [] {
+    std::array<bool, number_of_char_values> res{};
+    res[u8(' ')]  = true;
+    res[u8('\t')] = true;
+    res[u8('\r')] = true;
+    res[u8('\n')] = true;
     return res;
 }();
 
 // Lookup table used to get an appropriate char for the escaped char in a 2-char JSON escape sequence.
-constexpr std::array<char, _number_of_char_values> _lookup_parsed_escaped_chars = [] {
-    std::array<char, _number_of_char_values> res{};
-    res[_u8('"')]  = '"';
-    res[_u8('\\')] = '\\';
-    res[_u8('/')]  = '/';
-    res[_u8('b')]  = '\b';
-    res[_u8('f')]  = '\f';
-    res[_u8('n')]  = '\n';
-    res[_u8('r')]  = '\r';
-    res[_u8('t')]  = '\t';
+constexpr std::array<char, number_of_char_values> lookup_parsed_escaped_chars = [] {
+    std::array<char, number_of_char_values> res{};
+    res[u8('"')]  = '"';
+    res[u8('\\')] = '\\';
+    res[u8('/')]  = '/';
+    res[u8('b')]  = '\b';
+    res[u8('f')]  = '\f';
+    res[u8('n')]  = '\n';
+    res[u8('r')]  = '\r';
+    res[u8('t')]  = '\t';
     return res;
 }();
+
+// ======================================
+// --- libc++ 'from_chars()' fallback ---
+// ======================================
+
+#ifdef UTL_JSON_FROM_CHARS_FALLBACK
+constexpr std::array<bool, number_of_char_values> lookup_numeric_chars = [] {
+    std::array<bool, number_of_char_values> res{};
+    for (std::uint8_t i = u8('0'); i <= u8('9'); ++i) res[i] = true;
+    res[u8('-')] = true;
+    res[u8('+')] = true;
+    res[u8('e')] = true;
+    res[u8('E')] = true;
+    res[u8('.')] = true;
+    return res;
+}();
+
+// Basically the only thread-safe locale-neutral way of parsing floats that doesn't involve a hand-rolled <charconv>
+// (which takes approx. 4k lines of rather terse code), VERY slow and doesn't provide <charconv> roundtrip guarantees.
+//
+// 'stod()' and 'strtod()' are inherently not thread-safe due to their dependence on a global locale with no thread
+// safety guarantees, many smaller JSON libs fumble this aspect since it's very easy to miss and produces bugs that
+// are difficult to pinpoint. Float parsing situation is rather grim before C++17.
+//
+// For usage convenience we expose the same API as regular 'from_chars()'.
+//
+inline std::from_chars_result available_from_chars_impl(const char* first, const char* last, Number& value) {
+    const char* cursor = first;
+    while (cursor < last && lookup_numeric_chars[u8(*cursor)]) ++cursor; // skip to the first non-numeric char
+
+    std::istringstream iss(std::string(first, cursor));
+    iss.imbue(std::locale::classic());
+    iss >> value;
+
+    const auto error = (iss && iss.eof()) ? std::errc{} : std::errc::invalid_argument;
+    // '.eof()' not set => number wasn't parsed fully (usually due to incorrect format)
+    // 'iss' is false   => number parsing encountered an algorithmic issue
+    if (error != std::errc{}) return {first, error};
+    return {cursor, error};
+}
+#else
+inline std::from_chars_result available_from_chars_impl(const char* first, const char* last, Number& value) {
+    return std::from_chars(first, last, value);
+}
+#endif
 
 // ==========================
 // --- JSON Parsing impl. ---
 // ==========================
 
-inline int _recursion_limit = 1000;
+constexpr unsigned int default_recursion_limit = 100;
+// this recursion limit applies only to parsing from text, conversions from
+// structs & containers are a separate thing and don't really need it as much
 
-inline void set_recursion_limit(int max_depth) noexcept { _recursion_limit = max_depth; }
-
-struct _parser {
+struct Parser {
     const std::string& chars;
-    int                recursion_depth{};
+    unsigned int       recursion_limit;
+    unsigned int       recursion_depth = 0;
     // we track recursion depth to handle stack allocation errors
     // (this can be caused malicious inputs with extreme level of nesting, for example, 100k array
     // opening brackets, which would cause huge recursion depth causing the stack to overflow with SIGSEGV)
 
     // dynamic allocation errors can be handled with regular exceptions through std::bad_alloc
 
-    _parser() = delete;
-    _parser(const std::string& chars) : chars(chars) {}
+    Parser() = delete;
+    Parser(const std::string& chars, unsigned int& recursion_limit) : chars(chars), recursion_limit(recursion_limit) {}
 
-    // Parser state
     std::size_t skip_nonsignificant_whitespace(std::size_t cursor) {
         using namespace std::string_literals;
 
         while (cursor < this->chars.size()) {
-            if (!_lookup_whitespace_chars[_u8(this->chars[cursor])]) return cursor;
+            if (!lookup_whitespace_chars[u8(this->chars[cursor])]) return cursor;
             ++cursor;
         }
 
         throw std::runtime_error("JSON parser reached the end of buffer at pos "s + std::to_string(cursor) +
                                  " while skipping insignificant whitespace segment."s +
-                                 _pretty_error(cursor, this->chars));
+                                 pretty_error(cursor, this->chars));
     }
 
-    // Parsing methods
     std::pair<std::size_t, Node> parse_node(std::size_t cursor) {
         using namespace std::string_literals;
 
@@ -1522,7 +2248,7 @@ struct _parser {
         }
         throw std::runtime_error("JSON node selector encountered unexpected marker symbol {"s + this->chars[cursor] +
                                  "} at pos "s + std::to_string(cursor) + " (should be one of {0123456789{[\"tfn})."s +
-                                 _pretty_error(cursor, this->chars));
+                                 pretty_error(cursor, this->chars));
 
         // Note: using a lookup table instead of an 'if' chain doesn't seem to offer any performance benefits here
     }
@@ -1533,24 +2259,24 @@ struct _parser {
         // Object pair parser assumes it is starting at a '"'
 
         // Parse pair key
-        std::string key; // allocating a string here is fine since we will std::move() into a map key
-        std::tie(cursor, key) = this->parse_string(cursor); // may point 'this->current_node' to a new node
+        std::string key; // allocating a string here is fine since we will 'std::move()' it into a map key
+        std::tie(cursor, key) = this->parse_string(cursor);
 
-        // Handle stuff inbetween
+        // Handle stuff in-between
         cursor = this->skip_nonsignificant_whitespace(cursor);
         if (this->chars[cursor] != ':')
             throw std::runtime_error("JSON object node encountered unexpected symbol {"s + this->chars[cursor] +
                                      "} after the pair key at pos "s + std::to_string(cursor) + " (should be {:})."s +
-                                     _pretty_error(cursor, this->chars));
+                                     pretty_error(cursor, this->chars));
         ++cursor; // move past the colon ':'
         cursor = this->skip_nonsignificant_whitespace(cursor);
 
         // Parse pair value
-        if (++this->recursion_depth > _recursion_limit)
+        if (++this->recursion_depth > this->recursion_limit)
             throw std::runtime_error("JSON parser has exceeded maximum allowed recursion depth of "s +
-                                     std::to_string(_recursion_limit) +
+                                     std::to_string(this->recursion_limit) +
                                      ". If stated depth wasn't caused by an invalid input, "s +
-                                     "recursion limit can be increased with json::set_recursion_limit()."s);
+                                     "recursion limit can be increased in the parser."s);
 
         Node value;
         std::tie(cursor, value) = this->parse_node(cursor);
@@ -1558,20 +2284,20 @@ struct _parser {
         --this->recursion_depth;
 
         // Note 1:
-        // The question of wheter JSON allows duplicate keys is non-trivial but the resulting answer is NO.
-        // JSON is goverened by 2 standards:
+        // The question of whether JSON allows duplicate keys is non-trivial but the resulting answer is YES.
+        // JSON is governed by 2 standards:
         // 1) ECMA-404 https://ecma-international.org/wp-content/uploads/ECMA-404.pdf
         //    which doesn't say anything about duplicate kys
-        // 2) RFC-8259 https://www.rfc-editor.org/rfc/rfc2119
+        // 2) RFC-8259 https://www.rfc-editor.org/rfc/rfc8259
         //    which states "The names within an object SHOULD be unique.",
         //    however as defined in RFC-2119 https://www.rfc-editor.org/rfc/rfc2119:
         //       "SHOULD This word, or the adjective "RECOMMENDED", mean that there may exist valid reasons in
         //       particular circumstances to ignore a particular item, but the full implications must be understood
         //       and carefully weighed before choosing a different course."
-        // which means at the end of the day duplicate keys are discouraged but still valid
+        // which means at the end of the day duplicate keys are discouraged, but still valid
 
         // Note 2:
-        // There is no standard specification on which JSON value should be prefered in case of duplicate keys.
+        // There is no standard specification on which JSON value should be preferred in case of duplicate keys.
         // This is considered implementation detail as per RFC-8259:
         //    "An object whose names are all unique is interoperable in the sense that all software implementations
         //    receiving that object will agree on the name-value mappings. When the names within an object are not
@@ -1585,9 +2311,10 @@ struct _parser {
         // not since that goes against the standard
 
         // Note 4:
-        // 'parent.emplace_hint(parent.end(), ...)' can drastically speed up parsing of sorted JSON object, however
+        // 'parent.emplace_hint(parent.end(), ...)' can drastically speed up parsing of sorted JSON objects, however
         // since most JSONs in the wild aren't sorted we will resort to a more generic option of regular '.emplace()'
-        parent.emplace(std::move(key), std::move(value));
+
+        parent.try_emplace(std::move(key), std::move(value));
 
         return cursor;
     }
@@ -1637,12 +2364,12 @@ struct _parser {
             } else {
                 throw std::runtime_error(
                     "JSON array node could not find comma {,} or object ending symbol {}} after the element at pos "s +
-                    std::to_string(cursor) + "."s + _pretty_error(cursor, this->chars));
+                    std::to_string(cursor) + "."s + pretty_error(cursor, this->chars));
             }
         }
 
         throw std::runtime_error("JSON object node reached the end of buffer while parsing object contents." +
-                                 _pretty_error(cursor, this->chars));
+                                 pretty_error(cursor, this->chars));
     }
 
     std::size_t parse_array_element(std::size_t cursor, Array& parent) {
@@ -1651,9 +2378,9 @@ struct _parser {
         // Array element parser assumes it is starting at the first symbol of some JSON node
 
         // Parse pair key
-        if (++this->recursion_depth > _recursion_limit)
+        if (++this->recursion_depth > this->recursion_limit)
             throw std::runtime_error("JSON parser has exceeded maximum allowed recursion depth of "s +
-                                     std::to_string(_recursion_limit) +
+                                     std::to_string(this->recursion_limit) +
                                      ". If stated depth wasn't caused by an invalid input, "s +
                                      "recursion limit can be increased with json::set_recursion_limit()."s);
 
@@ -1672,7 +2399,7 @@ struct _parser {
 
         ++cursor; // move past the opening bracket '['
 
-        // Empty object that will accumulate child nodes as we parse them
+        // Empty array that will accumulate child nodes as we parse them
         Array array_value;
 
         // Handle 1st pair
@@ -1700,35 +2427,102 @@ struct _parser {
             } else {
                 throw std::runtime_error(
                     "JSON array node could not find comma {,} or array ending symbol {]} after the element at pos "s +
-                    std::to_string(cursor) + "."s + _pretty_error(cursor, this->chars));
+                    std::to_string(cursor) + "."s + pretty_error(cursor, this->chars));
             }
         }
 
         throw std::runtime_error("JSON array node reached the end of buffer while parsing object contents." +
-                                 _pretty_error(cursor, this->chars));
+                                 pretty_error(cursor, this->chars));
     }
 
-    inline void parse_unicode_codepoint_from_hex(std::size_t cursor, std::string& string_value) {
+    inline std::size_t parse_escaped_unicode_codepoint(std::size_t cursor, std::string& string_value) {
         using namespace std::string_literals;
 
-        if (cursor >= this->chars.size() + 4)
-            throw std::runtime_error("JSON string node reached the end of buffer while"s +
-                                     "parsing a 5-character escape sequence at pos "s + std::to_string(cursor) + "."s +
-                                     _pretty_error(cursor, this->chars));
-        // Standard library is absolutely HORRIBLE when it comes to Unicode support.
-        // Literally every single encoding function in <cuchar>/<string>/<codecvt> is a
-        // crime against common sense, API safety and performace, which is why we do this
-        // inefficient nonsense and pray that there's not gonna be a lot of escaped unicode
-        // in the data. This also adds another 2 #include's just by itself. Supports UTF-8.
-        const std::string hex(this->chars.data() + cursor + 1, 4);
-        // standard functions only support std::string or null-terminated char*,
-        // there's no way (that I'm aware of) to view into the data and parse it without making a copy,
-        // thankfully a string of 4 characters should always fit into the SSO buffer
-        const char32_t    unicode_char = std::stoul(hex, nullptr, 16);
-        if (!_unicode_codepoint_to_utf8(string_value, unicode_char))
-            throw std::runtime_error("JSON string node could not parse unicode codepoint {"s + hex +
+        // Note 1:
+        // 4 hex digits can encode every character in a basic multilingual plane, to properly encode all valid unicode
+        // chars 6 digits are needed. If JSON was a bit better we would have a longer escape sequence like '\Uxxxxxx',
+        // (the way ECMAScript, Python and C++ do it), but for historical reasons longer codepoints are instead
+        // represented using a UTF-16 surrogate pair like this: '\uxxxx\uxxxx'. The way such pair can be distinguished
+        // from 2 independent codepoints is by checking a range of the first codepoint: values from 'U+D800' to 'U+DFFF'
+        // are reserved for surrogate pairs. This is abhorrent and makes implementation twice as cumbersome, but we
+        // gotta to do it in order to be standard-compliant.
+
+        // Note 2:
+        // 1st surrogate contains high bits, 2nd surrogate contains low bits.
+
+        const auto throw_parsing_error = [&](std::string_view hex) {
+            throw std::runtime_error("JSON string node could not parse unicode codepoint {"s + std::string(hex) +
                                      "} while parsing an escape sequence at pos "s + std::to_string(cursor) + "."s +
-                                     _pretty_error(cursor, this->chars));
+                                     pretty_error(cursor, this->chars));
+        };
+
+        const auto throw_surrogate_error = [&](std::string_view hex) {
+            throw std::runtime_error("JSON string node encountered invalid unicode escape sequence in " +
+                                     "second half of UTF-16 surrogate pair starting at {"s + std::string(hex) +
+                                     "} while parsing an escape sequence at pos "s + std::to_string(cursor) + "."s +
+                                     pretty_error(cursor, this->chars));
+        };
+
+        const auto throw_end_of_buffer_error = [&]() {
+            throw std::runtime_error("JSON string node reached the end of buffer while "s +
+                                     "parsing a unicode escape sequence at pos "s + std::to_string(cursor) + "."s +
+                                     pretty_error(cursor, this->chars));
+        };
+
+        const auto throw_end_of_buffer_error_for_pair = [&]() {
+            throw std::runtime_error("JSON string node reached the end of buffer while "s +
+                                     "parsing a unicode escape sequence surrogate pair at pos "s +
+                                     std::to_string(cursor) + "."s + pretty_error(cursor, this->chars));
+        };
+
+        const auto parse_utf16 = [&](std::string_view hex) -> std::uint16_t {
+            std::uint16_t utf16{};
+            const auto [end_ptr, error_code] = std::from_chars(hex.data(), hex.data() + hex.size(), utf16, 16);
+
+            const bool sequence_is_valid     = (error_code == std::errc{});
+            const bool sequence_parsed_fully = (end_ptr == hex.data() + hex.size());
+
+            if (!sequence_is_valid || !sequence_parsed_fully) throw_parsing_error(hex);
+
+            return utf16;
+        };
+
+        // | '\uxxxx\uxxxx' | '\uxxxx\uxxxx'   | '\uxxxx\uxxxx' | '\uxxxx\uxxxx'   | '\uxxxx\uxxxx'  |
+        // |   ^            |    ^             |       ^        |          ^       |             ^   |
+        // | start (+0)     | hex_1_start (+1) | hex_1_end (+4) | hex_2_start (+7) | hex_2_end (+10) |
+        constexpr std::size_t hex_1_start     = 1;
+        constexpr std::size_t hex_1_end       = 4;
+        constexpr std::size_t hex_2_backslash = 5;
+        constexpr std::size_t hex_2_prefix    = 6;
+        constexpr std::size_t hex_2_start     = 7;
+        constexpr std::size_t hex_2_end       = 10;
+
+        const auto start = this->chars.data() + cursor;
+
+        if (cursor + hex_1_end >= this->chars.size()) throw_end_of_buffer_error();
+
+        const std::string_view hex_1(start + hex_1_start, 4);
+        const std::uint16_t    utf16_1 = parse_utf16(hex_1);
+
+        // Surrogate pair case
+        if (0xD800 <= utf16_1 && utf16_1 <= 0xDFFF) {
+            if (cursor + hex_2_end >= this->chars.size()) throw_end_of_buffer_error_for_pair();
+            if (start[hex_2_backslash] != '\\') throw_surrogate_error(hex_1);
+            if (start[hex_2_prefix] != 'u') throw_surrogate_error(hex_1);
+
+            const std::string_view hex_2(start + hex_2_start, 4);
+            const std::uint16_t    utf16_2 = parse_utf16(hex_2);
+
+            const std::uint32_t codepoint = utf16_pair_to_codepoint(utf16_1, utf16_2);
+            if (!codepoint_to_utf8(string_value, codepoint)) throw_parsing_error(hex_1);
+            return cursor + hex_2_end;
+        }
+        // Regular case
+        else {
+            const std::uint32_t codepoint = static_cast<std::uint32_t>(utf16_1);
+            if (!codepoint_to_utf8(string_value, codepoint)) throw_parsing_error(hex_1);
+            return cursor + hex_1_end;
+        }
     }
 
     std::pair<std::size_t, String> parse_string(std::size_t cursor) {
@@ -1759,26 +2553,28 @@ struct _parser {
                 ++cursor; // move past the backslash '\'
 
                 string_value.append(this->chars.data() + segment_start, cursor - segment_start - 1);
-                // can't buffer more than that since we have to insert special characters now.
+                // can't buffer more than that since we have to insert special characters now
+
+                if (cursor >= this->chars.size())
+                    throw std::runtime_error("JSON string node reached the end of buffer while"s +
+                                             "parsing an escape sequence at pos "s + std::to_string(cursor) + "."s +
+                                             pretty_error(cursor, this->chars));
 
                 const char escaped_char = this->chars[cursor];
 
                 // 2-character escape sequences
-                if (const char replacement_char = _lookup_parsed_escaped_chars[_u8(escaped_char)]) {
-                    if (cursor >= this->chars.size())
-                        throw std::runtime_error("JSON string node reached the end of buffer while"s +
-                                                 "parsing a 2-character escape sequence at pos "s +
-                                                 std::to_string(cursor) + "."s + _pretty_error(cursor, this->chars));
+                if (const char replacement_char = lookup_parsed_escaped_chars[u8(escaped_char)]) {
                     string_value += replacement_char;
                 }
-                // 6-character escape sequences (escaped unicode HEX codepoints)
+                // 6/12-character escape sequences (escaped unicode HEX codepoints)
                 else if (escaped_char == 'u') {
-                    parse_unicode_codepoint_from_hex(cursor, string_value);
-                    cursor += 4; // move past first 'uXXX' symbols, last symbol will be covered by the loop '++cursor'
+                    cursor = this->parse_escaped_unicode_codepoint(cursor, string_value);
+                    // moves past first 'uXXX' symbols, last symbol will be covered by the loop '++cursor',
+                    // in case of paired hexes moves past the second hex too
                 } else {
-                    throw std::runtime_error("JSON string node encountered unexpected character {"s + escaped_char +
-                                             "} while parsing an escape sequence at pos "s + std::to_string(cursor) +
-                                             "."s + _pretty_error(cursor, this->chars));
+                    throw std::runtime_error("JSON string node encountered unexpected character {"s +
+                                             std::string{escaped_char} + "} while parsing an escape sequence at pos "s +
+                                             std::to_string(cursor) + "."s + pretty_error(cursor, this->chars));
                 }
 
                 // This covers all non-hex escape sequences according to ECMA-404 specification
@@ -1789,15 +2585,15 @@ struct _parser {
                 continue;
             }
             // Reject unescaped control characters (codepoints U+0000 to U+001F)
-            else if (_u8(c) <= 31)
+            else if (u8(c) <= 31)
                 throw std::runtime_error(
                     "JSON string node encountered unescaped ASCII control character character \\"s +
                     std::to_string(static_cast<int>(c)) + " at pos "s + std::to_string(cursor) + "."s +
-                    _pretty_error(cursor, this->chars));
+                    pretty_error(cursor, this->chars));
         }
 
         throw std::runtime_error("JSON string node reached the end of buffer while parsing string contents." +
-                                 _pretty_error(cursor, this->chars));
+                                 pretty_error(cursor, this->chars));
     }
 
     std::pair<std::size_t, Number> parse_number(std::size_t cursor) {
@@ -1805,23 +2601,23 @@ struct _parser {
 
         Number number_value;
 
-        const auto [numer_end_ptr, error_code] =
-            std::from_chars(this->chars.data() + cursor, this->chars.data() + this->chars.size(), number_value);
+        const auto [numer_end_ptr, error_code] = available_from_chars_impl(
+            this->chars.data() + cursor, this->chars.data() + this->chars.size(), number_value);
 
         // Note:
         // std::from_chars() converts the first complete number it finds in the string,
         // for example "42 meters" would be converted to 42. We rely on that behaviour here.
 
-        if (error_code != std::errc()) {
+        if (error_code != std::errc{}) {
             // std::errc(0) is a valid enumeration value that represents success
             // even though it does not appear in the enumerator list (which starts at 1)
             if (error_code == std::errc::invalid_argument)
                 throw std::runtime_error("JSON number node could not be parsed as a number at pos "s +
-                                         std::to_string(cursor) + "."s + _pretty_error(cursor, this->chars));
+                                         std::to_string(cursor) + "."s + pretty_error(cursor, this->chars));
             else if (error_code == std::errc::result_out_of_range)
                 throw std::runtime_error(
                     "JSON number node parsed to number larger than its possible binary representation at pos "s +
-                    std::to_string(cursor) + "."s + _pretty_error(cursor, this->chars));
+                    std::to_string(cursor) + "."s + pretty_error(cursor, this->chars));
         }
 
         return {numer_end_ptr - this->chars.data(), number_value};
@@ -1833,7 +2629,7 @@ struct _parser {
 
         if (cursor + token_length > this->chars.size())
             throw std::runtime_error("JSON bool node reached the end of buffer while parsing {true}." +
-                                     _pretty_error(cursor, this->chars));
+                                     pretty_error(cursor, this->chars));
 
         const bool parsed_correctly =         //
             this->chars[cursor + 0] == 't' && //
@@ -1843,7 +2639,7 @@ struct _parser {
 
         if (!parsed_correctly)
             throw std::runtime_error("JSON bool node could not parse {true} at pos "s + std::to_string(cursor) + "."s +
-                                     _pretty_error(cursor, this->chars));
+                                     pretty_error(cursor, this->chars));
 
         return {cursor + token_length, Bool(true)};
     }
@@ -1854,7 +2650,7 @@ struct _parser {
 
         if (cursor + token_length > this->chars.size())
             throw std::runtime_error("JSON bool node reached the end of buffer while parsing {false}." +
-                                     _pretty_error(cursor, this->chars));
+                                     pretty_error(cursor, this->chars));
 
         const bool parsed_correctly =         //
             this->chars[cursor + 0] == 'f' && //
@@ -1865,7 +2661,7 @@ struct _parser {
 
         if (!parsed_correctly)
             throw std::runtime_error("JSON bool node could not parse {false} at pos "s + std::to_string(cursor) + "."s +
-                                     _pretty_error(cursor, this->chars));
+                                     pretty_error(cursor, this->chars));
 
         return {cursor + token_length, Bool(false)};
     }
@@ -1876,7 +2672,7 @@ struct _parser {
 
         if (cursor + token_length > this->chars.size())
             throw std::runtime_error("JSON null node reached the end of buffer while parsing {null}." +
-                                     _pretty_error(cursor, this->chars));
+                                     pretty_error(cursor, this->chars));
 
         const bool parsed_correctly =         //
             this->chars[cursor + 0] == 'n' && //
@@ -1886,7 +2682,7 @@ struct _parser {
 
         if (!parsed_correctly)
             throw std::runtime_error("JSON null node could not parse {null} at pos "s + std::to_string(cursor) + "."s +
-                                     _pretty_error(cursor, this->chars));
+                                     pretty_error(cursor, this->chars));
 
         return {cursor + token_length, Null()};
     }
@@ -1898,29 +2694,25 @@ struct _parser {
 // ==============================
 
 template <bool prettify>
-inline void _serialize_json_recursion(const Node& node, std::string& chars, unsigned int indent_level = 0,
-                                      bool skip_first_indent = false) {
+inline void serialize_json_recursion(const Node& node, std::string& chars, unsigned int indent_level = 0,
+                                     bool skip_first_indent = false) {
     using namespace std::string_literals;
     constexpr std::size_t indent_level_size = 4;
     const std::size_t     indent_size       = indent_level_size * indent_level;
 
-    // first indent should be skipped when printing after a key
-    //
-    // Example:
-    //
-    // {
-    //     "object": {              <- first indent skipped (Object)
-    //         "something": null    <- first indent skipped (Null)
-    //     },
-    //     "array": [               <- first indent skipped (Array)
-    //          1,                  <- first indent NOT skipped (Number)
-    //          2                   <- first indent NOT skipped (Number)
-    //     ]
-    // }
-    //
+    // First indent should be skipped when printing after a key, for example:
+    //    > {
+    //    >     "object": {              <- first indent skipped (Object)
+    //    >         "something": null    <- first indent skipped (Null)
+    //    >     },
+    //    >     "array": [               <- first indent skipped (Array)
+    //    >          1,                  <- first indent NOT skipped (Number)
+    //    >          2                   <- first indent NOT skipped (Number)
+    //    >     ]
+    //    > }
+
     // We handle 'prettify' segments through 'if constexpr'
-    // to avoid  any "trace" overhead on non-prettified serializing
-    //
+    // to avoid any additional overhead on non-prettified serializing
 
     // Note:
     // The fastest way to append strings to a preallocated buffer seems to be with '+=':
@@ -1930,17 +2722,16 @@ inline void _serialize_json_recursion(const Node& node, std::string& chars, unsi
     //    > chars +=  string_1 + string_2 + string_3; // slow
     //
     // '.append()' performs exactly the same as '+=', but has no overload for appending single chars.
-    // However it does have an overload for appending N of some character, which is why we use if for indentation.
+    // However, it does have an overload for appending N of some character, which is why we use if for indentation.
     //
-    // 'std::ostringstream' is painfully slow compared to regular appends
-    // so it's out of the question.
+    // 'std::ostringstream' is painfully slow compared to regular appends so it's out of the question.
 
     if constexpr (prettify)
         if (!skip_first_indent) chars.append(indent_size, ' ');
 
     // JSON Object
-    if (auto* ptr = node.get_if<Object>()) {
-        const auto& object_value = *ptr;
+    if (node.is_object()) {
+        const auto& object_value = node.get_object();
 
         // Skip all logic for empty objects
         if (object_value.empty()) {
@@ -1959,7 +2750,7 @@ inline void _serialize_json_recursion(const Node& node, std::string& chars, unsi
             if constexpr (prettify) chars += "\": ";
             else chars += "\":";
             // Value
-            _serialize_json_recursion<prettify>(it->second, chars, indent_level + 1, true);
+            serialize_json_recursion<prettify>(it->second, chars, indent_level + 1, true);
             // Comma
             if (++it != object_value.cend()) { // prevents trailing comma
                 chars += ',';
@@ -1974,8 +2765,8 @@ inline void _serialize_json_recursion(const Node& node, std::string& chars, unsi
         chars += '}';
     }
     // JSON Array
-    else if (auto* ptr = node.get_if<Array>()) {
-        const auto& array_value = *ptr;
+    else if (node.is_array()) {
+        const auto& array_value = node.get_array();
 
         // Skip all logic for empty arrays
         if (array_value.empty()) {
@@ -1988,7 +2779,7 @@ inline void _serialize_json_recursion(const Node& node, std::string& chars, unsi
 
         for (auto it = array_value.cbegin();;) {
             // Node
-            _serialize_json_recursion<prettify>(*it, chars, indent_level + 1);
+            serialize_json_recursion<prettify>(*it, chars, indent_level + 1);
             // Comma
             if (++it != array_value.cend()) { // prevents trailing comma
                 chars += ',';
@@ -2002,8 +2793,8 @@ inline void _serialize_json_recursion(const Node& node, std::string& chars, unsi
         chars += ']';
     }
     // String
-    else if (auto* ptr = node.get_if<String>()) {
-        const auto& string_value = *ptr;
+    else if (node.is_string()) {
+        const auto& string_value = node.get_string();
 
         chars += '"';
 
@@ -2016,7 +2807,7 @@ inline void _serialize_json_recursion(const Node& node, std::string& chars, unsi
         //
         std::size_t segment_start = 0;
         for (std::size_t i = 0; i < string_value.size(); ++i) {
-            if (const char escaped_char_replacement = _lookup_serialized_escaped_chars[_u8(string_value[i])]) {
+            if (const char escaped_char_replacement = lookup_serialized_escaped_chars[u8(string_value[i])]) {
                 chars.append(string_value.data() + segment_start, i - segment_start);
                 chars += '\\';
                 chars += escaped_char_replacement;
@@ -2028,12 +2819,12 @@ inline void _serialize_json_recursion(const Node& node, std::string& chars, unsi
         chars += '"';
     }
     // Number
-    else if (auto* ptr = node.get_if<Number>()) {
-        const auto& number_value = *ptr;
+    else if (node.is_number()) {
+        const auto& number_value = node.get_number();
 
         constexpr int max_exponent = std::numeric_limits<Number>::max_exponent10;
         constexpr int max_digits =
-            4 + std::numeric_limits<Number>::max_digits10 + std::max(2, _log_10_ceil(max_exponent));
+            4 + std::numeric_limits<Number>::max_digits10 + std::max(2, log10_ceil(max_exponent));
         // should be the smallest buffer size to account for all possible 'std::to_chars()' outputs,
         // see [https://stackoverflow.com/questions/68472720/stdto-chars-minimal-floating-point-buffer-size]
 
@@ -2042,7 +2833,7 @@ inline void _serialize_json_recursion(const Node& node, std::string& chars, unsi
         const auto [number_end_ptr, error_code] =
             std::to_chars(buffer.data(), buffer.data() + buffer.size(), number_value);
 
-        if (error_code != std::errc())
+        if (error_code != std::errc{})
             throw std::runtime_error(
                 "JSON serializing encountered std::to_chars() formatting error while serializing value {"s +
                 std::to_string(number_value) + "}."s);
@@ -2060,42 +2851,48 @@ inline void _serialize_json_recursion(const Node& node, std::string& chars, unsi
         }
     }
     // Bool
-    else if (auto* ptr = node.get_if<Bool>()) {
-        const auto& bool_value = *ptr;
+    else if (node.is_bool()) {
+        const auto& bool_value = node.get_bool();
         chars += (bool_value ? "true" : "false");
     }
     // Null
-    else if (node.is<Null>()) {
+    else if (node.is_null()) {
         chars += "null";
     }
 }
 
-inline void _serialize_json_to_buffer(std::string& chars, const Node& node, Format format) {
-    if (format == Format::PRETTY) _serialize_json_recursion<true>(node, chars);
-    else _serialize_json_recursion<false>(node, chars);
+inline void serialize_json_to_buffer(std::string& chars, const Node& node, Format format) {
+    if (format == Format::PRETTY) serialize_json_recursion<true>(node, chars);
+    else serialize_json_recursion<false>(node, chars);
 }
 
-// ===============================
-// --- JSON Parsing public API ---
-// ===============================
+// ========================
+// --- JSON parsing API ---
+// ========================
 
-[[nodiscard]] inline Node from_string(const std::string& chars) {
-    _parser           parser(chars);
+[[nodiscard]] inline Node from_string(const std::string& chars,
+                                      unsigned int       recursion_limit = default_recursion_limit) {
+    Parser            parser(chars, recursion_limit);
     const std::size_t json_start = parser.skip_nonsignificant_whitespace(0); // skip leading whitespace
     auto [end_cursor, node]      = parser.parse_node(json_start); // starts parsing recursively from the root node
-    // Check for invalid trailing sumbols
 
+    // Check for invalid trailing symbols
     using namespace std::string_literals;
+
     for (auto cursor = end_cursor; cursor < chars.size(); ++cursor)
-        if (!_lookup_whitespace_chars[_u8(chars[cursor])])
+        if (!lookup_whitespace_chars[u8(chars[cursor])])
             throw std::runtime_error("Invalid trailing symbols encountered after the root JSON node at pos "s +
-                                     std::to_string(cursor) + "."s + _pretty_error(cursor, chars));
+                                     std::to_string(cursor) + "."s + pretty_error(cursor, chars));
 
     return std::move(node); // implicit tuple blocks copy elision, we have to move() manually
+
+    // Note: Some code analyzers detect 'return std::move(node)' as a performance issue, it is
+    //       not, NOT having 'std::move()' on the other hand is very much a performance issue
 }
-[[nodiscard]] inline Node from_file(const std::string& filepath) {
-    const std::string chars = _read_file_to_string(filepath);
-    return from_string(chars);
+[[nodiscard]] inline Node from_file(const std::string& filepath,
+                                    unsigned int       recursion_limit = default_recursion_limit) {
+    const std::string chars = read_file_to_string(filepath);
+    return from_string(chars, recursion_limit);
 }
 
 namespace literals {
@@ -2112,13 +2909,13 @@ namespace literals {
 // -------------------------
 
 template <class T>
-constexpr bool _is_reflected_struct = false;
+constexpr bool is_reflected_struct = false;
 // this trait allows us to "mark" all reflected struct types, we use it to handle nested classes
 // and call 'to_struct()' / 'from_struct()' recursively whenever necessary
 
 template <class T>
-[[nodiscard]] utl::json::Node from_struct(const T&) {
-    static_assert(_always_false_v<T>,
+[[nodiscard]] utl::json::impl::Node from_struct(const T&) {
+    static_assert(always_false_v<T>,
                   "Provided type doesn't have a defined JSON reflection. Use 'UTL_JSON_REFLECT' macro to define one.");
     // compile-time protection against calling 'from_struct()' on types that don't have reflection,
     // we can also provide a proper error message here
@@ -2128,60 +2925,60 @@ template <class T>
 }
 
 template <class T>
-void _assign_value_to_node(Node& node, const T& value) {
+void assign_value_to_node(Node& node, const T& value) {
     if constexpr (is_json_convertible_v<T>) node = value;
-    // it is critical that the trait above performs DEEP check for JSON convertability and not a shallow one,
+    // it is critical that the trait above performs DEEP check for JSON convertibility and not a shallow one,
     // we want to detect things like 'std::vector<int>' as convertible, but not things like 'std::vector<MyStruct>',
     // these should expand over their element type / mapped type further until either they either reach
     // the reflected 'MyStruct' or end up on a dead end, which means an impossible conversion
-    else if constexpr (_is_reflected_struct<T>) node = from_struct(value);
+    else if constexpr (is_reflected_struct<T>) node = from_struct(value);
     else if constexpr (is_object_like_v<T>) {
         node = Object{};
         for (const auto& [key, val] : value) {
             Node single_node;
-            _assign_value_to_node(single_node, val);
+            assign_value_to_node(single_node, val);
             node.get_object().emplace(key, std::move(single_node));
         }
     } else if constexpr (is_array_like_v<T>) {
         node = Array{};
         for (const auto& elem : value) {
             Node single_node;
-            _assign_value_to_node(single_node, elem);
+            assign_value_to_node(single_node, elem);
             node.get_array().emplace_back(std::move(single_node));
         }
-    } else static_assert(_always_false_v<T>, "Could not resolve recursive conversion from 'T' to 'json::Node'.");
+    } else static_assert(always_false_v<T>, "Could not resolve recursive conversion from 'T' to 'json::Node'.");
 }
 
-#define utl_json_from_struct_assign(fieldname_) _assign_value_to_node(json[#fieldname_], val.fieldname_);
+#define utl_json_from_struct_assign(fieldname_) assign_value_to_node(json[#fieldname_], val.fieldname_);
 
 // --- to-struct utils ---
 // -----------------------
 
 // Assigning JSON node to a value for arbitrary type is a bit of an "incorrect" problem,
-// since we can't possinly know the API of the type we're assigning stuff to.
+// since we can't possibly know the API of the type we're assigning stuff to.
 // Object-like and array-like types need special handling that expands their nodes recursively,
-// we can't directly assign 'std::vector<Node>' to 'std::vector<double>' like we would we simpler types.
+// we can't directly assign 'std::vector<Node>' to 'std::vector<double>' like we would with simpler types.
 template <class T>
-void _assign_node_to_value_recursively(T& value, const Node& node) {
+void assign_node_to_value_recursively(T& value, const Node& node) {
     if constexpr (is_string_like_v<T>) value = node.get_string();
     else if constexpr (is_object_like_v<T>) {
         const auto object = node.get_object();
-        for (const auto& [key, val] : object) _assign_node_to_value_recursively(value[key], val);
+        for (const auto& [key, val] : object) assign_node_to_value_recursively(value[key], val);
     } else if constexpr (is_array_like_v<T>) {
         const auto array = node.get_array();
         value.resize(array.size());
-        for (std::size_t i = 0; i < array.size(); ++i) _assign_node_to_value_recursively(value[i], array[i]);
+        for (std::size_t i = 0; i < array.size(); ++i) assign_node_to_value_recursively(value[i], array[i]);
     } else if constexpr (is_bool_like_v<T>) value = node.get_bool();
     else if constexpr (is_null_like_v<T>) value = node.get_null();
-    else if constexpr (is_numeric_like_v<T>) value = node.get_number();
-    else if constexpr (_is_reflected_struct<T>) value = node.to_struct<T>();
-    else static_assert(_always_false_v<T>, "Method is a non-exhaustive visitor of std::variant<>.");
+    else if constexpr (is_numeric_like_v<T>) value = static_cast<T>(node.get_number());
+    else if constexpr (is_reflected_struct<T>) value = node.to_struct<T>();
+    else static_assert(always_false_v<T>, "Method is a non-exhaustive visitor of std::variant<>.");
 }
 
 // Not sure how to generically handle array-like types with compile-time known size,
-// so we're just gonna make a special case for 'std::array'
+// so we're just going to make a special case for 'std::array'
 template <class T, std::size_t N>
-void _assign_node_to_value_recursively(std::array<T, N>& value, const Node& node) {
+void assign_node_to_value_recursively(std::array<T, N>& value, const Node& node) {
     using namespace std::string_literals;
 
     const auto array = node.get_array();
@@ -2191,10 +2988,13 @@ void _assign_node_to_value_recursively(std::array<T, N>& value, const Node& node
                                  std::to_string(value.size()) + ", corresponding node has a size of "s +
                                  std::to_string(array.size()) + "."s);
 
-    for (std::size_t i = 0; i < array.size(); ++i) _assign_node_to_value_recursively(value[i], array[i]);
+    for (std::size_t i = 0; i < array.size(); ++i) assign_node_to_value_recursively(value[i], array[i]);
 }
 
-#define utl_json_to_struct_assign(fieldname_) _assign_node_to_value_recursively(val.fieldname_, this->at(#fieldname_));
+#define utl_json_to_struct_assign(fieldname_)                                                                          \
+    if (this->contains(#fieldname_)) assign_node_to_value_recursively(val.fieldname_, this->at(#fieldname_));
+// JSON might not have an entry corresponding to each structure member,
+// such members will stay defaulted according to the struct constructor
 
 // --- Codegen ---
 // ---------------
@@ -2202,18 +3002,18 @@ void _assign_node_to_value_recursively(std::array<T, N>& value, const Node& node
 #define UTL_JSON_REFLECT(struct_name_, ...)                                                                            \
                                                                                                                        \
     template <>                                                                                                        \
-    constexpr bool utl::json::_is_reflected_struct<struct_name_> = true;                                               \
+    constexpr bool utl::json::impl::is_reflected_struct<struct_name_> = true;                                          \
                                                                                                                        \
     template <>                                                                                                        \
-    utl::json::Node utl::json::from_struct<struct_name_>(const struct_name_& val) {                                    \
-        utl::json::Node json;                                                                                          \
+    inline utl::json::impl::Node utl::json::impl::from_struct<struct_name_>(const struct_name_& val) {                 \
+        utl::json::impl::Node json;                                                                                    \
         /* map 'json["<FIELDNAME>"] = val.<FIELDNAME>;' */                                                             \
         utl_json_map(utl_json_from_struct_assign, __VA_ARGS__);                                                        \
         return json;                                                                                                   \
     }                                                                                                                  \
                                                                                                                        \
     template <>                                                                                                        \
-    auto utl::json::Node::to_struct<struct_name_>() const->struct_name_ {                                              \
+    inline auto utl::json::impl::Node::to_struct<struct_name_>() const -> struct_name_ {                               \
         struct_name_ val;                                                                                              \
         /* map 'val.<FIELDNAME> = this->at("<FIELDNAME>").get<decltype(val.<FIELDNAME>)>();' */                        \
         utl_json_map(utl_json_to_struct_assign, __VA_ARGS__);                                                          \
@@ -2222,6 +3022,33 @@ void _assign_node_to_value_recursively(std::array<T, N>& value, const Node& node
                                                                                                                        \
     static_assert(true)
 
+
+} // namespace utl::json::impl
+
+// ______________________ PUBLIC API ______________________
+
+namespace utl::json {
+
+using impl::Format;
+
+using impl::Node;
+
+using impl::Object;
+using impl::Array;
+using impl::String;
+using impl::Number;
+using impl::Bool;
+using impl::Null;
+
+using impl::from_string;
+using impl::from_file;
+using impl::from_struct;
+
+namespace literals = impl::literals;
+
+// macro -> UTL_JSON_REFLECT
+
+using impl::is_reflected_struct;
 
 } // namespace utl::json
 
@@ -2242,581 +3069,178 @@ void _assign_node_to_value_recursively(std::array<T, N>& value, const Node& node
 //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-#if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_LOG)
-#ifndef UTLHEADERGUARD_LOG
-#define UTLHEADERGUARD_LOG
+#if !defined(UTL_PICK_MODULES) || defined(UTL_MODULE_LOG)
+
+#ifndef utl_log_headerguard
+#define utl_log_headerguard
+
+#define UTL_LOG_VERSION_MAJOR 2
+#define UTL_LOG_VERSION_MINOR 3
+#define UTL_LOG_VERSION_PATCH 3
 
 // _______________________ INCLUDES _______________________
 
-#include <array>         // array<>
-#include <charconv>      // to_chars()
-#include <chrono>        // steady_clock
-#include <cstddef>       // size_t
-#include <exception>     // exception
-#include <fstream>       // ofstream
-#include <iostream>      // cout
-#include <iterator>      // next()
-#include <limits>        // numeric_limits<>
-#include <list>          // list<>
-#include <mutex>         // lock_guard<>, mutex
-#include <ostream>       // ostream
-#include <sstream>       // std::ostringstream
-#include <stdexcept>     // std::runtime_error
-#include <string>        // string
-#include <string_view>   // string_view
-#include <system_error>  // errc()
-#include <thread>        // this_thread::get_id()
-#include <tuple>         // tuple_size<>
-#include <type_traits>   // is_integral_v<>, is_floating_point_v<>, is_same_v<>, is_convertible_to_v<>
-#include <unordered_map> // unordered_map<>
-#include <utility>       // forward<>()
-#include <variant>       // variant<>
+#include <array>              // array<>, size_t
+#include <atomic>             // atomic<>
+#include <cassert>            // assert()
+#include <charconv>           // to_chars()
+#include <chrono>             // steady_clock
+#include <condition_variable> // condition_variable
+#include <fstream>            // ofstream, ostream
+#include <functional>         // function<>, ref()
+#include <iostream>           // cout
+#include <iterator>           // ostreambuf_iterator<>
+#include <memory>             // unique_ptr<>, make_unique<>()
+#include <mutex>              // mutex<>, scoped_lock<>
+#include <queue>              // queue<>
+#include <sstream>            // ostringstream
+#include <string>             // string
+#include <string_view>        // string_view
+#include <thread>             // thread
+#include <tuple>              // tuple<>, get<>, tuple_size_v<>, apply()
+#include <type_traits>        // enable_if_t<>, is_enum_v<>, is_integral_v<>, is_unsigned_v<>, underlying_type_t<>, ...
+#include <utility>            // forward<>(), integer_sequence<>, make_index_sequence<>
 
 // ____________________ DEVELOPER DOCS ____________________
 
-// Reasonable performance and convenient logger.
+// A somewhat overengineered logger that uses a lot of compile-time magic and internal macro codegen
+// to generate a concise macro-free API that provides features usually associated with macros.
 //
-// The main highligh of this module (and the main performance win relative to 'std::ostream')
-// is a generic stringifier class that both convenient and quite fast at formatting multiple values.
+// We also want simple customizability on user side while squeezing out as much formatting
+// performance as we reasonably can using compile-time logic. Combined with the inherent
+// weirdness of variadic formatting this at times leads to some truly horrific constructs.
 //
-// This stringifier is copied as an implementation dependency in some other modules ('utl::mvl'
-// and 'utl::table') and customized with CRTP to format things in all kinds of specific ways.
-//
-// The logger implementation itself is actually not that efficient (even though not completely
-// naive either), a proper performance-oriented approach would use following things:
-//
-//    1. More 'constexpr' things to avoid having to constantly check styling conditions at runtime
-//
-//    2. A separate persistent thread to flush the buffer
-//
-//       Note: I did try using a stripped down version of 'utl::parallel::ThreadPool' to upload tasks
-//             for flushing the buffer, it generatly improves performance by ~30%, however I decided it
-//             is not worth the added complexity & cpu usage for that little gain
-//
-//    3. More platform-specific methods to query stuff like time & thread id with minimal overhead
-//
-//    4. A centralized formatting & info querying facility so multiple sinks don't have to repeat
-//       formatting & querying logic.
-//
-//       Such facility would have to decide the bare minimum of work possible base on all existing
-//       sink options, perform the formatting, and then just distribute string view to actual sinks.
-//
-//       This drastically complicated the logic and can be rather at odds with point (1) since unlike
-//       the individual sinks, I don't see a way of making style checks here constexpr, but in the end
-//       that would be a proper solution.
-//
+// All things considered, format strings are a much simpler solution from the implementation perspective,
+// however properly using them isn't possible without bringing in fmtlib as a dependency. In theory,
+// if we wanted to to push for truly top-notch performance the plan would be as follows:
+//    1. Bring in fmtlib as a dependency and use format strings as a syntax of choice
+//    2. Bring in llfio / glaze or another low latency IO library as a dependency
+//    3. Implement async formatting & IO backend:
+//    |  A. Loging threads push entries into a MPSC lock-free queue
+//    |  B. Serialized types are limited to a specific set which can be encoded
+//    |  C. Each queue entry consists of a:
+//    |  |  a. Timestamp
+//    |  |  b. Pointer to a constexpr metadata struct that contains callsite,
+//    |  |     format string and a pointer to a generated template decoder function
+//    |  |  c. Binary copy encoding the arguments
+//    |  D. Backend thread pops entries from the queue and puts them into an unbounded transit buffer
+//    |     ordered by the entry timestamp, this buffer gets periodically flushed, this is necessary
+//    |     to sort multi-threaded logs by time without introducing syncronization on the logging
+//    |     threads, perfect ordering is not theoretically guaranteed it is good enough in practice
+//    |  E. When flushing, backend thread performs:
+//    |  |  a. Decoding using the received function pointer
+//    |  |  b. Formatting using fmtlib
+//    |  |  c. Buffered IO using the manual buffer and the underlying IO library
+//    4. Use macro API to generate & format callsite and other metadata at compile-time,
+//       doing the same with functions is non-feasible / extremely difficult due to the
+//       design of 'std::source_location' which prevent proper compile-time evaluation
+//    5. Use a custom <chrono> clock based on RDTSC timestamps for lower overhead
+// this, however, would require a project of a whole different scale and integration complexity.
 
 // ____________________ IMPLEMENTATION ____________________
 
-namespace utl::log {
+// ===============================================
+// --- Optional 'std::source_location' support ---
+// ===============================================
 
-// ======================
-// --- Internal utils ---
-// ======================
+// clang-format off
 
-// - SFINAE to select localtime_s() or localtime_r() -
-template <class TimeMoment, class TimeType>
-auto _available_localtime_impl(TimeMoment time_moment, TimeType timer)
-    -> decltype(localtime_s(std::forward<TimeMoment>(time_moment), std::forward<TimeType>(timer))) {
-    return localtime_s(std::forward<TimeMoment>(time_moment), std::forward<TimeType>(timer));
-}
+// Detect if we have C++20 or above
 
-template <class TimeMoment, class TimeType>
-auto _available_localtime_impl(TimeMoment time_moment, TimeType timer)
-    -> decltype(localtime_r(std::forward<TimeType>(timer), std::forward<TimeMoment>(time_moment))) {
-    return localtime_r(std::forward<TimeType>(timer), std::forward<TimeMoment>(time_moment));
-}
+#ifdef _MSC_VER
+    #define utl_log_cpp_standard _MSVC_LANG
+#else
+    #define utl_log_cpp_standard __cplusplus
+#endif
 
-inline std::size_t _get_thread_index(const std::thread::id id) {
-    static std::size_t next_index = 0;
+// For C++20 and above use typedef for 'std::source_location'
 
-    static std::mutex                                       mutex;
-    static std::unordered_map<std::thread::id, std::size_t> thread_ids;
-    const std::lock_guard                                   lock(mutex);
-
-    const auto it = thread_ids.find(id);
-    if (it == thread_ids.end()) return thread_ids[id] = next_index++;
-    return it->second;
-}
-
-template <class IntType, std::enable_if_t<std::is_integral<IntType>::value, bool> = true>
-unsigned int _integer_digit_count(IntType value) {
-    unsigned int digits = (value <= 0) ? 1 : 0;
-    // (value <  0) => we add 1 digit because of '-' in front
-    // (value == 0) => we add 1 digit for '0' because the loop doesn't account for zero integers
-    while (value) {
-        value /= 10;
-        ++digits;
+#if utl_log_cpp_standard >= 202002L
+    #include <source_location>
+    namespace utl::log::impl {
+        using SourceLocation = std::source_location;
     }
-    return digits;
-    // Note: There is probably a faster way of doing it
-}
+    #define utl_log_has_source_location
+#endif
 
-using clock = std::chrono::steady_clock;
+// Below C++20 detect compiler version and intrinsics that allow its emulation.
+// Emulation works similarly for all 3 major compilers and is quite simple to implement.
+// It provides the entire standard API except '.column()' which is not supported by GCC.
 
-using ms = std::chrono::microseconds;
+// MSVC: requires at least VS 2019 16.6 Preview 2
+#ifndef utl_log_has_source_location
+    #ifdef _MSC_VER
+        #if _MSC_VER >= 1927
+            #define utl_log_use_source_location_builtin
+            #define utl_log_has_source_location
+        #endif
+    #endif
+#endif
 
-inline const clock::time_point _program_entry_time_point = clock::now();
+// GCC, clang: can be detected with '__has_builtin()'
+#ifndef utl_log_has_source_location 
+    #ifdef __has_builtin
+        #if __has_builtin(__builtin_LINE) && __has_builtin(__builtin_FUNCTION) && __has_builtin(__builtin_FILE)
+            #define utl_log_use_source_location_builtin
+            #define utl_log_has_source_location
+        #endif
+    #endif
+#endif
 
-// ===================
-// --- Stringifier ---
-// ===================
+// clang-format on
 
-// --- Internal type traits ---
-// ----------------------------
+#ifdef utl_log_use_source_location_builtin
+namespace utl::log::impl {
+class SourceLocation {
+    int         _line = -1;
+    const char* _func = nullptr;
+    const char* _file = nullptr;
 
-#define utl_log_define_trait(trait_name_, ...)                                                                         \
-    template <class T, class = void>                                                                                   \
-    struct trait_name_ : std::false_type {};                                                                           \
-                                                                                                                       \
-    template <class T>                                                                                                 \
-    struct trait_name_<T, std::void_t<decltype(__VA_ARGS__)>> : std::true_type {};                                     \
-                                                                                                                       \
-    template <class T>                                                                                                 \
-    constexpr bool trait_name_##_v = trait_name_<T>::value
+    constexpr SourceLocation(int line, const char* func, const char* file) noexcept
+        : _line(line), _func(func), _file(file) {}
 
-utl_log_define_trait(_has_real, std::declval<T>().real());
-utl_log_define_trait(_has_imag, std::declval<T>().imag());
-utl_log_define_trait(_has_begin, std::declval<T>().begin());
-utl_log_define_trait(_has_end, std::declval<T>().end());
-utl_log_define_trait(_has_input_it, std::next(std::declval<T>().begin()));
-utl_log_define_trait(_has_get, std::get<0>(std::declval<T>()));
-utl_log_define_trait(_has_tuple_size, std::tuple_size<T>::value);
-utl_log_define_trait(_has_container_type, std::declval<typename std::decay_t<T>::container_type>());
-utl_log_define_trait(_has_ostream_insert, std::declval<std::ostream>() << std::declval<T>());
-utl_log_define_trait(_is_pad_left, std::declval<std::decay_t<T>>().is_pad_left);
-utl_log_define_trait(_is_pad_right, std::declval<std::decay_t<T>>().is_pad_right);
-utl_log_define_trait(_is_pad, std::declval<std::decay_t<T>>().is_pad);
+public:
+    constexpr SourceLocation()                      = default;
+    constexpr SourceLocation(const SourceLocation&) = default;
+    constexpr SourceLocation(SourceLocation&&)      = default;
 
-// Note:
-// Trait '_has_input_it' is trickier than it may seem. Just doing '++std::declval<T>().begin()' will work
-// most of the time, but there are cases where it returns 'false' for very much iterable types.
-//
-// """
-//    Although the expression '++c.begin()' often compiles, it is not guaranteed to do so: 'c.begin()' is an rvalue
-//    expression, and there is no LegacyInputIterator requirement that specifies that increment of an rvalue is
-///   guaranteed to work. In particular, when iterators are implemented as pointers or its operator++ is
-//    lvalue-ref-qualified, '++c.begin()' does not compile, while 'std::next(c.begin())' does.
-// """ (c) https://en.cppreference.com/w/cpp/iterator/next
-//
-// By checking if 'std::next(c.begin())' compiles we can properly check that iterator satisfies input iterator
-// requirements, which means we can use it with operator '++' to iterate over the container. Trying to just
-// check for operator '++' would lead to false positives, while checking '++c.begin()' would lead to false
-// negatives on containers such as 'std::array'. It would seem that 'std::iterator_traits' is the way to go,
-// but since it provides no good way to test if iterator satisfies a category without checking every possible
-// tag, it ends up being more verbose that exisiting solution.
-
-#undef utl_log_define_trait
-
-// --- Internal utils ---
-// ----------------------
-
-template <class>
-constexpr bool _always_false_v = false;
-
-template <class T>
-constexpr int _log_10_ceil(T num) {
-    return num < 10 ? 1 : 1 + _log_10_ceil(num / 10);
-}
-
-template <class T>
-constexpr int _max_float_digits =
-    4 + std::numeric_limits<T>::max_digits10 + std::max(2, _log_10_ceil(std::numeric_limits<T>::max_exponent10));
-// should be the smallest buffer size to account for all possible 'std::to_chars()' outputs,
-// see [https://stackoverflow.com/questions/68472720/stdto-chars-minimal-floating-point-buffer-size]
-
-template <class T>
-constexpr int _max_int_digits = 2 + std::numeric_limits<T>::digits10;
-// +2 because 'digits10' returns last digit index rather than the number of digits
-// (aka 1 less than one would expect) and doesn't account for possible '-'.
-// Also note that ints use 'digits10' and not 'max_digits10' which is only valid for floats.
-
-// "Unwrapper" for container adaptors such as 'std::queue', 'std::priority_queue', 'std::stack'
-template <class Adaptor>
-const auto& _underlying_container_cref(const Adaptor& adaptor) {
-
-    struct Hack : private Adaptor {
-        using container_type = typename Adaptor::container_type;
-
-        static const container_type& get_container(const Adaptor& adp) {
-            return adp.*&Hack::c;
-            // An extremely hacky yet standard-compliant way of accessing protected member
-            // of a class without actually creating any instances of derived class.
-            //
-            // This is essentially 2 operators: '.*' and '&',
-            // '.*' takes an object on the left side, and a member pointer on the right side,
-            // and resolves the pointed-to member of the given object, this means
-            // 'object.*&Class::member' is essentially equivalent to 'object.member',
-            // except it reveals a "loophole" in protection semantics that allows us to interpret
-            // base class object as if it was derived class.
-            //
-            // Note that doing seemingly much more logical 'static_cast<Derived&>(object).member'
-            // is technically UB, even through most compilers will do the reasonable thing.
-        }
-    };
-
-    return Hack::get_container(adaptor);
-}
-
-// --- Alignment ---
-// -----------------
-
-// To align/pad values in a stringifier we can wrap then in thin structs
-// that gets some special alignment logic in stringifier formatting selector.
-
-template <class T>
-struct PadLeft {
-    constexpr PadLeft(const T& val, std::size_t size) : val(val), size(size) {} // this is needed for CTAD
-    const T&              val;
-    std::size_t           size;
-    constexpr static bool is_pad_left = true;
-}; // pads value the left (aka right alignment)
-
-template <class T>
-struct PadRight {
-    constexpr PadRight(const T& val, std::size_t size) : val(val), size(size) {}
-    const T&              val;
-    std::size_t           size;
-    constexpr static bool is_pad_right = true;
-}; // pads value the right (aka left alignment)
-
-template <class T>
-struct Pad {
-    constexpr Pad(const T& val, std::size_t size) : val(val), size(size) {}
-    const T&              val;
-    std::size_t           size;
-    constexpr static bool is_pad = true;
-}; // pads value on both sides (aka center alignment)
-
-constexpr std::string_view indent = "    ";
-
-// --- Stringifier ---
-// -------------------
-
-// Generic stringifier with customizable API. Formatting of specific types can be customized by inheriting it
-// and overriding specific methods. This is a reference implementation that is likely to be used in other modules.
-//
-// For example of how to extend stringifier see 'utl::log' documentation.
-//
-template <class Derived>
-struct StringifierBase {
-    using self    = StringifierBase;
-    using derived = Derived;
-
-    // --- Type-wise methods ---
-    // -------------------------
-
-    template <class T>
-    static void append_bool(std::string& buffer, const T& value) {
-        buffer += value ? "true" : "false";
+    [[nodiscard]] constexpr static SourceLocation
+    current(int line = __builtin_LINE(), const char* func = __builtin_FUNCTION(), const char* file = __builtin_FILE()) {
+        return SourceLocation{line, func, file};
     }
 
-    template <class T>
-    static void append_int(std::string& buffer, const T& value) {
-        std::array<char, _max_int_digits<T>> stbuff;
-        const auto [number_end_ptr, error_code] = std::to_chars(stbuff.data(), stbuff.data() + stbuff.size(), value);
-        if (error_code != std::errc())
-            throw std::runtime_error("Stringifier encountered std::to_chars() error while serializing an integer.");
-        buffer.append(stbuff.data(), number_end_ptr - stbuff.data());
-    }
-    
-    template <class T>
-    static void append_enum(std::string& buffer, const T& value) {
-        derived::append_int(buffer, static_cast<std::underlying_type_t<T>>(value));
-    }
-
-    template <class T>
-    static void append_float(std::string& buffer, const T& value) {
-        std::array<char, _max_float_digits<T>> stbuff;
-        const auto [number_end_ptr, error_code] = std::to_chars(stbuff.data(), stbuff.data() + stbuff.size(), value);
-        if (error_code != std::errc())
-            throw std::runtime_error("Stringifier encountered std::to_chars() error while serializing a float.");
-        buffer.append(stbuff.data(), number_end_ptr - stbuff.data());
-    }
-
-    template <class T>
-    static void append_complex(std::string& buffer, const T& value) {
-        derived::append_float(buffer, value.real());
-        buffer += " + ";
-        derived::append_float(buffer, value.imag());
-        buffer += " i";
-    }
-
-    template <class T>
-    static void append_string(std::string& buffer, const T& value) {
-        buffer += value;
-    }
-
-    template <class T>
-    static void append_array(std::string& buffer, const T& value) {
-        buffer += "{ ";
-        if (value.begin() != value.end())
-            for (auto it = value.begin();;) {
-                derived::append(buffer, *it);
-                if (++it == value.end()) break; // prevents trailing comma
-                buffer += ", ";
-            }
-        buffer += " }";
-    }
-
-    template <class T>
-    static void append_tuple(std::string& buffer, const T& value) {
-        self::_append_tuple_fwd(buffer, value);
-    }
-
-    template <class T>
-    static void append_adaptor(std::string& buffer, const T& value) {
-        derived::append(buffer, _underlying_container_cref(value));
-    }
-
-    template <class T>
-    static void append_printable(std::string& buffer, const T& value) {
-        buffer += (std::ostringstream() << value).str();
-    }
-
-    // --- Main API ---
-    // ----------------
-
-    template <class T>
-    static void append(std::string& buffer, const T& value) {
-        self::_append_selector(buffer, value);
-    }
-
-    template <class... Args>
-    static void append(std::string& buffer, const Args&... args) {
-        (derived::append(buffer, args), ...);
-    }
-
-    template <class... Args>
-    [[nodiscard]] static std::string stringify(Args&&... args) {
-        std::string buffer;
-        derived::append(buffer, std::forward<Args>(args)...);
-        return buffer;
-    }
-
-    template <class... Args>
-    [[nodiscard]] std::string operator()(Args&&... args) {
-        return derived::stringify(std::forward<Args>(args)...);
-    } // allows stringifier to be used as a functor
-
-    // --- Helpers ---
-    // ---------------
-private:
-    template <class Tuplelike, std::size_t... Idx>
-    static void _append_tuple_impl(std::string& buffer, Tuplelike value, std::index_sequence<Idx...>) {
-        ((Idx == 0 ? "" : buffer += ", ", derived::append(buffer, std::get<Idx>(value))), ...);
-        // fold expression '( f(args), ... )' invokes 'f(args)' for all arguments in 'args...'
-        // in the same fashion, we can fold over 2 functions by doing '( ( f(args), g(args) ), ... )'
-    }
-
-    template <template <class...> class Tuplelike, class... Args>
-    static void _append_tuple_fwd(std::string& buffer, const Tuplelike<Args...>& value) {
-        buffer += "< ";
-        self::_append_tuple_impl(buffer, value, std::index_sequence_for<Args...>{});
-        buffer += " >";
-    }
-
-    template <class T>
-    static void _append_selector(std::string& buffer, const T& value) {
-        // Left-padded something
-        if constexpr (_is_pad_left_v<T>) {
-            std::string temp;
-            self::_append_selector(temp, value.val);
-            if (temp.size() < value.size) buffer.append(value.size - temp.size(), ' ');
-            buffer += temp;
-        }
-        // Right-padded something
-        else if constexpr (_is_pad_right_v<T>) {
-            const std::size_t old_size = buffer.size();
-            self::_append_selector(buffer, value.val);
-            const std::size_t appended_size = buffer.size() - old_size;
-            if (appended_size < value.size) buffer.append(value.size - appended_size, ' ');
-            // right-padding is faster than left padding since we don't need a temporary string to get appended size
-        }
-        // Center-padded something
-        else if constexpr (_is_pad_v<T>) {
-            std::string temp;
-            self::_append_selector(temp, value.val);
-            if (temp.size() < value.size) {
-                const std::size_t lpad_size = (value.size - temp.size()) / 2;
-                const std::size_t rpad_size = value.size - lpad_size - temp.size();
-                buffer.append(lpad_size, ' ');
-                buffer += temp;
-                buffer.append(rpad_size, ' ');
-            } else buffer += temp;
-        }
-        // Bool
-        else if constexpr (std::is_same_v<T, bool>)
-            derived::append_bool(buffer, value);
-        // Char
-        else if constexpr (std::is_same_v<T, char>) derived::append_string(buffer, value);
-        // 'std::string_view'-convertible (most strings and string-like types)
-        else if constexpr (std::is_convertible_v<T, std::string_view>) derived::append_string(buffer, value);
-        // 'std::string'-convertible (some "nastier" string-like types, mainly 'std::path')
-        else if constexpr (std::is_convertible_v<T, std::string>) derived::append_string(buffer, std::string(value));
-        // Integral
-        else if constexpr (std::is_integral_v<T>) derived::append_int(buffer, value);
-        // Enum
-        else if constexpr (std::is_enum_v<T>) derived::append_enum(buffer, value);
-        // Floating-point
-        else if constexpr (std::is_floating_point_v<T>) derived::append_float(buffer, value);
-        // Complex
-        else if constexpr (_has_real_v<T> && _has_imag_v<T>) derived::append_complex(buffer, value);
-        // Array-like
-        else if constexpr (_has_begin_v<T> && _has_end_v<T> && _has_input_it_v<T>) derived::append_array(buffer, value);
-        // Tuple-like
-        else if constexpr (_has_get_v<T> && _has_tuple_size_v<T>) derived::append_tuple(buffer, value);
-        // Container adaptor
-        else if constexpr (_has_container_type_v<T>) derived::append_adaptor(buffer, value);
-        // 'std::ostream' printable
-        else if constexpr (_has_ostream_insert_v<T>) derived::append_printable(buffer, value);
-        // No valid stringification exists
-        else static_assert(_always_false_v<T>, "No valid stringification exists for the type.");
-
-        // Note: Using if-constexpr chain here allows us to pick and choose priority of different branches,
-        // removing any possible ambiguity we could encounter doing things through SFINAE or overloads.
-    }
+    [[nodiscard]] constexpr int         line() const noexcept { return this->_line; }
+    [[nodiscard]] constexpr const char* file_name() const noexcept { return this->_file; }
+    [[nodiscard]] constexpr const char* function_name() const noexcept { return this->_func; }
 };
+} // namespace utl::log::impl
+#endif
 
-// Note:
-// The stringifier shines at stringifying & concatenating multiple values into the same buffer.
-// Single-value is a specific case which allows all 'buffer += ...' to be replaced with most things being formatted
-// straight into a newly created string. We could optimize this, but that would make require an almost full logic
-// duplication and make the class cumbersome to extend since instead of a singural 'append_something()' methods there
-// would be 2: 'append_something()' and 'construct_something()'. It also doesn't seem to be worth it, the difference
-// in performance isn't that significat and we're still faster than most usual approaches to stringification.
+// If all else fails, provide a mock class that returns nothing
 
-// ===============================
-// --- Stringifier derivatives ---
-// ===============================
+#ifndef utl_log_has_source_location
+#define utl_log_has_source_location
+namespace utl::log::impl {
+struct SourceLocation {
+    [[nodiscard]] constexpr static SourceLocation current() { return SourceLocation{}; }
 
-// "Default" customization of stringifier, here we can optimize a few things.
-//
-// The reason we don't include this in the original stringifier is because it's intended to be a customizable
-// class that can be extended/optimized/decorated by inheriting it and overriding specific methods. The changes
-// made by some optimizations wouldn't be compatible with such philosophy.
-//
-struct Stringifier : public StringifierBase<Stringifier> {
-    using base = StringifierBase<Stringifier>;
-
-    // template <class... Args>
-    // [[nodiscard]] static std::string stringify(Args&&... args) {
-    //     return StringifierBase::stringify(std::forward<Args>(args)...);
-    // }
-
-    using base::stringify;
-
-    [[nodiscard]] static std::string stringify(int arg) { return std::to_string(arg); }
-    [[nodiscard]] static std::string stringify(long arg) { return std::to_string(arg); }
-    [[nodiscard]] static std::string stringify(long long arg) { return std::to_string(arg); }
-    [[nodiscard]] static std::string stringify(unsigned int arg) { return std::to_string(arg); }
-    [[nodiscard]] static std::string stringify(unsigned long arg) { return std::to_string(arg); }
-    [[nodiscard]] static std::string stringify(unsigned long long arg) { return std::to_string(arg); }
-    // for individual ints 'std::to_string()' beats 'append_int()' with <charconv> since any reasonable compiler
-    // implements it using the same <charconv> routine, but formatted directly into a string upon its creation
-
-    [[nodiscard]] static std::string stringify(std::string&& arg) { return arg; }
-    // no need to do all the appending stuff for individual r-value strings, just forward them as is
-
-    template <class... Args>
-    [[nodiscard]] std::string operator()(Args&&... args) {
-        return Stringifier::stringify(std::forward<Args>(args)...);
-    }
+    [[nodiscard]] constexpr int         line() const noexcept { return 0; }
+    [[nodiscard]] constexpr const char* file_name() const noexcept { return ""; }
+    [[nodiscard]] constexpr const char* function_name() const noexcept { return ""; }
 };
+} // namespace utl::log::impl
+#endif
 
-template <class... Args>
-void append_stringified(std::string& str, Args&&... args) {
-    Stringifier::append(str, std::forward<Args>(args)...);
-}
+namespace utl::log::impl {
 
-template <class... Args>
-[[nodiscard]] std::string stringify(Args&&... args) {
-    return Stringifier::stringify(std::forward<Args>(args)...);
-}
-
-template <class... Args>
-void print(Args&&... args) {
-    const auto                        res = Stringifier::stringify(std::forward<Args>(args)...);
-    static std::mutex                 mutex;
-    const std::lock_guard<std::mutex> lock(mutex);
-    std::cout << res << std::flush;
-    // print in a thread-safe way and instantly flush every message, this is much slower that buffering
-    // (which regular logging methods do), but for generic console output this is a more robust way
-}
-
-template <class... Args>
-void println(Args&&... args) {
-    print(std::forward<Args>(args)..., '\n');
-}
-
-// ===============
-// --- Options ---
-// ===============
-
-enum class Verbosity { ERR = 1, WARN = 2, INFO = 3, DEBUG = 4, TRACE = 5 };
-
-enum class OpenMode { REWRITE, APPEND };
-
-enum class Colors { ENABLE, DISABLE };
-
-struct Columns {
-    bool datetime = true;
-    bool uptime   = true;
-    bool thread   = true;
-    bool callsite = true;
-    bool level    = true;
-    bool message  = true;
-
-    // Columns() : datetime(true), uptime(true), thread(true), callsite(true), level(true), message(true) {}
-};
-
-struct Callsite {
-    std::string_view file;
-    int              line;
-};
-
-struct MessageMetadata {
-    Verbosity verbosity;
-};
-
-constexpr bool operator<(Verbosity l, Verbosity r) { return static_cast<int>(l) < static_cast<int>(r); }
-constexpr bool operator<=(Verbosity l, Verbosity r) { return static_cast<int>(l) <= static_cast<int>(r); }
-
-// --- Column widths ---
-// ---------------------
-
-constexpr unsigned int _w_uptime_sec = 4;
-constexpr unsigned int _w_uptime_ms  = 3;
-
-constexpr std::size_t _w_callsite_before_dot = 22;
-constexpr std::size_t _w_callsite_after_dot  = 4;
-
-constexpr std::size_t _col_w_datetime = sizeof("yyyy-mm-dd HH:MM:SS") - 1;
-constexpr std::size_t _col_w_uptime   = _w_uptime_sec + 1 + _w_uptime_ms;
-constexpr std::size_t _col_w_thread   = sizeof("thread") - 1;
-constexpr std::size_t _col_w_callsite = _w_callsite_before_dot + 1 + _w_callsite_after_dot;
-constexpr std::size_t _col_w_level    = sizeof("level") - 1;
-
-// --- Column left/right delimers ---
-// ----------------------------------
-
-constexpr std::string_view _col_ld_datetime = "";
-constexpr std::string_view _col_rd_datetime = " ";
-constexpr std::string_view _col_ld_uptime   = "(";
-constexpr std::string_view _col_rd_uptime   = ")";
-constexpr std::string_view _col_ld_thread   = "[";
-constexpr std::string_view _col_rd_thread   = "]";
-constexpr std::string_view _col_ld_callsite = " ";
-constexpr std::string_view _col_rd_callsite = " ";
-constexpr std::string_view _col_ld_level    = "";
-constexpr std::string_view _col_rd_level    = "|";
-constexpr std::string_view _col_ld_message  = " ";
-constexpr std::string_view _col_rd_message  = "\n";
+// =================
+// --- Utilities ---
+// =================
 
 // --- ANSI Colors ---
 // -------------------
 
-namespace color {
+namespace ansi {
 
 constexpr std::string_view black          = "\033[30m";
 constexpr std::string_view red            = "\033[31m";
@@ -2854,329 +3278,2020 @@ constexpr std::string_view bold_bright_white   = "\033[97;1m";
 
 constexpr std::string_view reset = "\033[0m";
 
-// logger itself only uses a few of those colors, but since we do it this way might as well provide
-// the whole spectrum so users can color 'cout' and 'log::println()' statements too
+} // namespace ansi
 
-} // namespace color
+// --- SFINAE helpers ---
+// ----------------------
 
-constexpr std::string_view _color_heading = color::bold_cyan;
-constexpr std::string_view _color_reset   = color::reset;
+template <bool Cond>
+using require = std::enable_if_t<Cond, bool>;
 
-constexpr std::string_view _color_trace = color::bright_black;
-constexpr std::string_view _color_debug = color::green;
-constexpr std::string_view _color_info  = color::white;
-constexpr std::string_view _color_warn  = color::yellow;
-constexpr std::string_view _color_err   = color::bold_red;
+template <class T>
+using require_enum = require<std::is_enum_v<T>>;
 
-// ==================
-// --- Sink class ---
-// ==================
+template <class T>
+using require_uint = require<std::is_integral_v<T> && std::is_unsigned_v<T>>;
 
-class Sink {
-private:
-    using os_ref_wrapper = std::reference_wrapper<std::ostream>;
+template <class T>
+using require_integral = require<std::is_integral_v<T>>;
 
-    std::variant<os_ref_wrapper, std::ofstream> os_variant;
-    Verbosity                                   verbosity;
-    Colors                                      colors;
-    clock::duration                             flush_interval;
-    Columns                                     columns;
-    clock::time_point                           last_flushed;
-    bool                                        print_header = true;
-    mutable std::mutex                          ostream_mutex;
+template <class T>
+using require_float = require<std::is_floating_point_v<T>>;
 
-    friend struct _logger;
+template <class>
+constexpr bool always_false_v = false;
 
-    std::ostream& ostream_ref() {
-        if (const auto ref_wrapper_ptr = std::get_if<os_ref_wrapper>(&this->os_variant)) return ref_wrapper_ptr->get();
-        else return std::get<std::ofstream>(this->os_variant);
+// --- Thread ID ---
+// -----------------
+
+// Human readable replacement for 'std::this_thread::get_id()'. Usually this is implemented using
+// 'std::unordered_map<std::thread::id, int>' accessed with 'std::this_thread::get_id()' but such
+// approach is considerably slower due to a map lookup and requires additional logic to address
+// possible thread id reuse, which many implementations seem to neglect. We can use thread-locals
+// and an atomic counter to implement lazily initialized thread id count. After a first call the
+// overhead of getting thread id should be approx ~ to a branch + array lookup.
+[[nodiscard]] inline int get_next_linear_thread_id() {
+    static std::atomic<int> counter = 0;
+    return counter++;
+}
+
+[[nodiscard]] inline int this_thread_linear_id() {
+    thread_local int thread_id = get_next_linear_thread_id();
+    return thread_id;
+}
+
+// --- Local time ---
+// ------------------
+
+[[nodiscard]] inline std::tm to_localtime(const std::time_t& time) {
+    // There are 3 ways of getting localtime in C-stdlib:
+    //    1. 'std::localtime()' - isn't thread-safe and will be marked as "deprecated" by MSVC
+    //    2. 'localtime_r()'    - isn't a part of C++, it's a part of C11, in reality provided by POSIX
+    //    3. 'localtime_s()'    - isn't a part of C++, it's a part of C23, in reality provided by Windows
+    //                            with reversed order of arguments
+    // Seemingly there is no portable way of getting thread-safe localtime without being screamed at by at least one
+    // compiler, however there is a little known trick that uses a side effect of 'std::mktime()' which normalizes its
+    // inputs should they "overflow" the allowed range. Unlike 'localtime', 'std::mktime()' is thread-safe and portable,
+    // see https://stackoverflow.com/questions/54246983/c-how-to-fix-add-a-time-offset-the-calculation-is-wrong/54248414
+
+    // Create reference time moment at year 2025
+    std::tm reference_tm{};
+    reference_tm.tm_isdst = -1;  // negative => let the implementation deal with daylight savings
+    reference_tm.tm_year  = 125; // counting starts from 1900
+
+    // Get the 'std::time_t' corresponding to the reference time moment
+    const std::time_t reference_time = std::mktime(&reference_tm);
+    if (reference_time == -1)
+        throw std::runtime_error("time::to_localtime(): time moment can't be represented as 'std::time_t'.");
+
+    // Adjusting reference moment by 'time - reference_time' makes it equal to the current time moment,
+    // it is now invalid due to seconds overflowing the allowed range
+    reference_tm.tm_sec += static_cast<int>(time - reference_time);
+    // 'std::time_t' is an arithmetic type, although not defined, this is almost always an
+    // integral value holding the number of seconds since Epoch (see cppreference). This is
+    // why we can substract them and add into the seconds.
+
+    // Normalize time moment, it is now valid and corresponds to a current local time
+    if (std::mktime(&reference_tm) == -1)
+        throw std::runtime_error("time::to_localtime(): time moment can't be represented as 'std::time_t'.");
+
+    return reference_tm;
+}
+
+[[nodiscard]] inline std::string datetime_string(const char* format = "%Y-%m-%d %H:%M:%S") {
+    const auto now    = std::chrono::system_clock::now();
+    const auto c_time = std::chrono::system_clock::to_time_t(now);
+    const auto c_tm   = to_localtime(c_time);
+
+    std::array<char, 256> buffer;
+    if (std::strftime(buffer.data(), buffer.size(), format, &c_tm) == 0)
+        throw std::runtime_error("time::datetime_string(): 'format' does not fit into the buffer.");
+    return std::string(buffer.data());
+
+    // Note 1: C++20 provides <chrono> with a native way of getting date, before that we have to use <ctime>
+    // Note 2: 'std::chrono::system_clock' is unique - its output can be converted into a C-style 'std::time_t'
+    // Note 3: This function is thread-safe, we use a quirky implementation of 'localtime()', see notes above
+}
+
+// --- Thread-local state ---
+// --------------------------
+
+[[nodiscard]] inline std::string& thread_local_temporary_string() {
+    thread_local std::string str;
+    str.clear();
+    return str; // returned string is always empty, no need to clear it at the callsite
+}
+// In order to compute alignment we have to format things into a temporary string first.
+// The naive way would be to allocate a new function-local string every time. We can reduce
+// allocations by keeping a single temp string per thread and reusing it every time we need a temporary.
+
+// --- Constants ---
+// -----------------
+
+constexpr std::size_t max_chars_float = 30;       // enough to fit 80-bit long double
+constexpr std::size_t max_chars_int   = 20;       // enough to fit 64-bit signed integer
+constexpr std::size_t buffering_size  = 8 * 1024; // 8 KB, good for most systems
+constexpr auto        buffering_time  = std::chrono::milliseconds{5};
+
+// --- <chrono> formatting ---
+// ---------------------------
+
+struct SplitDuration {
+    std::chrono::hours        hours;
+    std::chrono::minutes      min;
+    std::chrono::seconds      sec;
+    std::chrono::milliseconds ms;
+    std::chrono::microseconds us;
+    std::chrono::nanoseconds  ns;
+
+    constexpr static std::size_t size = 6; // number of time units, avoids magic constants everywhere
+
+    using common_rep = std::common_type_t<decltype(hours)::rep, decltype(min)::rep, decltype(sec)::rep,
+                                          decltype(ms)::rep, decltype(us)::rep, decltype(ns)::rep>;
+    // standard doesn't specify common representation type, usually it's 'std::int64_t'
+
+    std::array<common_rep, SplitDuration::size> count() {
+        return {this->hours.count(), this->min.count(), this->sec.count(),
+                this->ms.count(),    this->us.count(),  this->ns.count()};
+    }
+};
+
+template <class Rep, class Period>
+[[nodiscard]] constexpr SplitDuration unit_split(std::chrono::duration<Rep, Period> val) {
+    // for some reason 'duration_cast<>()' is not 'noexcept'
+    const auto hours = std::chrono::duration_cast<std::chrono::hours>(val);
+    const auto min   = std::chrono::duration_cast<std::chrono::minutes>(val - hours);
+    const auto sec   = std::chrono::duration_cast<std::chrono::seconds>(val - hours - min);
+    const auto ms    = std::chrono::duration_cast<std::chrono::milliseconds>(val - hours - min - sec);
+    const auto us    = std::chrono::duration_cast<std::chrono::microseconds>(val - hours - min - sec - ms);
+    const auto ns    = std::chrono::duration_cast<std::chrono::nanoseconds>(val - hours - min - sec - ms - us);
+    return {hours, min, sec, ms, us, ns};
+}
+
+using Sec = std::chrono::duration<double, std::chrono::seconds::period>; // convenient duration-to-float conversion
+
+// --- Worker thread ---
+// ---------------------
+
+// A single persistent thread that executes detached tasks, effectively a single-thread thread pool
+class WorkerThread {
+    bool                              terminating;
+    std::queue<std::function<void()>> tasks;
+    std::mutex                        mutex;
+    std::condition_variable           polling_cv;
+    std::thread                       thread;
+
+    void thread_main() {
+        while (true) {
+            std::unique_lock lock(this->mutex);
+
+            this->polling_cv.wait(lock, [this] { return this->terminating || !this->tasks.empty(); });
+
+            while (!this->tasks.empty()) {
+                auto task = std::move(this->tasks.front());
+                this->tasks.pop();
+
+                lock.unlock();
+                task();
+                lock.lock();
+            }
+
+            if (this->terminating) break;
+        }
     }
 
 public:
-    Sink()            = delete;
-    Sink(const Sink&) = delete;
-    Sink(Sink&&)      = delete;
+    WorkerThread() : terminating(false), thread([this] { this->thread_main(); }) {}
 
-    Sink(std::ofstream&& os, Verbosity verbosity, Colors colors, clock::duration flush_interval, const Columns& columns)
-        : os_variant(std::move(os)), verbosity(verbosity), colors(colors), flush_interval(flush_interval),
-          columns(columns) {}
-
-    Sink(std::reference_wrapper<std::ostream> os, Verbosity verbosity, Colors colors, clock::duration flush_interval,
-         const Columns& columns)
-        : os_variant(os), verbosity(verbosity), colors(colors), flush_interval(flush_interval), columns(columns) {}
-
-    // We want a way of changing sink options using its handle / reference returned by the logger
-    Sink& set_verbosity(Verbosity verbosity) {
-        this->verbosity = verbosity;
-        return *this;
-    }
-    Sink& set_colors(Colors colors) {
-        this->colors = colors;
-        return *this;
-    }
-    Sink& set_flush_interval(clock::duration flush_interval) {
-        this->flush_interval = flush_interval;
-        return *this;
-    }
-    Sink& set_columns(const Columns& columns) {
-        this->columns = columns;
-        return *this;
-    }
-    Sink& skip_header(bool skip = true) {
-        this->print_header = !skip;
-        return *this;
-    }
-
-private:
-    template <class... Args>
-    void format(const Callsite& callsite, const MessageMetadata& meta, const Args&... args) {
-        if (meta.verbosity > this->verbosity) return;
-
-        thread_local std::string buffer;
-
-        const clock::time_point now = clock::now();
-
-        // To minimize logging overhead we use string buffer, append characters to it and then write the whole buffer
-        // to `std::ostream`. This avoids the inherent overhead of ostream formatting (caused largely by
-        // virtualization, syncronization and locale handling, neither of which are relevant for the logger).
-        //
-        // This buffer gets reused between calls. Note the 'thread_local', if buffer was just a class member, multiple
-        // threads could fight trying to clear and resize the buffer while it's being written to by another thread.
-        //
-        // Buffer may grow when formatting a message longer that any one that was formatted before, otherwise we just
-        // reuse the reserved memory and no new allocations take place.
-
-        buffer.clear();
-
-        // Print log header on the first call
+    ~WorkerThread() { // stops the worker thread & joins once the tasks are done
         {
-            static std::mutex     header_mutex;
-            const std::lock_guard lock(header_mutex);
-            if (this->print_header) {
-                this->print_header = false;
-                this->format_header(buffer);
-            }
-            // no need to lock the buffer, other threads can't reach buffer
-            // output code while they're stuck waiting for the header to print
+            const std::scoped_lock lock(this->mutex);
+            this->terminating = true;
         }
 
-        // Format columns one-by-one
-        if (this->colors == Colors::ENABLE) switch (meta.verbosity) {
-            case Verbosity::ERR: buffer += _color_err; break;
-            case Verbosity::WARN: buffer += _color_warn; break;
-            case Verbosity::INFO: buffer += _color_info; break;
-            case Verbosity::DEBUG: buffer += _color_debug; break;
-            case Verbosity::TRACE: buffer += _color_trace; break;
-            }
+        this->polling_cv.notify_one();
 
-        if (this->columns.datetime) this->format_column_datetime(buffer);
-        if (this->columns.uptime) this->format_column_uptime(buffer, now);
-        if (this->columns.thread) this->format_column_thread(buffer);
-        if (this->columns.callsite) this->format_column_callsite(buffer, callsite);
-        if (this->columns.level) this->format_column_level(buffer, meta.verbosity);
-        if (this->columns.message) this->format_column_message(buffer, args...);
+        if (this->thread.joinable()) this->thread.join();
+    }
 
-        if (this->colors == Colors::ENABLE) buffer += _color_reset;
-
-        // 'std::ostream' isn't guaranteed to be thread-safe, even through many implementations seem to have
-        // some thread-safety built into `std::cout` the same cannot be said about a generic 'std::ostream'
-        const std::lock_guard ostream_lock(this->ostream_mutex);
-
-        this->ostream_ref().write(buffer.data(), buffer.size());
-
-        // flush every message immediately
-        if (this->flush_interval.count() == 0) {
-            this->ostream_ref().flush();
+    void detached_task(std::function<void()> task) {
+        {
+            const std::scoped_lock lock(this->mutex);
+            this->tasks.emplace(std::move(task));
         }
-        // or flush periodically
-        else if (now - this->last_flushed > this->flush_interval) {
-            this->last_flushed = now;
-            this->ostream_ref().flush();
-        }
-    }
 
-    void format_header(std::string& buffer) {
-        if (this->colors == Colors::ENABLE) buffer += _color_heading;
-        if (this->columns.datetime)
-            append_stringified(buffer, _col_ld_datetime, PadRight{"date       time", _col_w_datetime},
-                               _col_rd_datetime);
-        if (this->columns.uptime)
-            append_stringified(buffer, _col_ld_uptime, PadRight{"uptime", _col_w_uptime}, _col_rd_uptime);
-        if (this->columns.thread)
-            append_stringified(buffer, _col_ld_thread, PadRight{"thread", _col_w_thread}, _col_rd_thread);
-        if (this->columns.callsite)
-            append_stringified(buffer, _col_ld_callsite, PadRight{"callsite", _col_w_callsite}, _col_rd_callsite);
-        if (this->columns.level)
-            append_stringified(buffer, _col_ld_level, PadRight{"level", _col_w_level}, _col_rd_level);
-        if (this->columns.message) append_stringified(buffer, _col_ld_message, "message", _col_rd_message);
-        if (this->colors == Colors::ENABLE) buffer += _color_reset;
-    }
-
-    void format_column_datetime(std::string& buffer) {
-        std::time_t timer = std::time(nullptr);
-        std::tm     time_moment{};
-
-        _available_localtime_impl(&time_moment, &timer);
-
-        // Format time straight into the buffer
-        std::array<char, _col_w_datetime + 1>
-            strftime_buffer; // size includes the null terminator added by 'strftime()'
-        std::strftime(strftime_buffer.data(), strftime_buffer.size(), "%Y-%m-%d %H:%M:%S", &time_moment);
-
-        // strftime_buffer.back() = ' '; // replace null-terminator added by 'strftime()' with a space
-        buffer += _col_ld_datetime;
-        buffer.append(strftime_buffer.data(), _col_w_datetime);
-        buffer += _col_rd_datetime;
-    }
-
-    void format_column_uptime(std::string& buffer, clock::time_point now) {
-        const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - _program_entry_time_point);
-        const auto sec        = (elapsed_ms / 1000).count();
-        const auto ms         = (elapsed_ms % 1000).count(); // is 'elapsed_ms - 1000 * full_seconds; faster?
-
-        const unsigned int sec_digits = _integer_digit_count(sec);
-        const unsigned int ms_digits  = _integer_digit_count(ms);
-
-        buffer += _col_ld_uptime;
-
-        // Left-pad the value to column width (doing it manually is a bit faster than using PadLeft{})
-        if (sec_digits < _w_uptime_sec) buffer.append(_w_uptime_sec - sec_digits, ' ');
-        append_stringified(buffer, sec);
-
-        buffer += '.';
-
-        // Add leading zeroes to a fixed length
-        if (ms_digits < _w_uptime_ms) buffer.append(_w_uptime_ms - ms_digits, '0');
-        append_stringified(buffer, ms);
-
-        buffer += _col_rd_uptime;
-    }
-
-    void format_column_thread(std::string& buffer) {
-        const auto thread_id       = _get_thread_index(std::this_thread::get_id());
-        const auto thread_id_width = _integer_digit_count(thread_id);
-
-        buffer += _col_ld_thread;
-        if (thread_id_width < _col_w_thread) buffer.append(_col_w_thread - thread_id_width, ' ');
-        append_stringified(buffer, thread_id);
-        buffer += _col_rd_thread;
-    }
-
-    void format_column_callsite(std::string& buffer, const Callsite& callsite) {
-        // Get just filename from the full path
-        std::string_view filename = callsite.file.substr(callsite.file.find_last_of("/\\") + 1);
-
-        // Left-pad callsite to column width, trim first characters if it's too long
-        if (filename.size() < _w_callsite_before_dot) buffer.append(_w_callsite_before_dot - filename.size(), ' ');
-        else filename.remove_prefix(_w_callsite_before_dot - filename.size());
-
-        buffer += _col_ld_callsite;
-        buffer += filename;
-        buffer += ':';
-        // Right-pad line number
-        append_stringified(buffer, callsite.line);
-        buffer.append(_w_callsite_after_dot - _integer_digit_count(callsite.line), ' ');
-        buffer += _col_rd_callsite;
-    }
-
-    void format_column_level(std::string& buffer, Verbosity level) {
-        buffer += _col_ld_level;
-        switch (level) {
-        case Verbosity::ERR: buffer += "  ERR"; break;
-        case Verbosity::WARN: buffer += " WARN"; break;
-        case Verbosity::INFO: buffer += " INFO"; break;
-        case Verbosity::DEBUG: buffer += "DEBUG"; break;
-        case Verbosity::TRACE: buffer += "TRACE"; break;
-        }
-        buffer += _col_rd_level;
-    }
-
-    template <class... Args>
-    void format_column_message(std::string& buffer, const Args&... args) {
-        buffer += _col_ld_message;
-        append_stringified(buffer, args...);
-        buffer += _col_rd_message;
+        this->polling_cv.notify_one();
     }
 };
 
-// ====================
-// --- Logger class ---
-// ====================
+// --- Other ---
+// -------------
 
-struct _logger {
-    inline static std::list<Sink> sinks;
-    // we use list<> because we don't want sinks to ever reallocate when growing / shrinking
-    // (reallocation requres a move-constructor, which 'std::mutex' doesn't have),
-    // the added overhead of iterating a list is negligible
+template <class T>
+[[nodiscard]] constexpr T max(T a, T b) noexcept {
+    return a < b ? b : a;
+} // saves us from including the whole <algorithm> for a one-liner
 
-    static inline Sink default_sink{std::cout, Verbosity::TRACE, Colors::ENABLE, ms(0), Columns{}};
+template <class Tp, class Func> // Func = void(Element&&)
+constexpr void tuple_for_each(Tp&& tuple, Func&& func) {
+    std::apply([&func](auto&&... args) { (func(std::forward<decltype(args)>(args)), ...); }, std::forward<Tp>(tuple));
+}
 
-    static _logger& instance() {
-        static _logger logger;
-        return logger;
+template <class T, T... Idxs, class Func> // Func = void(std::integral_constant<T, Index>)
+constexpr void for_sequence(std::integer_sequence<T, Idxs...>, Func&& func) {
+    (func(std::integral_constant<std::size_t, Idxs>{}), ...);
+} // effectively a 'constexpr for' where 'constexpr parameters' are passed as integral constants
+
+template <class E, require_enum<E> = true>
+[[nodiscard]] constexpr auto to_underlying(E value) noexcept {
+    return static_cast<std::underlying_type_t<E>>(value); // in C++23 gets replaced by 'std::to_underlying()'
+}
+
+template <class E, require_enum<E> = true>
+[[nodiscard]] constexpr bool to_bool(E value) noexcept {
+    return static_cast<bool>(to_underlying(value));
+}
+
+// "Unwrapper" for container adaptors such as 'std::queue', 'std::priority_queue', 'std::stack'
+template <class Adaptor>
+const auto& underlying_container_cref(const Adaptor& adaptor) {
+
+    struct Hack : private Adaptor {
+        static const typename Adaptor::container_type& get_container(const Adaptor& adp) {
+            return adp.*&Hack::c;
+            // An extremely hacky yet standard-compliant way of accessing protected member
+            // of a class without actually creating any instances of the derived class.
+            //
+            // This expression consists of 2 operators: '.*' and '&'.
+            // '.*' takes an object on the left side, and a member pointer on the right side,
+            // and resolves the pointed-to member of the given object, this means
+            // 'object.*&Class::member' is essentially equivalent to 'object.member',
+            // except it reveals a "loophole" in protection semantics that allows us to
+            // interpret base class object as if it was derived class.
+            //
+            // Note that doing seemingly much more logical 'static_cast<Derived&>(object).member'
+            // is technically UB, even through most compilers will do the reasonable thing.
+        }
+    };
+
+    return Hack::get_container(adaptor);
+}
+
+// ===============
+// --- Styling ---
+// ===============
+
+// --- Modifiers ---
+// -----------------
+
+// clang-format off
+namespace mods {
+struct FloatFormat   { std::chars_format format; int precision; };
+struct IntegerFormat { int               base;                  };
+struct AlignLeft     { std::size_t       size;                  };
+struct AlignCenter   { std::size_t       size;                  };
+struct AlignRight    { std::size_t       size;                  };
+struct Color         { std::string_view  code;                  };
+} // namespace mods
+// clang-format on
+
+// --- Wrapped values ---
+// ----------------------
+
+// Note:
+// Creating a 'wrapped value' class that doesn't leave dangling references when used with temporaries
+// requires careful application of perfect forwarding, if we were to make a naive struct like this:
+//    > template <class T>
+//    > struct Wrapper { const T& val };
+// Then creating such struct from a temporary and then passing it around further would lead to a dangling reference,
+// we want 'Wrapper' to "take ownership" of the value when it gets constructed from a temporary, but save only a
+// reference when it gets constructed from an l-value (since copying it would be wasteful), this can be achieved
+// through appropriate CTAD with perfect forwarding:
+//    > template <class T>
+//    > struct Wrapper {
+//    >     T val;
+//    >     Wrapper(T&& val) : val(std::forward<T>(val)) {}
+//    > };
+//    >
+//    > template <class T>
+//    > Wrapper(T&& val) -> Wrapper<T>;
+// 'Wrapper{const std::vector<int>&}' => 'T' will be 'const std::vector<int>&'
+// 'Wrapper{      std::vector<int>&}' => 'T' will be '      std::vector<int>&'
+// 'Wrapper{      std::vector<int> }' => 'T' will be '      std::vector<int> '
+
+#define utl_log_define_style_wrapper(wrapper_, style_)                                                                 \
+    template <class T>                                                                                                 \
+    struct wrapper_ {                                                                                                  \
+        T      value;                                                                                                  \
+        style_ mod;                                                                                                    \
+                                                                                                                       \
+        wrapper_(T&& value, style_ mod) : value(std::forward<T>(value)), mod(mod) {}                                   \
+    };                                                                                                                 \
+                                                                                                                       \
+    template <class T>                                                                                                 \
+    wrapper_(T&&, style_)->wrapper_<T>
+
+// clang-format off
+utl_log_define_style_wrapper(FormattedFloat  , mods::FloatFormat  );
+utl_log_define_style_wrapper(FormattedInteger, mods::IntegerFormat);
+utl_log_define_style_wrapper(AlignedLeft     , mods::AlignLeft    );
+utl_log_define_style_wrapper(AlignedCenter   , mods::AlignCenter  );
+utl_log_define_style_wrapper(AlignedRight    , mods::AlignRight   );
+utl_log_define_style_wrapper(Colored         , mods::Color        );
+// clang-format on
+
+#undef utl_log_define_style_wrapper
+
+// --- Style merging ---
+// ---------------------
+
+namespace mods { // necessary for unqualified name lookup to discover operators with 'mods::' types
+
+#define utl_log_define_style_merging(wrapper_, style_, require_)                                                       \
+    template <class T, require_ = true>                                                                                \
+    [[nodiscard]] constexpr wrapper_<T> operator|(T&& value, style_ mod) noexcept {                                    \
+        return {std::forward<T>(value), mod};                                                                          \
+    }                                                                                                                  \
+    static_assert(true)
+
+// clang-format off
+utl_log_define_style_merging(FormattedFloat  , mods::FloatFormat  , require_float   <std::decay_t<T>>);
+utl_log_define_style_merging(FormattedInteger, mods::IntegerFormat, require_integral<std::decay_t<T>>);
+utl_log_define_style_merging(AlignedLeft     , mods::AlignLeft    , bool                             );
+utl_log_define_style_merging(AlignedCenter   , mods::AlignCenter  , bool                             );
+utl_log_define_style_merging(AlignedRight    , mods::AlignRight   , bool                             );
+utl_log_define_style_merging(Colored         , mods::Color        , bool                             );
+// clang-format on
+
+#undef utl_log_define_style_merging
+
+// Prohibit applying alignment after the color (which is necessary to make log color escaping work),
+// doing it at the operator level produces the best error messages and tends to work well with LSPs
+#define utl_log_prohibit_style_merging(wrapper_, style_)                                                               \
+    template <class T>                                                                                                 \
+    constexpr void operator|(wrapper_, style_) noexcept {                                                              \
+        static_assert(always_false_v<T>, "Color modifiers should be applied after alignment.");                        \
+    }                                                                                                                  \
+    static_assert(true)
+
+// clang-format off
+utl_log_prohibit_style_merging(const Colored<T>& , mods::AlignRight );
+utl_log_prohibit_style_merging(const Colored<T>& , mods::AlignCenter);
+utl_log_prohibit_style_merging(const Colored<T>& , mods::AlignLeft  );
+utl_log_prohibit_style_merging(      Colored<T>&&, mods::AlignRight );
+utl_log_prohibit_style_merging(      Colored<T>&&, mods::AlignCenter);
+utl_log_prohibit_style_merging(      Colored<T>&&, mods::AlignLeft  );
+// clang-format on
+
+#undef utl_log_prohibit_style_merging
+
+} // namespace mods
+
+// --- Public API for style modifiers ---
+// --------------------------------------
+
+[[nodiscard]] constexpr auto general(std::size_t precision = 6) noexcept {
+    return mods::FloatFormat{std::chars_format::general, static_cast<int>(precision)};
+}
+[[nodiscard]] constexpr auto fixed(std::size_t precision = 3) noexcept {
+    return mods::FloatFormat{std::chars_format::fixed, static_cast<int>(precision)};
+}
+[[nodiscard]] constexpr auto scientific(std::size_t precision = 3) noexcept {
+    return mods::FloatFormat{std::chars_format::scientific, static_cast<int>(precision)};
+}
+[[nodiscard]] constexpr auto hex(std::size_t precision = 3) noexcept {
+    return mods::FloatFormat{std::chars_format::hex, static_cast<int>(precision)};
+}
+[[nodiscard]] constexpr auto base(std::size_t base) noexcept { return mods::IntegerFormat{static_cast<int>(base)}; }
+[[nodiscard]] constexpr auto align_left(std::size_t size) noexcept { return mods::AlignLeft{size}; }
+[[nodiscard]] constexpr auto align_center(std::size_t size) noexcept { return mods::AlignCenter{size}; }
+[[nodiscard]] constexpr auto align_right(std::size_t size) noexcept { return mods::AlignRight{size}; }
+
+// clang-format off
+namespace color {
+constexpr auto black               = mods::Color{ansi::black              };
+constexpr auto red                 = mods::Color{ansi::red                };
+constexpr auto green               = mods::Color{ansi::green              };
+constexpr auto yellow              = mods::Color{ansi::yellow             };
+constexpr auto blue                = mods::Color{ansi::blue               };
+constexpr auto magenta             = mods::Color{ansi::magenta            };
+constexpr auto cyan                = mods::Color{ansi::cyan               };
+constexpr auto white               = mods::Color{ansi::white              };
+constexpr auto bright_black        = mods::Color{ansi::bright_black       };
+constexpr auto bright_red          = mods::Color{ansi::bright_red         };
+constexpr auto bright_green        = mods::Color{ansi::bright_green       };
+constexpr auto bright_yellow       = mods::Color{ansi::bright_yellow      };
+constexpr auto bright_blue         = mods::Color{ansi::bright_blue        };
+constexpr auto bright_magenta      = mods::Color{ansi::bright_magenta     };
+constexpr auto bright_cyan         = mods::Color{ansi::bright_cyan        };
+constexpr auto bright_white        = mods::Color{ansi::bright_white       };
+constexpr auto bold_black          = mods::Color{ansi::bold_black         };
+constexpr auto bold_red            = mods::Color{ansi::bold_red           };
+constexpr auto bold_green          = mods::Color{ansi::bold_green         };
+constexpr auto bold_yellow         = mods::Color{ansi::bold_yellow        };
+constexpr auto bold_blue           = mods::Color{ansi::bold_blue          };
+constexpr auto bold_magenta        = mods::Color{ansi::bold_magenta       };
+constexpr auto bold_cyan           = mods::Color{ansi::bold_cyan          };
+constexpr auto bold_white          = mods::Color{ansi::bold_white         };
+constexpr auto bold_bright_black   = mods::Color{ansi::bold_bright_black  };
+constexpr auto bold_bright_red     = mods::Color{ansi::bold_bright_red    };
+constexpr auto bold_bright_green   = mods::Color{ansi::bold_bright_green  };
+constexpr auto bold_bright_yellow  = mods::Color{ansi::bold_bright_yellow };
+constexpr auto bold_bright_blue    = mods::Color{ansi::bold_bright_blue   };
+constexpr auto bold_bright_magenta = mods::Color{ansi::bold_bright_magenta};
+constexpr auto bold_bright_cyan    = mods::Color{ansi::bold_bright_cyan   };
+constexpr auto bold_bright_white   = mods::Color{ansi::bold_bright_white  };
+} // namespace color
+// clang-format on
+
+// =================
+// --- Formatter ---
+// =================
+
+// --- Member detection type traits ---
+// ------------------------------------
+
+#define utl_log_define_trait(trait_name_, ...)                                                                         \
+    template <class T, class = void>                                                                                   \
+    struct trait_name_ : std::false_type {};                                                                           \
+                                                                                                                       \
+    template <class T>                                                                                                 \
+    struct trait_name_<T, std::void_t<decltype(__VA_ARGS__)>> : std::true_type {};                                     \
+                                                                                                                       \
+    template <class T>                                                                                                 \
+    constexpr bool trait_name_##_v = trait_name_<T>::value
+
+// clang-format off
+utl_log_define_trait(has_string        , std::declval<T>().string()                              );
+utl_log_define_trait(has_real          , std::declval<T>().real()                                );
+utl_log_define_trait(has_imag          , std::declval<T>().imag()                                );
+utl_log_define_trait(has_begin         , std::declval<T>().begin()                               );
+utl_log_define_trait(has_end           , std::declval<T>().end()                                 );
+utl_log_define_trait(has_input_it      , std::next(std::declval<T>().begin())                    );
+utl_log_define_trait(has_get           , std::get<0>(std::declval<T>())                          );
+utl_log_define_trait(has_tuple_size    , std::tuple_size<T>::value                               );
+utl_log_define_trait(has_container_type, std::declval<typename std::decay_t<T>::container_type>());
+utl_log_define_trait(has_rep           , std::declval<typename std::decay_t<T>::rep>()           );
+utl_log_define_trait(has_period        , std::declval<typename std::decay_t<T>::period>()        );
+utl_log_define_trait(has_ostream_insert, std::declval<std::ostream>() << std::declval<T>()       );
+// clang-format on
+
+#undef utl_log_define_trait
+
+// --- Type trait chain ---
+// ------------------------
+
+// We want to provide default formatting behaviour based on type traits, however one type
+// might satisfy multiple formatter-suitable type traits. To avoid ambiguity we need to select
+// one based on a certain trait priority.
+//
+// A simple way to do it would be to have and 'if constexpr' chain inside the formatter,
+// however that would leave user with no good customization points.
+//
+// We can emulate an 'if constexpr' chain on the type trait level by arranging them in a following pattern:
+//    > is_TYPE_i = /* if TYPE should be included due to its properties         */;
+//    > is_TYPE_e = /* if TYPE should be excluded due to already having a match */;
+//    > is_TYPE_v = is_TYPE_i && !is_TYPE_e;
+//
+// Similar effect could be achieved in other ways, but this one proved to be so far the least impactful
+// in terms of compile times, as we don't introduce and deep template nesting & minimize instantiations.
+
+template <class Type>
+struct Traits {
+    using T = std::decay_t<Type>;
+
+    // char types ('char')
+    constexpr static bool is_char_i               = std::is_same_v<T, char>;
+    constexpr static bool is_char_e               = false;
+    constexpr static bool is_char_v               = is_char_i && !is_char_e;
+    // enum types
+    constexpr static bool is_enum_i               = std::is_enum_v<T>;
+    constexpr static bool is_enum_e               = is_char_e || is_char_i;
+    constexpr static bool is_enum_v               = is_enum_i && !is_enum_e;
+    // types with '.string()' ('std::path')
+    constexpr static bool is_path_i               = has_string_v<T>;
+    constexpr static bool is_path_e               = is_enum_e || is_enum_i;
+    constexpr static bool is_path_v               = is_path_i && !is_path_e;
+    // string-like types ('std::string_view', 'std::string', 'const char*')
+    constexpr static bool is_string_i             = std::is_convertible_v<T, std::string_view>;
+    constexpr static bool is_string_e             = is_path_e || is_path_i;
+    constexpr static bool is_string_v             = is_string_i && !is_string_e;
+    // string-convertible types (custom classes)
+    constexpr static bool is_string_convertible_i = std::is_convertible_v<T, std::string>;
+    constexpr static bool is_string_convertible_e = is_string_e || is_string_i;
+    constexpr static bool is_string_convertible_v = is_string_convertible_i && !is_string_convertible_e;
+    // boolean types ('bool')
+    constexpr static bool is_bool_i               = std::is_same_v<T, bool>;
+    constexpr static bool is_bool_e               = is_string_convertible_e || is_string_convertible_i;
+    constexpr static bool is_bool_v               = is_bool_i && !is_bool_e;
+    // integer types ('int', 'std::uint64_t', etc.)
+    constexpr static bool is_integer_i            = std::is_integral_v<T>;
+    constexpr static bool is_integer_e            = is_bool_e || is_bool_i;
+    constexpr static bool is_integer_v            = is_integer_i && !is_integer_e;
+    // floating-point types
+    constexpr static bool is_float_i              = std::is_floating_point_v<T>;
+    constexpr static bool is_float_e              = is_integer_e || is_integer_i;
+    constexpr static bool is_float_v              = is_float_i && !is_float_e;
+    // 'std::complex'-like types
+    constexpr static bool is_complex_i            = has_imag_v<T>;
+    constexpr static bool is_complex_e            = is_float_e || is_float_i;
+    constexpr static bool is_complex_v            = is_complex_i && !is_complex_e;
+    // array-like types
+    constexpr static bool is_array_i              = has_begin_v<T> && has_end_v<T> && has_input_it_v<T>;
+    constexpr static bool is_array_e              = is_complex_e || is_complex_i;
+    constexpr static bool is_array_v              = is_array_i && !is_array_e;
+    // tuple-like types
+    constexpr static bool is_tuple_i              = has_get_v<T> && has_tuple_size_v<T>;
+    constexpr static bool is_tuple_e              = is_array_e || is_array_i;
+    constexpr static bool is_tuple_v              = is_tuple_i && !is_tuple_e;
+    // container adaptor types
+    constexpr static bool is_adaptor_i            = has_container_type_v<T>;
+    constexpr static bool is_adaptor_e            = is_tuple_e || is_tuple_i;
+    constexpr static bool is_adaptor_v            = is_adaptor_i && !is_adaptor_e;
+    // <chrono> types
+    constexpr static bool is_duration_i           = has_rep_v<T> && has_period_v<T>;
+    constexpr static bool is_duration_e           = is_adaptor_e || is_adaptor_i;
+    constexpr static bool is_duration_v           = is_duration_i && !is_duration_e;
+    // printable types
+    constexpr static bool is_printable_i          = has_ostream_insert_v<T>;
+    constexpr static bool is_printable_e          = is_duration_e || is_duration_i;
+    constexpr static bool is_printable_v          = is_printable_i && !is_printable_e;
+};
+
+// --- String buffer ---
+// ---------------------
+
+// Simplest case of a 'buffer' concept, wraps 'std::string' into a buffer-like API for appending
+// so we can use it in formatters that require an intermediate string for formatting
+
+class StringBuffer {
+    std::string& str;
+
+public:
+    StringBuffer(std::string& str) noexcept : str(str) {}
+
+    void push_string(std::string_view sv) { this->str += sv; }
+
+    void push_chars(std::size_t count, char ch) { this->str.append(count, ch); }
+};
+
+// --- Partial specializations ---
+// -------------------------------
+
+// Base template
+template <class T, class = void>
+struct Formatter {
+    static_assert(always_false_v<T>, "No formatter could be deduced for the type.");
+};
+
+// char types ('char')
+template <class T>
+struct Formatter<T, std::enable_if_t<Traits<T>::is_char_v>> {
+    template <class Buffer>
+    void operator()(Buffer& buffer, const T& arg) const {
+        buffer.push_chars(1, arg);
+    }
+};
+
+// enum types
+template <class T>
+struct Formatter<T, std::enable_if_t<Traits<T>::is_enum_v>> {
+    template <class Buffer>
+    void operator()(Buffer& buffer, const T& arg) const {
+        Formatter<std::underlying_type_t<std::decay_t<T>>>{}(buffer, to_underlying(arg));
+    }
+};
+
+// types with '.string()' ('std::path')
+template <class T>
+struct Formatter<T, std::enable_if_t<Traits<T>::is_path_v>> {
+    template <class Buffer>
+    void operator()(Buffer& buffer, const T& arg) const {
+        buffer.push_string(arg.string());
+    }
+};
+
+// string-like types ('std::string_view', 'std::string', 'const char*')
+template <class T>
+struct Formatter<T, std::enable_if_t<Traits<T>::is_string_v>> {
+    template <class Buffer>
+    void operator()(Buffer& buffer, const T& arg) const {
+        buffer.push_string(std::string_view{arg});
+    }
+};
+
+// string-convertible types (custom classes)
+template <class T>
+struct Formatter<T, std::enable_if_t<Traits<T>::is_string_convertible_v>> {
+    template <class Buffer>
+    void operator()(Buffer& buffer, const T& arg) const {
+        buffer.push_string(std::string{arg});
+    }
+};
+
+// boolean types ('bool')
+template <class T>
+struct Formatter<T, std::enable_if_t<Traits<T>::is_bool_v>> {
+    template <class Buffer>
+    void operator()(Buffer& buffer, const T& arg) const {
+        buffer.push_string(arg ? "true" : "false");
+    }
+};
+
+// integral types ('int', 'std::uint64_t', etc.)
+template <class T>
+struct Formatter<T, std::enable_if_t<Traits<T>::is_integer_v>> {
+    template <class Buffer>
+    void operator()(Buffer& buffer, const T& arg) const {
+        std::array<char, max_chars_int> res;
+
+        const std::size_t serialized = std::to_chars(res.data(), res.data() + res.size(), arg).ptr - res.data();
+
+        buffer.push_string(std::string_view{res.data(), serialized});
+    }
+};
+
+// floating-point types
+template <class T>
+struct Formatter<T, std::enable_if_t<Traits<T>::is_float_v>> {
+    template <class Buffer>
+    void operator()(Buffer& buffer, const T& arg) const {
+        std::array<char, max_chars_int> res;
+
+        const std::size_t serialized = std::to_chars(res.data(), res.data() + res.size(), arg).ptr - res.data();
+
+        buffer.push_string(std::string_view{res.data(), serialized});
+    }
+};
+
+// 'std::complex'-like types
+template <class T>
+struct Formatter<T, std::enable_if_t<Traits<T>::is_complex_v>> {
+    template <class Buffer>
+    void operator()(Buffer& buffer, const T& arg) const {
+        const auto string_formatter = Formatter<std::string_view>{};
+        const auto value_formatter  = Formatter<decltype(arg.real())>{};
+
+        value_formatter(buffer, arg.real());
+        if (arg.imag() >= 0) {
+            string_formatter(buffer, " + ");
+            value_formatter(buffer, arg.imag());
+        } else {
+            string_formatter(buffer, " - ");
+            value_formatter(buffer, -arg.imag());
+        }
+        string_formatter(buffer, "i");
+    }
+};
+
+// array-like types
+template <class T>
+struct Formatter<T, std::enable_if_t<Traits<T>::is_array_v>> {
+    static constexpr std::string_view prefix    = "[ ";
+    static constexpr std::string_view suffix    = " ]";
+    static constexpr std::string_view delimiter = ", ";
+
+    template <class Buffer>
+    void operator()(Buffer& buffer, const T& arg) const {
+        const auto string_formatter = Formatter<std::string_view>{};
+        const auto value_formatter  = Formatter<typename std::decay_t<T>::value_type>{};
+
+        string_formatter(buffer, prefix);
+        if (arg.begin() != arg.end()) {
+            for (auto it = arg.begin();;) {
+                value_formatter(buffer, *it);
+                if (++it == arg.end()) break; // prevents trailing comma
+                string_formatter(buffer, delimiter);
+            }
+        }
+        string_formatter(buffer, suffix);
+    }
+};
+
+// tuple-like types
+template <class T>
+struct Formatter<T, std::enable_if_t<Traits<T>::is_tuple_v>> {
+    static constexpr std::string_view prefix    = "< ";
+    static constexpr std::string_view suffix    = " >";
+    static constexpr std::string_view delimiter = ", ";
+
+    template <class Buffer>
+    void operator()(Buffer& buffer, const T& arg) const {
+        const auto string_formatter = Formatter<std::string_view>{};
+
+        string_formatter(buffer, prefix);
+
+        for_sequence(std::make_index_sequence<std::tuple_size_v<T>>{}, [&](auto index) {
+            const auto& element = std::get<index>(arg); // 'index' is an 'std::integral_constant<std::size_t, i>'
+
+            if constexpr (index != 0) string_formatter(buffer, delimiter);
+
+            Formatter<std::tuple_element_t<index, T>>{}(buffer, element);
+        });
+
+        string_formatter(buffer, suffix);
+    }
+};
+
+// container adaptor types
+template <class T>
+struct Formatter<T, std::enable_if_t<Traits<T>::is_adaptor_v>> {
+    template <class Buffer>
+    void operator()(Buffer& buffer, const T& arg) const {
+        const auto& ref = underlying_container_cref(arg);
+
+        Formatter<std::decay_t<decltype(ref)>>{}(buffer, ref);
+    }
+};
+
+// <chrono> types
+template <class T>
+struct Formatter<T, std::enable_if_t<Traits<T>::is_duration_v>> {
+    constexpr static std::size_t relevant_units = 3;
+
+    constexpr static std::array<std::string_view, SplitDuration::size> names = {"hours", "min", "sec",
+                                                                                "ms",    "us",  "ns"};
+
+    template <class Buffer>
+    void operator()(Buffer& buffer, const T& arg) const {
+
+        auto string_formatter  = Formatter<std::string_view>{};
+        auto integer_formatter = Formatter<SplitDuration::common_rep>{};
+
+        // Takes 'unit_count' of the highest relevant units and converts them to string,
+        // for example with 'unit_count' equal to '3', we will have:
+        //
+        // timescale <= hours   =>   show { hours, min, sec }   =>   string "___ hours ___ min ___ sec"
+        // timescale <= min     =>   show {   min, sec,  ms }   =>   string "___ min ___ sec ___ ms"
+        // timescale <= sec     =>   show {   sec,  ms,  us }   =>   string "___ sec ___ ms ___ us"
+        // timescale <= ms      =>   show {    ms,  us,  ns }   =>   string "___ ms ___ us ___ ns"
+        // timescale <= us      =>   show {    us,  ns      }   =>   string "___ us ___ ns"
+        // timescale <= ns      =>   show {    ns           }   =>   string "___ ns"
+
+        const std::array<SplitDuration::common_rep, SplitDuration::size> counts = unit_split(arg).count();
+
+        for (std::size_t unit = 0; unit < counts.size(); ++unit) {
+            if (counts[unit]) {
+                const std::size_t last =
+                    (unit + relevant_units < counts.size()) ? (unit + relevant_units) : counts.size();
+                // don't want to include the whole <algorithm> just for 'std::max()'
+
+                for (std::size_t k = unit; k < last; ++k) {
+                    integer_formatter(buffer, counts[k]);
+                    string_formatter(buffer, " ");
+                    string_formatter(buffer, names[k]);
+                    if (k + 1 != last) string_formatter(buffer, " "); // prevents trailing space at the end
+                }
+                return;
+            }
+        }
+
+        string_formatter(buffer, "0 ns"); // fallback, unlikely to ever be triggered
+    }
+};
+
+// printable types
+template <class T>
+struct Formatter<T, std::enable_if_t<Traits<T>::is_printable_v>> {
+    template <class Buffer>
+    void operator()(Buffer& buffer, const T& arg) const {
+        buffer.push_string((std::ostringstream{} << arg).str());
+        // creating a string stream every time is slow, but there is no way around it,
+        // this is simply a flaw of streams as a design
+    }
+};
+
+// 'FormattedFloat<T>' types
+template <class T>
+struct Formatter<FormattedFloat<T>, std::enable_if_t<Traits<T>::is_float_v>> {
+    template <class Buffer>
+    void operator()(Buffer& buffer, const FormattedFloat<T>& arg) const {
+        std::array<char, max_chars_int> res;
+
+        const std::size_t serialized =
+            std::to_chars(res.data(), res.data() + res.size(), arg.value, arg.mod.format, arg.mod.precision).ptr -
+            res.data();
+
+        buffer.push_string(std::string_view{res.data(), serialized});
+    }
+};
+
+// 'FormattedInteger<T>' types
+template <class T>
+struct Formatter<FormattedInteger<T>, std::enable_if_t<Traits<T>::is_integer_v>> {
+    template <class Buffer>
+    void operator()(Buffer& buffer, const FormattedInteger<T>& arg) const {
+        std::array<char, max_chars_int> res;
+
+        const std::size_t serialized =
+            std::to_chars(res.data(), res.data() + res.size(), arg.value, arg.mod.base).ptr - res.data();
+
+        buffer.push_string(std::string_view{res.data(), serialized});
+    }
+};
+
+// 'AlignedLeft<T>' types
+template <class T>
+struct Formatter<AlignedLeft<T>, void> {
+    template <class Buffer>
+    void operator()(Buffer& buffer, const AlignedLeft<T>& arg) const {
+        std::string& temp = thread_local_temporary_string();
+        StringBuffer temp_buffer(temp);
+
+        Formatter<T>{}(temp_buffer, arg.value);
+
+        const std::size_t size_no_pad   = temp.size();
+        const std::size_t size_with_pad = max(arg.mod.size, size_no_pad);
+        const std::size_t right_pad     = size_with_pad - size_no_pad;
+
+        buffer.push_string(temp);
+        buffer.push_chars(right_pad, ' ');
+    }
+};
+
+// 'AlignedCenter<T>' types
+template <class T>
+struct Formatter<AlignedCenter<T>, void> {
+    template <class Buffer>
+    void operator()(Buffer& buffer, const AlignedCenter<T>& arg) const {
+        std::string& temp = thread_local_temporary_string();
+        StringBuffer temp_buffer(temp);
+
+        Formatter<T>{}(temp_buffer, arg.value);
+
+        const std::size_t size_no_pad   = temp.size();
+        const std::size_t size_with_pad = max(arg.mod.size, size_no_pad);
+        const std::size_t left_pad      = (size_with_pad - size_no_pad) / 2;
+        const std::size_t right_pad     = size_with_pad - size_no_pad - left_pad;
+
+        buffer.push_chars(left_pad, ' ');
+        buffer.push_string(temp);
+        buffer.push_chars(right_pad, ' ');
+    }
+};
+
+// 'AlignedRight<T>' types
+template <class T>
+struct Formatter<AlignedRight<T>, void> {
+    template <class Buffer>
+    void operator()(Buffer& buffer, const AlignedRight<T>& arg) const {
+        std::string& temp = thread_local_temporary_string();
+        StringBuffer temp_buffer(temp);
+
+        Formatter<T>{}(temp_buffer, arg.value);
+
+        const std::size_t size_no_pad   = temp.size();
+        const std::size_t size_with_pad = max(arg.mod.size, size_no_pad);
+        const std::size_t left_pad      = size_with_pad - size_no_pad;
+
+        buffer.push_chars(left_pad, ' ');
+        buffer.push_string(temp);
+    }
+};
+
+// 'Colored<T>' types
+template <class T>
+struct Formatter<Colored<T>, void> {
+    template <class Buffer>
+    void operator()(Buffer& buffer, const Colored<T>& arg) const {
+        buffer.push_string(arg.mod.code);
+        Formatter<T>{}(buffer, arg.value);
+        buffer.push_string(ansi::reset);
+    }
+};
+
+// ==============
+// --- Logger ---
+// ==============
+
+// Class layout:
+//
+//    Logger               | Input: Message    | Output: Message    | - Captures meta, forwards message to all sinks
+//    -> tuple<Sink, ...>
+//
+//    Sink                 | Input: Message    | Output: Message    | - Wraps underlying API & provides defaults
+//    -> Protector         | Input: Message    | Output: Message    | - Handles safe/unsafe threading
+//       -> Writer         | Input: Message    | Output: Log string | - Handles message formatting
+//         -> Buffer       | Input: Log string | Output: Log string | - Handles instant/fixed/timed buffering
+//            -> Flusher   | Input: Log string | Output: Log string | - Handles sync/async flushing
+//               -> Output | Input: Log string | Output: Log string | - Wraps underlying IO output
+//
+// Specific instances of all listed components depend on specializations selected though policies.
+
+// --- Message metadata ---
+// ------------------------
+
+using Clock = std::chrono::steady_clock;
+
+// Metadata associated with a logging record, generated once by the 'Logger' and distributed to all sinks
+struct Record {
+    Clock::duration  elapsed;
+    std::string_view file;
+    std::size_t      line;
+};
+
+// --- Policies ---
+// ----------------
+
+namespace policy {
+
+enum class Type { FILE, STREAM };
+
+enum class Level { ERR = 0, WARN = 1, NOTE = 2, INFO = 3, DEBUG = 4, TRACE = 5 };
+
+enum class Color { NONE, ANSI };
+
+enum class Format {
+    DATE     = 1 << 0,
+    TITLE    = 1 << 1,
+    THREAD   = 1 << 2,
+    UPTIME   = 1 << 3,
+    CALLSITE = 1 << 4,
+    LEVEL    = 1 << 5,
+    NONE     = 0,
+    FULL     = DATE | TITLE | THREAD | UPTIME | CALLSITE | LEVEL
+}; // bitmask enum
+
+[[nodiscard]] constexpr Format operator|(Format a, Format b) noexcept {
+    return static_cast<Format>(to_underlying(a) | to_underlying(b));
+}
+
+[[nodiscard]] constexpr Format operator&(Format a, Format b) noexcept {
+    return static_cast<Format>(to_underlying(a) & to_underlying(b));
+}
+
+enum class Buffering { NONE, FIXED, TIMED };
+
+enum class Flushing { SYNC, ASYNC };
+
+enum class Threading { UNSAFE, SAFE };
+
+} // namespace policy
+
+// =========================
+// --- Component: Output ---
+// =========================
+
+template <policy::Type type>
+class Output;
+
+// --- File output ---
+// -------------------
+
+template <>
+class Output<policy::Type::FILE> {
+    std::ofstream file;
+
+public:
+    Output(const std::string& name) : file(name) {}
+    Output(std::ofstream&& file) : file(std::move(file)) {}
+
+    void flush_string(std::string_view sv) {
+        this->file.write(sv.data(), sv.size());
+        this->file.flush();
     }
 
-    template <class... Args>
-    void push_message(const Callsite& callsite, const MessageMetadata& meta, const Args&... args) {
-        // When no sinks were manually created, default sink-to-terminal takes over
-        if (this->sinks.empty()) {
-            // static Sink default_sink(std::cout, Verbosity::TRACE, Colors::ENABLE, ms(0), Columns{});
-            default_sink.format(callsite, meta, args...);
-        } else
-            for (auto& sink : this->sinks) sink.format(callsite, meta, args...);
+    void flush_chars(std::size_t count, char ch) {
+        std::ostreambuf_iterator<char> first(this->file);
+        for (std::size_t i = 0; i < count; ++i) first = ch;
+        // fastest way of writing N chars to a stream, 'std::ostreambuf_iterator' writes character to a stream
+        // when assigned, dereference/increment is no-op making it rather strange for an "iterator"
+    }
+};
+
+// --- Stream output ---
+// ---------------------
+
+template <>
+class Output<policy::Type::STREAM> {
+    std::ostream& os;
+
+public:
+    Output(std::ostream& os) noexcept : os(os) {}
+
+    void flush_string(std::string_view sv) {
+        this->os.write(sv.data(), sv.size());
+        this->os.flush();
+    }
+
+    void flush_chars(std::size_t count, char ch) {
+        std::ostreambuf_iterator<char> first(this->os);
+        for (std::size_t i = 0; i < count; ++i) first = ch;
+        // fastest way of writing N chars to a stream, 'std::ostreambuf_iterator' writes character to a stream
+        // when assigned, dereference/increment is no-op making it a rather strange case of an "iterator"
+    }
+};
+
+// ==========================
+// --- Component: Flusher ---
+// ==========================
+
+template <class OutputType, policy::Flushing flushing>
+class Flusher;
+
+// --- Synchonous flushing ---
+// ---------------------------
+
+template <class OutputType>
+class Flusher<OutputType, policy::Flushing::SYNC> {
+    OutputType output;
+
+public:
+    Flusher(OutputType&& output) : output(std::move(output)) {}
+
+    void flush_string(std::string_view sv) { this->output.flush_string(sv); }
+
+    void flush_chars(std::size_t count, char ch) { this->output.flush_chars(count, ch); }
+};
+
+// --- Async flushing ---
+// ----------------------
+
+template <class OutputType>
+class Flusher<OutputType, policy::Flushing::ASYNC> {
+    OutputType output; // destruction order matters here, 'output' should be available until 'worker' thread joins
+
+    std::unique_ptr<WorkerThread> worker = std::make_unique<WorkerThread>();
+
+public:
+    Flusher(OutputType&& output) : output(std::move(output)) {}
+
+    Flusher(Flusher&& other) : output(std::move(other.output)), worker(std::move(other.worker)) {}
+
+    void flush_string(std::string_view sv) {
+        this->worker->detached_task([&out = output, str = std::string(sv)]() { out.flush_string(str); });
+
+        // Note 1: The buffer might be mutated while the other thread flushes it, we have to pass a copy
+        // Note 2: 'std::bind' doesn't bind reference arguments, we have to add a wrapper with 'std::ref'
+    }
+
+    void flush_chars(std::size_t count, char ch) {
+        this->worker->detached_task([&out = output, count, ch] { out.flush_chars(count, ch); });
+    }
+};
+
+// =========================
+// --- Component: Buffer ---
+// =========================
+
+template <class FlusherType, policy::Buffering buffering>
+class Buffer;
+
+// --- Instant buffering ---
+// -------------------------
+
+template <class FlusherType>
+class Buffer<FlusherType, policy::Buffering::NONE> {
+    FlusherType flusher;
+
+public:
+    Buffer(FlusherType&& flusher) : flusher(std::move(flusher)) {}
+
+    void push_record(const Record&) const noexcept {} // only matters for timed buffer
+
+    void push_string(std::string_view sv) { this->flusher.flush_string(sv); }
+
+    void push_chars(std::size_t count, char ch) { this->flusher.flush_chars(count, ch); }
+};
+
+// --- Fixed buffering ---
+// -----------------------
+
+template <class FlusherType>
+class Buffer<FlusherType, policy::Buffering::FIXED> {
+    constexpr static std::size_t size = buffering_size;
+
+    FlusherType            flusher;
+    std::array<char, size> buffer{};
+    std::size_t            cursor{};
+
+public:
+    Buffer(FlusherType&& output) : flusher(std::move(output)) {}
+
+    // Buffered flusher need non-trivial destructor and move semantics to ensure correct flushing of
+    // the remaining buffer upon destruction. Moved-from buffer should not flush upon destruction.
+    Buffer(Buffer&& other) : flusher(std::move(other.flusher)), buffer(other.buffer), cursor(other.cursor) {
+        other.cursor = size;
+    }
+
+    ~Buffer() {
+        if (this->cursor == size) return;
+
+        this->flusher.flush_string(std::string_view{this->buffer.data(), this->cursor});
+    }
+
+    void push_record(const Record&) const noexcept {} // only matters for timed buffer
+
+    void push_string(std::string_view sv) {
+        while (true) {
+            const std::size_t space_needed    = sv.size();
+            const std::size_t space_remaining = size - this->cursor;
+
+            // Fast path: Message fits into the buffer
+            if (space_needed <= space_remaining) {
+                for (std::size_t i = 0; i < space_needed; ++i) this->buffer[this->cursor + i] = sv[i];
+                this->cursor += space_needed;
+
+                return;
+            }
+            // Slow path: Message doesn't fit, need to flush
+            else {
+                for (std::size_t i = 0; i < space_remaining; ++i) this->buffer[this->cursor + i] = sv[i];
+                this->cursor = 0;
+                this->flusher.flush_string(std::string_view{this->buffer.data(), this->buffer.size()});
+
+                sv.remove_prefix(space_remaining);
+            }
+        }
+    }
+
+    void push_chars(std::size_t count, char ch) {
+        while (true) {
+            const std::size_t space_needed    = count;
+            const std::size_t space_remaining = size - this->cursor;
+
+            // Fast path: Message fits into the buffer
+            if (space_needed <= space_remaining) {
+                for (std::size_t i = 0; i < space_needed; ++i) this->buffer[this->cursor + i] = ch;
+                this->cursor += space_needed;
+
+                return;
+            }
+            // Slow path: Message doesn't fit, need to flush
+            else {
+                for (std::size_t i = 0; i < space_remaining; ++i) this->buffer[this->cursor + i] = ch;
+                this->cursor = 0;
+                this->flusher.flush_string(std::string_view{this->buffer.data(), this->buffer.size()});
+
+                count -= space_remaining; // guaranteed to not underflow
+            }
+        }
+    }
+};
+
+// --- Timed buffering ---
+// -----------------------
+
+template <class FlusherType>
+class Buffer<FlusherType, policy::Buffering::TIMED> {
+    FlusherType     flusher;
+    std::string     buffer;
+    Clock::duration last_flush_uptime{};
+
+    void flush() {
+        this->flusher.flush_string(this->buffer);
+
+        this->buffer.clear();
+        // standard doesn't guarantee that this doesn't reallocate (unlike 'std::vector<>'), however all
+        // existing implementations do the reasonable thing and don't reallocate so we can mostly rely on it
+    }
+
+public:
+    Buffer(FlusherType&& flusher) : flusher(std::move(flusher)) {}
+
+    Buffer(Buffer&& other)
+        : flusher(std::move(other).flusher), buffer(std::move(other).buffer),
+          last_flush_uptime(other.last_flush_uptime) {
+        other.buffer.clear(); // ensures moved-from buffer will not flush in destructor
+    }
+
+    ~Buffer() {
+        if (!this->buffer.empty()) this->flush();
+    }
+
+    void push_record(const Record& record) noexcept {
+        // retrieving timestamps is expensive, we can reuse the one already produced by the logger
+
+        if (record.elapsed - this->last_flush_uptime > buffering_time) {
+            this->flush();
+            this->last_flush_uptime = record.elapsed;
+        }
+    }
+
+    void push_string(std::string_view sv) { this->buffer += sv; }
+
+    void push_chars(std::size_t count, char ch) { this->buffer.append(count, ch); }
+};
+
+// =========================
+// --- Component: Writer ---
+// =========================
+
+// --- Style configuration ---
+// ---------------------------
+
+namespace config {
+
+constexpr std::size_t width_thread        = 6;
+constexpr std::size_t width_uptime        = 8;
+constexpr std::size_t width_callsite_name = 24; // split used for file:line alignment
+constexpr std::size_t width_callsite_line = 4;
+constexpr std::size_t width_callsite      = width_callsite_name + 1 + width_callsite_line;
+constexpr std::size_t width_level         = 5;
+constexpr std::size_t width_message       = 30; // doesn't limit actual message size, used for separator width
+
+constexpr std::string_view delimiter_front = "| ";
+constexpr std::string_view delimiter_mid   = " | ";
+
+constexpr std::string_view title_thread   = "thread";
+constexpr std::string_view title_uptime   = "  uptime";
+constexpr std::string_view title_callsite = "                     callsite";
+constexpr std::string_view title_level    = "level";
+constexpr std::string_view title_message  = "message";
+
+constexpr std::string_view date_prefix = "date -> ";
+
+constexpr char hline_fill = '-';
+
+constexpr std::string_view line_break = "\n";
+
+constexpr std::string_view name_err   = "  ERR";
+constexpr std::string_view name_warn  = " WARN";
+constexpr std::string_view name_note  = " NOTE";
+constexpr std::string_view name_info  = " INFO";
+constexpr std::string_view name_debug = "DEBUG";
+constexpr std::string_view name_trace = "TRACE";
+
+constexpr std::string_view color_header = ansi::bold_cyan;
+
+constexpr std::string_view color_err   = ansi::bold_red;
+constexpr std::string_view color_warn  = ansi::yellow;
+constexpr std::string_view color_note  = ansi::magenta;
+constexpr std::string_view color_info  = ansi::white;
+constexpr std::string_view color_debug = ansi::green;
+constexpr std::string_view color_trace = ansi::bright_black;
+
+static_assert(width_thread == title_thread.size());
+static_assert(width_uptime == title_uptime.size());
+static_assert(width_callsite == title_callsite.size());
+static_assert(width_level == title_level.size());
+static_assert(width_message > title_message.size());
+
+static_assert(width_level == name_trace.size());
+static_assert(width_level == name_debug.size());
+static_assert(width_level == name_info.size());
+static_assert(width_level == name_note.size());
+static_assert(width_level == name_warn.size());
+static_assert(width_level == name_err.size());
+
+} // namespace config
+
+// --- Component ---
+// -----------------
+
+// Component that wraps 'Formatter' with sink-specific formatting
+
+template <class BufferType, policy::Level level, policy::Color color, policy::Format format>
+struct Writer {
+private:
+    BufferType buffer;
+
+    constexpr static bool has_color = color == policy::Color::ANSI;
+
+    constexpr static bool format_date  = to_bool(format & policy::Format::DATE);
+    constexpr static bool format_title = to_bool(format & policy::Format::TITLE);
+
+    constexpr static auto delimiter_date = config::delimiter_front;
+
+    constexpr static bool format_thread   = to_bool(format & policy::Format::THREAD);
+    constexpr static bool format_uptime   = to_bool(format & policy::Format::UPTIME);
+    constexpr static bool format_callsite = to_bool(format & policy::Format::CALLSITE);
+    constexpr static bool format_level    = to_bool(format & policy::Format::LEVEL);
+    constexpr static bool format_message  = true;
+
+    constexpr static bool front_is_thread   = format_thread;
+    constexpr static bool front_is_uptime   = format_uptime && !front_is_thread;
+    constexpr static bool front_is_callsite = format_callsite && !front_is_thread && !front_is_uptime;
+    constexpr static bool front_is_level = format_level && !front_is_thread && !front_is_uptime && !front_is_callsite;
+    constexpr static bool front_is_message =
+        format_message && !front_is_thread && !front_is_uptime && !front_is_callsite && !front_is_level;
+
+    constexpr static auto delimiter_thread   = front_is_thread ? config::delimiter_front : config::delimiter_mid;
+    constexpr static auto delimiter_uptime   = front_is_uptime ? config::delimiter_front : config::delimiter_mid;
+    constexpr static auto delimiter_callsite = front_is_callsite ? config::delimiter_front : config::delimiter_mid;
+    constexpr static auto delimiter_level    = front_is_level ? config::delimiter_front : config::delimiter_mid;
+    constexpr static auto delimiter_message  = front_is_message ? config::delimiter_front : config::delimiter_mid;
+
+    void write_thread() {
+        using styled_type     = AlignedLeft<int>;
+        const styled_type arg = this_thread_linear_id() | align_left(config::width_thread);
+
+        Formatter<styled_type>{}(this->buffer, arg);
+    }
+
+    void write_uptime(const Record& record) {
+        using styled_type     = AlignedRight<FormattedFloat<double>>;
+        const styled_type arg = Sec(record.elapsed).count() | fixed(2) | align_right(config::width_uptime);
+
+        Formatter<styled_type>{}(this->buffer, arg);
+    }
+
+    void write_callsite([[maybe_unused]] const Record& record) {
+        using styled_file      = AlignedRight<const std::string_view&>;
+        const styled_file file = record.file | align_right(config::width_callsite_name);
+
+        using styled_line      = AlignedLeft<const std::size_t&>;
+        const styled_line line = record.line | align_left(config::width_callsite_line);
+
+        Formatter<styled_file>{}(this->buffer, file);
+        Formatter<char>{}(this->buffer, ':');
+        Formatter<styled_line>{}(this->buffer, line);
+    }
+
+    template <policy::Level message_level>
+    void write_level() {
+        // clang-format off
+        if constexpr (message_level == policy::Level::ERR  ) this->buffer.push_string(config::name_err  );
+        if constexpr (message_level == policy::Level::WARN ) this->buffer.push_string(config::name_warn );
+        if constexpr (message_level == policy::Level::NOTE ) this->buffer.push_string(config::name_note );
+        if constexpr (message_level == policy::Level::INFO ) this->buffer.push_string(config::name_info );
+        if constexpr (message_level == policy::Level::DEBUG) this->buffer.push_string(config::name_debug);
+        if constexpr (message_level == policy::Level::TRACE) this->buffer.push_string(config::name_trace);
+        // clang-format on
+    }
+
+    template <policy::Level message_level>
+    void write_color_message() {
+        // clang-format off
+        if constexpr (message_level == policy::Level::ERR  ) this->buffer.push_string(config::color_err  );
+        if constexpr (message_level == policy::Level::WARN ) this->buffer.push_string(config::color_warn );
+        if constexpr (message_level == policy::Level::NOTE ) this->buffer.push_string(config::color_note );
+        if constexpr (message_level == policy::Level::INFO ) this->buffer.push_string(config::color_info );
+        if constexpr (message_level == policy::Level::DEBUG) this->buffer.push_string(config::color_debug);
+        if constexpr (message_level == policy::Level::TRACE) this->buffer.push_string(config::color_trace);
+        // clang-format on
+    }
+
+    void write_color_header() { this->buffer.push_string(config::color_header); }
+
+    void write_color_reset() { this->buffer.push_string(ansi::reset); }
+
+    template <policy::Level message_level, class T>
+    void write_arg(const T& arg) {
+        Formatter<T>{}(this->buffer, arg);
+    }
+
+    // Color modifier requires special handling at the logger level since we need to properly escape & restore
+    // current logging level color. This wouldn't be required if ANSI codes could be nested.
+    template <policy::Level message_level, class T>
+    void write_arg(const Colored<T>& arg) {
+        // Switch to message color
+        if constexpr (has_color) this->write_color_reset();
+        if constexpr (has_color) this->buffer.push_string(arg.mod.code);
+
+        this->write_arg<message_level>(arg.value);
+
+        // Restore logger color
+        if constexpr (has_color) this->buffer.push_string(ansi::reset);
+        if constexpr (has_color) this->write_color_message<message_level>();
+    }
+
+    void write_header_datetime() {
+        this->buffer.push_string(config::delimiter_front);
+        this->buffer.push_string(config::date_prefix);
+        this->buffer.push_string(datetime_string());
+        this->buffer.push_string(config::line_break);
+    }
+
+    void write_header_separator() {
+        if constexpr (format_thread) this->buffer.push_string(delimiter_thread);
+        if constexpr (format_thread) this->buffer.push_chars(config::width_thread, config::hline_fill);
+        if constexpr (format_uptime) this->buffer.push_string(delimiter_uptime);
+        if constexpr (format_uptime) this->buffer.push_chars(config::width_uptime, config::hline_fill);
+        if constexpr (format_callsite) this->buffer.push_string(delimiter_callsite);
+        if constexpr (format_callsite) this->buffer.push_chars(config::width_callsite, config::hline_fill);
+        if constexpr (format_level) this->buffer.push_string(delimiter_level);
+        if constexpr (format_level) this->buffer.push_chars(config::width_level, config::hline_fill);
+        this->buffer.push_string(delimiter_message);
+        this->buffer.push_chars(config::width_message, config::hline_fill);
+        this->buffer.push_string(config::line_break);
+    }
+
+    void write_header_hline() {
+        constexpr std::size_t w_thread   = format_thread ? (config::width_thread + delimiter_thread.size()) : 0;
+        constexpr std::size_t w_uptime   = format_uptime ? (config::width_uptime + delimiter_uptime.size()) : 0;
+        constexpr std::size_t w_callsite = format_callsite ? (config::width_callsite + delimiter_callsite.size()) : 0;
+        constexpr std::size_t w_level    = format_level ? (config::width_level + delimiter_level.size()) : 0;
+        constexpr std::size_t w_message  = config::width_message + delimiter_message.size();
+
+        constexpr std::size_t hline_total =
+            w_thread + w_uptime + w_callsite + w_level + w_message - config::delimiter_front.size();
+
+        this->buffer.push_string(config::delimiter_front);
+        this->buffer.push_chars(hline_total, config::hline_fill);
+        this->buffer.push_string(config::line_break);
+    }
+
+    void write_header_title() {
+        if constexpr (format_thread) this->buffer.push_string(delimiter_thread);
+        if constexpr (format_thread) this->buffer.push_string(config::title_thread);
+        if constexpr (format_uptime) this->buffer.push_string(delimiter_uptime);
+        if constexpr (format_uptime) this->buffer.push_string(config::title_uptime);
+        if constexpr (format_callsite) this->buffer.push_string(delimiter_callsite);
+        if constexpr (format_callsite) this->buffer.push_string(config::title_callsite);
+        if constexpr (format_level) this->buffer.push_string(delimiter_level);
+        if constexpr (format_level) this->buffer.push_string(config::title_level);
+        this->buffer.push_string(delimiter_message);
+        this->buffer.push_string(config::title_message);
+        this->buffer.push_string(config::line_break);
+    }
+
+    void write_header() {
+        // Start color
+        if constexpr (has_color) this->write_color_header();
+
+        if constexpr (format_date) {
+            this->write_header_hline();
+            this->write_header_datetime();
+            this->write_header_separator();
+        }
+
+        if constexpr (format_title) {
+            this->write_header_title();
+            this->write_header_separator();
+        }
+
+        // End color
+        if constexpr (has_color) this->write_color_reset();
+    }
+
+    template <policy::Level message_level, class... Args>
+    void write_message(const Record& record, const Args&... args) {
+        // Start color
+        if constexpr (has_color) this->write_color_message<message_level>();
+
+        // Format info & message
+        if constexpr (format_thread) this->buffer.push_string(delimiter_thread);
+        if constexpr (format_thread) this->write_thread();
+        if constexpr (format_uptime) this->buffer.push_string(delimiter_uptime);
+        if constexpr (format_uptime) this->write_uptime(record);
+        if constexpr (format_callsite) this->buffer.push_string(delimiter_callsite);
+        if constexpr (format_callsite) this->write_callsite(record);
+        if constexpr (format_level) this->buffer.push_string(delimiter_level);
+        if constexpr (format_level) this->write_level<message_level>();
+
+        this->buffer.push_string(delimiter_message);
+        (this->write_arg<message_level>(args), ...);
+        this->buffer.push_string(config::line_break);
+
+        // Notify buffer of the record metadata it can potentially use
+        this->buffer.push_record(record);
+
+        // End color
+        if constexpr (has_color) this->write_color_reset();
+    }
+
+public:
+    Writer(BufferType&& buffer) : buffer(std::move(buffer)) {}
+
+    void header() {
+        if constexpr (format_date || format_title) this->write_header();
+    }
+
+    template <policy::Level message_level, class... Args>
+    void message([[maybe_unused]] const Record& record, [[maybe_unused]] const Args&... args) {
+        if constexpr (message_level <= level) this->write_message<message_level>(record, args...);
+        // Note: Both '[[maybe_unused]]' and splitting 'write_message()' into a separate method are
+        //       necessary to prevent MSVC from complaining about unused code at W4 warning level
+        //       in cases where this methods should intentionally compile to nothing.
+    }
+};
+
+// ============================
+// --- Component: Protector ---
+// ============================
+
+template <class WriterType, policy::Threading>
+class Protector;
+
+// --- Thread-unsafe writing ---
+// -----------------------------
+
+template <class WriterType>
+class Protector<WriterType, policy::Threading::UNSAFE> {
+    WriterType writer;
+
+public:
+    Protector(WriterType&& writer) : writer(std::move(writer)) {}
+
+    void header() { this->writer.header(); }
+
+    template <policy::Level message_level, class... Args>
+    void message(const Record& record, const Args&... args) {
+        this->writer.template message<message_level>(record, args...);
+    }
+};
+
+// --- Thread-safe writing ---
+// ---------------------------
+
+template <class WriterType>
+class Protector<WriterType, policy::Threading::SAFE> {
+    WriterType writer;
+    std::mutex mutex;
+
+public:
+    Protector(WriterType&& writer) : writer(std::move(writer)) {}
+
+    Protector(Protector&& other) : writer(std::move(other.writer)) {}
+    // we assume move to be thread-safe since it should only be done in logger constructor which is thread-safe
+    // by itself due being either 'static' or function-local, otherwise we'd need to lock 'other.mutex'
+
+    void header() { this->writer.header(); }
+
+    template <policy::Level message_level, class... Args>
+    void message(const Record& record, const Args&... args) {
+        const std::lock_guard lock(this->mutex);
+        this->writer.template message<message_level>(record, args...);
     }
 };
 
 // =======================
-// --- Sink public API ---
+// --- Component: Sink ---
 // =======================
 
-inline Sink& add_ostream_sink(std::ostream& os, Verbosity verbosity = Verbosity::INFO, Colors colors = Colors::ENABLE,
-                              clock::duration flush_interval = ms{}, const Columns& columns = Columns{}) {
-    return _logger::instance().sinks.emplace_back(os, verbosity, colors, flush_interval, columns);
+// Component that wraps all the previous components into a public API with defaults & CTAD
+
+// clang-format off
+template <
+    policy::Type      type,
+    policy::Level     level     = (type == policy::Type::STREAM) ? policy::Level::INFO : policy::Level::TRACE,
+    policy::Color     color     = (type == policy::Type::STREAM) ? policy::Color::ANSI : policy::Color::NONE,
+    policy::Format    format    = policy::Format::FULL,
+    policy::Buffering buffering = (type == policy::Type::STREAM) ? policy::Buffering::NONE : policy::Buffering::FIXED,
+    policy::Flushing  flushing  = policy::Flushing::SYNC,
+    policy::Threading threading = policy::Threading::SAFE
+>
+// clang-format on
+class Sink {
+    using output_type    = Output<type>;
+    using flusher_type   = Flusher<output_type, flushing>;
+    using buffer_type    = Buffer<flusher_type, buffering>;
+    using writer_type    = Writer<buffer_type, level, color, format>;
+    using protector_type = Protector<writer_type, threading>;
+
+    protector_type protector;
+
+public:
+    Sink(protector_type&& protector) : protector(std::move(protector)) {}
+
+    void header() { this->protector.header(); }
+
+    template <policy::Level message_level, class... Args>
+    void message(const Record& record, const Args&... args) {
+        this->protector.template message<message_level>(record, args...);
+    }
+
+    // Stream sink preset
+    Sink(std::ostream& os) : Sink(protector_type(writer_type(buffer_type(flusher_type(output_type(os)))))) {}
+    // File sink preset
+    Sink(std::ofstream&& file)
+        : Sink(protector_type(writer_type(buffer_type(flusher_type(output_type(std::move(file))))))) {}
+    Sink(std::string_view name)
+        : Sink(protector_type(writer_type(buffer_type(flusher_type(output_type(std::string(name))))))) {}
+};
+
+// CTAD for presets
+Sink(std::ostream&) -> Sink<policy::Type::STREAM>;
+Sink(std::ofstream&&) -> Sink<policy::Type::FILE>;
+Sink(std::string_view) -> Sink<policy::Type::FILE>;
+
+// =========================
+// --- Component: Logger ---
+// =========================
+
+// --- Codegen macros ---
+// ----------------------
+
+// Since we want to have macro-free API on the user side, the only way of capturing callsite is
+// 'std::source_location' or its re-implementation. The only way to capture callsite with such class
+// in C++17 is by using it as a defaulted function parameter, however we cannot have defaulted parameters
+// after a variadic pack (which is what logging functions accept).
+//
+// Some loggers that use global logging functions work around this by replacing such functions with class constructor,
+// that use special CTAD to omit the need to pass source location. However, we cannot use this with a local logger API
+// without making it weird for the user. The only way to achieve the desired regular syntax is to manually provide
+// overloads for every number of arguments up to a certain large N. Since doing that truly manually would require
+// an unreasonable amount of code repetition, we use macros to generate those function with preprocessor.
+//
+// This is truly horrible, but sacrifices must be made if we want a nice user API.
+//
+// Such codegen could also be implemented in a more concise way using map-macro, however this adds a lot of
+// nested preprocessing which bloats the compile time and slows down LSPs, so we use simple & shallow macros
+// even through it requires more boilerplate on the use site, this results in no measurable slowdown.
+
+#define utl_log_hold(...) __VA_ARGS__
+
+#define utl_log_member_alias(template_params_, function_params_, args_)                                                \
+    template <template_params_>                                                                                        \
+    void err(function_params_, SourceLocation location = SourceLocation::current()) {                                  \
+        this->message<policy::Level::ERR>(location, args_);                                                            \
+    }                                                                                                                  \
+    template <template_params_>                                                                                        \
+    void warn(function_params_, SourceLocation location = SourceLocation::current()) {                                 \
+        this->message<policy::Level::WARN>(location, args_);                                                           \
+    }                                                                                                                  \
+    template <template_params_>                                                                                        \
+    void note(function_params_, SourceLocation location = SourceLocation::current()) {                                 \
+        this->message<policy::Level::NOTE>(location, args_);                                                           \
+    }                                                                                                                  \
+    template <template_params_>                                                                                        \
+    void info(function_params_, SourceLocation location = SourceLocation::current()) {                                 \
+        this->message<policy::Level::INFO>(location, args_);                                                           \
+    }                                                                                                                  \
+    template <template_params_>                                                                                        \
+    void debug(function_params_, SourceLocation location = SourceLocation::current()) {                                \
+        this->message<policy::Level::DEBUG>(location, args_);                                                          \
+    }                                                                                                                  \
+    template <template_params_>                                                                                        \
+    void trace(function_params_, SourceLocation location = SourceLocation::current()) {                                \
+        this->message<policy::Level::TRACE>(location, args_);                                                          \
+    }
+
+#define utl_log_function_alias(template_params_, function_params_, args_)                                              \
+    template <template_params_>                                                                                        \
+    void err(function_params_, SourceLocation location = SourceLocation::current()) {                                  \
+        default_logger().err(args_, location);                                                                         \
+    }                                                                                                                  \
+    template <template_params_>                                                                                        \
+    void warn(function_params_, SourceLocation location = SourceLocation::current()) {                                 \
+        default_logger().warn(args_, location);                                                                        \
+    }                                                                                                                  \
+    template <template_params_>                                                                                        \
+    void note(function_params_, SourceLocation location = SourceLocation::current()) {                                 \
+        default_logger().note(args_, location);                                                                        \
+    }                                                                                                                  \
+    template <template_params_>                                                                                        \
+    void info(function_params_, SourceLocation location = SourceLocation::current()) {                                 \
+        default_logger().info(args_, location);                                                                        \
+    }                                                                                                                  \
+    template <template_params_>                                                                                        \
+    void debug(function_params_, SourceLocation location = SourceLocation::current()) {                                \
+        default_logger().debug(args_, location);                                                                       \
+    }                                                                                                                  \
+    template <template_params_>                                                                                        \
+    void trace(function_params_, SourceLocation location = SourceLocation::current()) {                                \
+        default_logger().trace(args_, location);                                                                       \
+    }
+
+// --- Component ---
+// -----------------
+
+// Component that wraps a number of sinks and distributes records to them
+
+template <class... Sinks>
+class Logger {
+    std::tuple<Sinks...> sinks;
+    Clock::time_point    creation_time_point = Clock::now();
+
+    template <policy::Level message_level, class... Args>
+    void message(SourceLocation location, const Args&... args) {
+        // Get record info
+        Record record;
+        record.elapsed = Clock::now() - this->creation_time_point;
+
+        std::string_view path = location.function_name();
+
+        record.file = path.substr(path.find_last_of("\\/") + 1);
+        record.line = static_cast<std::size_t>(location.line());
+
+        // Note 1: Even if there is nothing to trim, the 'file' will be correct due to the 'npos + 1 == 0' wrap-around
+
+        // Note 2: We have no choice, but to evaluate 'std::source_location' at runtime due to a deficiency in its
+        //         design. In C++20 we do get potential constexpr source location through non-type template parameters,
+        //         but even we have to implement a custom source location using compiler build-ins since standard one
+        //         doesn't work as a non-type parameter.
+
+        // Forward record & message to every sink
+        tuple_for_each(this->sinks, [&](auto&& sink) { sink.template message<message_level>(record, args...); });
+    }
+
+public:
+    Logger(Sinks&&... sinks) : sinks(std::move(sinks)...) {
+        tuple_for_each(this->sinks, [&](auto&& sink) { sink.header(); }); // [Important!]
+        // any buffer operations should happen AFTER the sink construction, since during construction
+        // buffer & output pointers can change, which would break the async case (single-threaded case is fine)
+    }
+
+    // Create err() / warn() / note() / info() / debug() / trace() for up to 18 arguments
+    // clang-format off
+    utl_log_member_alias( // 1
+        utl_log_hold(class A   ),
+        utl_log_hold(const A& a),
+        utl_log_hold(         a)
+    )
+    utl_log_member_alias( // 2
+        utl_log_hold(class A   , class B   ),
+        utl_log_hold(const A& a, const B& b),
+        utl_log_hold(         a,          b)
+    )
+    utl_log_member_alias( // 3
+        utl_log_hold(class A   , class B   , class C   ),
+        utl_log_hold(const A& a, const B& b, const C& c),
+        utl_log_hold(         a,          b,          c)
+    )
+    utl_log_member_alias( // 4
+        utl_log_hold(class A   , class B   , class C   , class D   ),
+        utl_log_hold(const A& a, const B& b, const C& c, const D& d),
+        utl_log_hold(         a,          b,          c,          d)
+    )
+    utl_log_member_alias( // 5
+        utl_log_hold(class A   , class B   , class C   , class D   , class E   ),
+        utl_log_hold(const A& a, const B& b, const C& c, const D& d, const E& e),
+        utl_log_hold(         a,          b,          c,          d,          e)
+    )
+    utl_log_member_alias( // 6
+        utl_log_hold(class A   , class B   , class C   , class D   , class E   , class F   ),
+        utl_log_hold(const A& a, const B& b, const C& c, const D& d, const E& e, const F& f),
+        utl_log_hold(         a,          b,          c,          d,          e,          f)
+    )
+    utl_log_member_alias( // 7
+        utl_log_hold(class A   , class B   , class C   , class D   , class E   , class F   , class G   ),
+        utl_log_hold(const A& a, const B& b, const C& c, const D& d, const E& e, const F& f, const G& g),
+        utl_log_hold(         a,          b,          c,          d,          e,          f,          g)
+    )
+    utl_log_member_alias( // 8
+        utl_log_hold(class A   , class B   , class C   , class D   , class E   , class F   , class G   , class H   ),
+        utl_log_hold(const A& a, const B& b, const C& c, const D& d, const E& e, const F& f, const G& g, const H& h),
+        utl_log_hold(         a,          b,          c,          d,          e,          f,          g,          h)
+    )
+    utl_log_member_alias( // 9
+        utl_log_hold(class A   , class B   , class C   , class D   , class E   , class F   , class G   , class H   , class I   ),
+        utl_log_hold(const A& a, const B& b, const C& c, const D& d, const E& e, const F& f, const G& g, const H& h, const I& i),
+        utl_log_hold(         a,          b,          c,          d,          e,          f,          g,          h,          i)
+    )
+    utl_log_member_alias( // 10
+        utl_log_hold(class A   , class B   , class C   , class D   , class E   , class F   , class G   , class H   , class I   ,
+                     class J                                                                                                   ),
+        utl_log_hold(const A& a, const B& b, const C& c, const D& d, const E& e, const F& f, const G& g, const H& h, const I& i,
+                     const J& j                                                                                                ),
+        utl_log_hold(         a,          b,          c,          d,          e,          f,          g,          h,          i,
+                              j                                                                                                )
+    )
+    utl_log_member_alias( // 11
+        utl_log_hold(class A   , class B   , class C   , class D   , class E   , class F   , class G   , class H   , class I   ,
+                     class J   , class K                                                                                       ),
+        utl_log_hold(const A& a, const B& b, const C& c, const D& d, const E& e, const F& f, const G& g, const H& h, const I& i,
+                     const J& j, const K& k                                                                                    ),
+        utl_log_hold(         a,          b,          c,          d,          e,          f,          g,          h,          i,
+                              j,          k                                                                                    )
+    )
+    utl_log_member_alias( // 12
+        utl_log_hold(class A   , class B   , class C   , class D   , class E   , class F   , class G   , class H   , class I   ,
+                     class J   , class K   , class L                                                                           ),
+        utl_log_hold(const A& a, const B& b, const C& c, const D& d, const E& e, const F& f, const G& g, const H& h, const I& i,
+                     const J& j, const K& k, const L& l                                                                        ),
+        utl_log_hold(         a,          b,          c,          d,          e,          f,          g,          h,          i,
+                              j,          k,          l                                                                        )
+    )
+    utl_log_member_alias( // 13
+        utl_log_hold(class A   , class B   , class C   , class D   , class E   , class F   , class G   , class H   , class I   ,
+                     class J   , class K   , class L   , class M                                                               ),
+        utl_log_hold(const A& a, const B& b, const C& c, const D& d, const E& e, const F& f, const G& g, const H& h, const I& i,
+                     const J& j, const K& k, const L& l, const M& m                                                            ),
+        utl_log_hold(         a,          b,          c,          d,          e,          f,          g,          h,          i,
+                              j,          k,          l,          m                                                            )
+    )
+    utl_log_member_alias( // 14
+        utl_log_hold(class A   , class B   , class C   , class D   , class E   , class F   , class G   , class H   , class I   ,
+                     class J   , class K   , class L   , class M   , class N                                                   ),
+        utl_log_hold(const A& a, const B& b, const C& c, const D& d, const E& e, const F& f, const G& g, const H& h, const I& i,
+                     const J& j, const K& k, const L& l, const M& m, const N& n                                                ),
+        utl_log_hold(         a,          b,          c,          d,          e,          f,          g,          h,          i,
+                              j,          k,          l,          m,          n                                                )
+    )
+    utl_log_member_alias( // 15
+        utl_log_hold(class A   , class B   , class C   , class D   , class E   , class F   , class G   , class H   , class I   ,
+                     class J   , class K   , class L   , class M   , class N   , class O                                       ),
+        utl_log_hold(const A& a, const B& b, const C& c, const D& d, const E& e, const F& f, const G& g, const H& h, const I& i,
+                     const J& j, const K& k, const L& l, const M& m, const N& n, const O& o                                    ),
+        utl_log_hold(         a,          b,          c,          d,          e,          f,          g,          h,          i,
+                              j,          k,          l,          m,          n,          o                                    )
+    )
+    utl_log_member_alias( // 16
+        utl_log_hold(class A   , class B   , class C   , class D   , class E   , class F   , class G   , class H   , class I   ,
+                     class J   , class K   , class L   , class M   , class N   , class O   , class P                           ),
+        utl_log_hold(const A& a, const B& b, const C& c, const D& d, const E& e, const F& f, const G& g, const H& h, const I& i,
+                     const J& j, const K& k, const L& l, const M& m, const N& n, const O& o, const P& p                        ),
+        utl_log_hold(         a,          b,          c,          d,          e,          f,          g,          h,          i,
+                              j,          k,          l,          m,          n,          o,          p                        )
+    )
+    utl_log_member_alias( // 17
+        utl_log_hold(class A   , class B   , class C   , class D   , class E   , class F   , class G   , class H   , class I   ,
+                     class J   , class K   , class L   , class M   , class N   , class O   , class P   , class Q               ),
+        utl_log_hold(const A& a, const B& b, const C& c, const D& d, const E& e, const F& f, const G& g, const H& h, const I& i,
+                     const J& j, const K& k, const L& l, const M& m, const N& n, const O& o, const P& p, const Q& q            ),
+        utl_log_hold(         a,          b,          c,          d,          e,          f,          g,          h,          i,
+                              j,          k,          l,          m,          n,          o,          p,          q            )
+    )
+    utl_log_member_alias( // 18
+        utl_log_hold(class A   , class B   , class C   , class D   , class E   , class F   , class G   , class H   , class I   ,
+                     class J   , class K   , class L   , class M   , class N   , class O   , class P   , class Q   , class R   ),
+        utl_log_hold(const A& a, const B& b, const C& c, const D& d, const E& e, const F& f, const G& g, const H& h, const I& i,
+                     const J& j, const K& k, const L& l, const M& m, const N& n, const O& o, const P& p, const Q& q, const R& r),
+        utl_log_hold(         a,          b,          c,          d,          e,          f,          g,          h,          i,
+                              j,          k,          l,          m,          n,          o,          p,          q,          r)
+    )
+    // clang-format on
+};
+
+// =============================
+// --- Pre-configured logger ---
+// =============================
+
+inline auto& default_logger() {
+    static auto logger = Logger{Sink{std::cout}, Sink{"latest.log"}};
+    return logger;
 }
 
-inline Sink& add_file_sink(const std::string& filename, OpenMode open_mode = OpenMode::REWRITE,
-                           Verbosity verbosity = Verbosity::TRACE, Colors colors = Colors::DISABLE,
-                           clock::duration flush_interval = ms{15}, const Columns& columns = Columns{}) {
-    const auto ios_open_mode = (open_mode == OpenMode::APPEND) ? std::ios::out | std::ios::app : std::ios::out;
-    return _logger::instance().sinks.emplace_back(std::ofstream(filename, ios_open_mode), verbosity, colors,
-                                                  flush_interval, columns);
+// Expose default logger err() / warn() / note() / info() / debug() / trace() as functions in the global namespace
+// clang-format off
+utl_log_function_alias( // 1
+    utl_log_hold(class A   ),
+    utl_log_hold(const A& a),
+    utl_log_hold(         a)
+)
+utl_log_function_alias( // 2
+    utl_log_hold(class A   , class B   ),
+    utl_log_hold(const A& a, const B& b),
+    utl_log_hold(         a,          b)
+)
+utl_log_function_alias( // 3
+    utl_log_hold(class A   , class B   , class C   ),
+    utl_log_hold(const A& a, const B& b, const C& c),
+    utl_log_hold(         a,          b,          c)
+)
+utl_log_function_alias( // 4
+    utl_log_hold(class A   , class B   , class C   , class D   ),
+    utl_log_hold(const A& a, const B& b, const C& c, const D& d),
+    utl_log_hold(         a,          b,          c,          d)
+)
+utl_log_function_alias( // 5
+    utl_log_hold(class A   , class B   , class C   , class D   , class E   ),
+    utl_log_hold(const A& a, const B& b, const C& c, const D& d, const E& e),
+    utl_log_hold(         a,          b,          c,          d,          e)
+)
+utl_log_function_alias( // 6
+    utl_log_hold(class A   , class B   , class C   , class D   , class E   , class F   ),
+    utl_log_hold(const A& a, const B& b, const C& c, const D& d, const E& e, const F& f),
+    utl_log_hold(         a,          b,          c,          d,          e,          f)
+)
+utl_log_function_alias( // 7
+    utl_log_hold(class A   , class B   , class C   , class D   , class E   , class F   , class G   ),
+    utl_log_hold(const A& a, const B& b, const C& c, const D& d, const E& e, const F& f, const G& g),
+    utl_log_hold(         a,          b,          c,          d,          e,          f,          g)
+)
+utl_log_function_alias( // 8
+    utl_log_hold(class A   , class B   , class C   , class D   , class E   , class F   , class G   , class H   ),
+    utl_log_hold(const A& a, const B& b, const C& c, const D& d, const E& e, const F& f, const G& g, const H& h),
+    utl_log_hold(         a,          b,          c,          d,          e,          f,          g,          h)
+)
+utl_log_function_alias( // 9
+    utl_log_hold(class A   , class B   , class C   , class D   , class E   , class F   , class G   , class H   , class I   ),
+    utl_log_hold(const A& a, const B& b, const C& c, const D& d, const E& e, const F& f, const G& g, const H& h, const I& i),
+    utl_log_hold(         a,          b,          c,          d,          e,          f,          g,          h,          i)
+)
+utl_log_function_alias( // 10
+    utl_log_hold(class A   , class B   , class C   , class D   , class E   , class F   , class G   , class H   , class I   ,
+                 class J                                                                                                   ),
+    utl_log_hold(const A& a, const B& b, const C& c, const D& d, const E& e, const F& f, const G& g, const H& h, const I& i,
+                 const J& j                                                                                                ),
+    utl_log_hold(         a,          b,          c,          d,          e,          f,          g,          h,          i,
+                          j                                                                                                )
+)
+utl_log_function_alias( // 11
+    utl_log_hold(class A   , class B   , class C   , class D   , class E   , class F   , class G   , class H   , class I   ,
+                 class J   , class K                                                                                       ),
+    utl_log_hold(const A& a, const B& b, const C& c, const D& d, const E& e, const F& f, const G& g, const H& h, const I& i,
+                 const J& j, const K& k                                                                                    ),
+    utl_log_hold(         a,          b,          c,          d,          e,          f,          g,          h,          i,
+                          j,          k                                                                                    )
+)
+utl_log_function_alias( // 12
+    utl_log_hold(class A   , class B   , class C   , class D   , class E   , class F   , class G   , class H   , class I   ,
+                 class J   , class K   , class L                                                                           ),
+    utl_log_hold(const A& a, const B& b, const C& c, const D& d, const E& e, const F& f, const G& g, const H& h, const I& i,
+                 const J& j, const K& k, const L& l                                                                        ),
+    utl_log_hold(         a,          b,          c,          d,          e,          f,          g,          h,          i,
+                          j,          k,          l                                                                        )
+)
+utl_log_function_alias( // 13
+    utl_log_hold(class A   , class B   , class C   , class D   , class E   , class F   , class G   , class H   , class I   ,
+                 class J   , class K   , class L   , class M                                                               ),
+    utl_log_hold(const A& a, const B& b, const C& c, const D& d, const E& e, const F& f, const G& g, const H& h, const I& i,
+                 const J& j, const K& k, const L& l, const M& m                                                            ),
+    utl_log_hold(         a,          b,          c,          d,          e,          f,          g,          h,          i,
+                          j,          k,          l,          m                                                            )
+)
+utl_log_function_alias( // 14
+    utl_log_hold(class A   , class B   , class C   , class D   , class E   , class F   , class G   , class H   , class I   ,
+                 class J   , class K   , class L   , class M   , class N                                                   ),
+    utl_log_hold(const A& a, const B& b, const C& c, const D& d, const E& e, const F& f, const G& g, const H& h, const I& i,
+                 const J& j, const K& k, const L& l, const M& m, const N& n                                                ),
+    utl_log_hold(         a,          b,          c,          d,          e,          f,          g,          h,          i,
+                          j,          k,          l,          m,          n                                                )
+)
+utl_log_function_alias( // 15
+    utl_log_hold(class A   , class B   , class C   , class D   , class E   , class F   , class G   , class H   , class I   ,
+                 class J   , class K   , class L   , class M   , class N   , class O                                       ),
+    utl_log_hold(const A& a, const B& b, const C& c, const D& d, const E& e, const F& f, const G& g, const H& h, const I& i,
+                 const J& j, const K& k, const L& l, const M& m, const N& n, const O& o                                    ),
+    utl_log_hold(         a,          b,          c,          d,          e,          f,          g,          h,          i,
+                          j,          k,          l,          m,          n,          o                                    )
+)
+utl_log_function_alias( // 16
+    utl_log_hold(class A   , class B   , class C   , class D   , class E   , class F   , class G   , class H   , class I   ,
+                 class J   , class K   , class L   , class M   , class N   , class O   , class P                           ),
+    utl_log_hold(const A& a, const B& b, const C& c, const D& d, const E& e, const F& f, const G& g, const H& h, const I& i,
+                 const J& j, const K& k, const L& l, const M& m, const N& n, const O& o, const P& p                        ),
+    utl_log_hold(         a,          b,          c,          d,          e,          f,          g,          h,          i,
+                          j,          k,          l,          m,          n,          o,          p                        )
+)
+utl_log_function_alias( // 17
+    utl_log_hold(class A   , class B   , class C   , class D   , class E   , class F   , class G   , class H   , class I   ,
+                 class J   , class K   , class L   , class M   , class N   , class O   , class P   , class Q               ),
+    utl_log_hold(const A& a, const B& b, const C& c, const D& d, const E& e, const F& f, const G& g, const H& h, const I& i,
+                 const J& j, const K& k, const L& l, const M& m, const N& n, const O& o, const P& p, const Q& q            ),
+    utl_log_hold(         a,          b,          c,          d,          e,          f,          g,          h,          i,
+                          j,          k,          l,          m,          n,          o,          p,          q            )
+)
+utl_log_function_alias( // 18
+    utl_log_hold(class A   , class B   , class C   , class D   , class E   , class F   , class G   , class H   , class I   ,
+                 class J   , class K   , class L   , class M   , class N   , class O   , class P   , class Q   , class R   ),
+    utl_log_hold(const A& a, const B& b, const C& c, const D& d, const E& e, const F& f, const G& g, const H& h, const I& i,
+                 const J& j, const K& k, const L& l, const M& m, const N& n, const O& o, const P& p, const Q& q, const R& r),
+    utl_log_hold(         a,          b,          c,          d,          e,          f,          g,          h,          i,
+                          j,          k,          l,          m,          n,          o,          p,          q,          r)
+)
+    // clang-format on
+
+    // ================
+    // --- Printing ---
+    // ================
+
+    template <class... Args>
+    void stringify_append(std::string& str, const Args&... args) {
+    // Format all 'args' into a string using the same buffer abstraction as logging sinks, this doesn't add overhead
+    StringBuffer buffer(str);
+    (Formatter<Args>{}(buffer, args), ...);
 }
 
-// ======================
-// --- Logging macros ---
-// ======================
+template <class... Args>
+std::string stringify(const Args&... args) {
+    std::string res;
+    stringify_append(res, args...);
+    return res;
+}
 
-#define UTL_LOG_ERR(...)                                                                                               \
-    utl::log::_logger::instance().push_message({__FILE__, __LINE__}, {utl::log::Verbosity::ERR}, __VA_ARGS__)
+template <class... Args>
+void print(const Args&... args) {
+    // Print all 'args' to console in a thread-safe way with instant flushing
+    static std::mutex     mutex;
+    const std::lock_guard lock(mutex);
 
-#define UTL_LOG_WARN(...)                                                                                              \
-    utl::log::_logger::instance().push_message({__FILE__, __LINE__}, {utl::log::Verbosity::WARN}, __VA_ARGS__)
+    std::cout << stringify(args...) << std::flush;
+}
 
-#define UTL_LOG_INFO(...)                                                                                              \
-    utl::log::_logger::instance().push_message({__FILE__, __LINE__}, {utl::log::Verbosity::INFO}, __VA_ARGS__)
+template <class... Args>
+void println(const Args&... args) {
+    print(args..., '\n');
+}
 
-#define UTL_LOG_DEBUG(...)                                                                                             \
-    utl::log::_logger::instance().push_message({__FILE__, __LINE__}, {utl::log::Verbosity::DEBUG}, __VA_ARGS__)
+} // namespace utl::log::impl
 
-#define UTL_LOG_TRACE(...)                                                                                             \
-    utl::log::_logger::instance().push_message({__FILE__, __LINE__}, {utl::log::Verbosity::TRACE}, __VA_ARGS__)
+// ______________________ PUBLIC API ______________________
 
-#ifdef _DEBUG
-#define UTL_LOG_DERR(...) UTL_LOG_ERR(__VA_ARGS__)
-#define UTL_LOG_DWARN(...) UTL_LOG_WARN(__VA_ARGS__)
-#define UTL_LOG_DINFO(...) UTL_LOG_INFO(__VA_ARGS__)
-#define UTL_LOG_DDEBUG(...) UTL_LOG_DEBUG(__VA_ARGS__)
-#define UTL_LOG_DTRACE(...) UTL_LOG_TRACE(__VA_ARGS__)
-#else
-#define UTL_LOG_DERR(...)
-#define UTL_LOG_DWARN(...)
-#define UTL_LOG_DINFO(...)
-#define UTL_LOG_DDEBUG(...)
-#define UTL_LOG_DTRACE(...)
-#endif
+namespace utl::log {
 
+using impl::Formatter;
+
+using impl::Logger;
+using impl::Sink;
+
+namespace policy = impl::policy;
+
+using impl::general;
+using impl::fixed;
+using impl::scientific;
+using impl::hex;
+using impl::base;
+using impl::align_left;
+using impl::align_center;
+using impl::align_right;
+
+namespace color = impl::color;
+
+using impl::err;
+using impl::warn;
+using impl::note;
+using impl::info;
+using impl::debug;
+using impl::trace;
+
+using impl::stringify_append;
+using impl::stringify;
+using impl::print;
+using impl::println;
 
 } // namespace utl::log
 
@@ -3198,328 +5313,254 @@ inline Sink& add_file_sink(const std::string& filename, OpenMode open_mode = Ope
 //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-#if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_MATH)
-#ifndef UTLHEADERGUARD_MATH
-#define UTLHEADERGUARD_MATH
+#if !defined(UTL_PICK_MODULES) || defined(UTL_MODULE_MATH)
+
+#ifndef utl_math_headerguard
+#define utl_math_headerguard
+
+#define UTL_MATH_VERSION_MAJOR 1
+#define UTL_MATH_VERSION_MINOR 2
+#define UTL_MATH_VERSION_PATCH 1
 
 // _______________________ INCLUDES _______________________
 
-#include <cassert>          // assert()
-#include <cstddef>          // size_t
-#include <functional>       // function<>
-#include <type_traits>      // enable_if_t<>, void_t<>, is_floating_point<>, is_arithmetic<>,
-                            // conditional_t<>, is_integral<>, true_type, false_type
-#include <algorithm>        // sort()
-#include <initializer_list> // initializer_list<>
-#include <utility>          // declval<>(), move()
-#include <vector>           // vector<>
+#include <cassert>     // assert()
+#include <limits>      // numeric_limits<>
+#include <type_traits> // enable_if_t<>, is_floating_point<>, is_arithmetic<>, is_integral<>, is_same<>, ...
 
 // ____________________ DEVELOPER DOCS ____________________
 
-// Coordinate transformations, mathematical constants and technical helper functions.
-// A bit of a mix-bag-of-everything, but in the end pretty useful.
+// A bunch of template utils that naturally accumulated over time.
 //
-// # ::PI, ::PI_TWO, ::PI_HALF, ::E, ::GOLDEN_RATION #
-// Constants.
-//
-// # ::is_addable_with_itself<Type> #
-// Integral constant, returns in "::value" whether Type supports 'operator()+' with itself.
-//
-// # ::is_multipliable_by_scalar<Type> #
-// Integral constant, returns in "::value" whether Type supports 'operator()*' with double.
-//
-// # ::is_sized<Type> #
-// Integral constant, returns in "::value" whether Type supports '.size()' method.
-//
-// # ::abs(), ::sign(), ::sqr(), ::cube(), ::midpoint(), deg_to_rad(), rad_to_deg() #
-// Constexpr templated math functions, useful when writing expressions with a "textbook form" math.
-//
-// # ::uint_difference() #
-// Returns abs(uint - uint) with respect to uint size and possible overflow.
-//
-// # ::linspace() #
-// Tabulates [min, max] range with N evenly spaced points and returns it as a vector.
-//
-// # ::ssize() #
-// Returns '.size()' of the argument casted to 'int'.
-// Essentially a shortcut for verbose 'static_cast<int>(container.size())'.
-//
-// # ::ternary_branchless() #
-// Branchless ternary operator. Slightly slower that regular ternary on most CPUs.
-// Should not be used unless branchess qualifier is necessary (like in GPU computation).
-//
-// # ::ternary_bitselect() #
-// Faster branchless ternary for integer types.
-// If 2nd return is ommited, 0 is assumed, which allows for significant optimization.
+// This header used to be somewhat of a junkyard of different math-adjacent stuff, but later underwent a cleanup
+// due to the development of another numerical library (GSE) implementing a much more "serious" mathematical package,
+// a lot of functionality from here was generalized and moved into the appropriate modules of this lib.
 
 // ____________________ IMPLEMENTATION ____________________
 
-namespace utl::math {
+namespace utl::math::impl {
+
+// ======================
+// --- SFINAE helpers ---
+// ======================
+
+template <bool Cond>
+using require = std::enable_if_t<Cond, bool>;
+
+template <class T>
+using require_arithmetic = require<std::is_arithmetic_v<T> && !std::is_same_v<T, bool>>;
+
+template <class T>
+using require_int = require<std::is_integral_v<T> && !std::is_same_v<T, bool>>;
+
+template <class T>
+using require_uint = require<std::is_integral_v<T> && std::is_unsigned_v<T> && !std::is_same_v<T, bool>>;
+
+template <class T>
+using require_float = require<std::is_floating_point_v<T>>;
+
+template <class T, class... Args>
+using require_invocable = require<std::is_invocable_v<T, Args...>>;
 
 // =================
 // --- Constants ---
 // =================
 
-constexpr double PI           = 3.14159265358979323846;
-constexpr double PI_TWO       = 2. * PI;
-constexpr double PI_HALF      = 0.5 * PI;
-constexpr double E            = 2.71828182845904523536;
-constexpr double GOLDEN_RATIO = 1.6180339887498948482;
+namespace constants {
 
-// ===================
-// --- Type Traits ---
-// ===================
+constexpr double pi      = 3.14159265358979323846;
+constexpr double two_pi  = 6.28318530717958647693;
+constexpr double half_pi = 1.57079632679489661923;
+constexpr double inv_pi  = 0.31830988618379067153;
+constexpr double sqrtpi  = 1.77245385090551602729;
+constexpr double e       = 2.71828182845904523536; // Euler's number
+constexpr double egamma  = 0.57721566490153286060; // Euler-Mascheroni constant
+constexpr double phi     = 1.61803398874989484820; // golden ratio
+constexpr double ln2     = 0.69314718055994530942;
+constexpr double ln10    = 2.30258509299404568402;
+constexpr double sqrt2   = 1.41421356237309504880;
+constexpr double sqrt3   = 1.73205080756887729352;
 
-template <class Type, class = void>
-struct is_addable_with_itself : std::false_type {};
+} // namespace constants
 
-template <class Type>
-struct is_addable_with_itself<Type, std::void_t<decltype(std::declval<Type>() + std::declval<Type>())>
-                              // perhaps check that resulting type is same as 'Type', but that can cause issues
-                              // with classes like Eigen::MatrixXd that return "foldables" that convert back to
-                              // objects in the end
-                              > : std::true_type {};
+// =======================
+// --- Basic functions ---
+// =======================
 
-template <class Type, class = void>
-struct is_multipliable_by_scalar : std::false_type {};
-
-template <class Type>
-struct is_multipliable_by_scalar<Type, std::void_t<decltype(std::declval<Type>() * std::declval<double>())>>
-    : std::true_type {};
-
-template <class Type, class = void>
-struct is_sized : std::false_type {};
-
-template <class Type>
-struct is_sized<Type, std::void_t<decltype(std::declval<Type>().size())>> : std::true_type {};
-
-template <class FuncType, class Signature>
-using is_function_with_signature = std::is_convertible<FuncType, std::function<Signature>>;
-
-// ======================
-// --- Math functions ---
-// ======================
-
-template <class Type, std::enable_if_t<std::is_scalar<Type>::value, bool> = true>
-[[nodiscard]] constexpr Type abs(Type x) {
-    return (x > Type(0)) ? x : -x;
+template <class T, require_arithmetic<T> = true>
+[[nodiscard]] constexpr T abs(T x) noexcept {
+    return (x > T(0)) ? x : -x;
 }
 
-template <class Type, std::enable_if_t<std::is_scalar<Type>::value, bool> = true>
-[[nodiscard]] constexpr Type sign(Type x) {
-    return (x > Type(0)) ? Type(1) : Type(-1);
-}
+template <class T, require_arithmetic<T> = true>
+[[nodiscard]] constexpr T sign(T x) noexcept {
+    if constexpr (std::is_unsigned_v<T>) return (x > T(0)) ? T(1) : T(0);
+    else return (x > T(0)) ? T(1) : (x < T(0)) ? T(-1) : T(0);
+} // returns -1 / 0 / 1
 
-template <class Type, std::enable_if_t<std::is_arithmetic<Type>::value, bool> = true>
-[[nodiscard]] constexpr Type sqr(Type x) {
+template <class T, require_arithmetic<T> = true>
+[[nodiscard]] constexpr T bsign(T x) noexcept {
+    if constexpr (std::is_unsigned_v<T>) return T(1);
+    else return (x >= T(0)) ? T(1) : T(-1);
+} // returns -1 / 1 (1 gets priority in x == 0)
+
+template <class T, require_arithmetic<T> = true>
+[[nodiscard]] constexpr T sqr(T x) noexcept {
     return x * x;
 }
 
-template <class Type, std::enable_if_t<std::is_arithmetic<Type>::value, bool> = true>
-[[nodiscard]] constexpr Type cube(Type x) {
+template <class T, require_arithmetic<T> = true>
+[[nodiscard]] constexpr T cube(T x) noexcept {
     return x * x * x;
 }
 
-template <class Type, std::enable_if_t<utl::math::is_addable_with_itself<Type>::value, bool> = true,
-          std::enable_if_t<utl::math::is_multipliable_by_scalar<Type>::value, bool> = true>
-[[nodiscard]] constexpr Type midpoint(Type a, Type b) {
-    return (a + b) * 0.5;
+template <class T, require_float<T> = true>
+[[nodiscard]] constexpr T inv(T x) noexcept {
+    return T(1) / x;
 }
 
-template <class IntegerType, std::enable_if_t<std::is_integral<IntegerType>::value, bool> = true>
-[[nodiscard]] constexpr int kronecker_delta(IntegerType i, IntegerType j) {
-    // 'IntegerType' here is necessary to prevent enforcing static_cast<int>(...) on the callsite
-    return (i == j) ? 1 : 0;
+template <class T, require_arithmetic<T> = true>
+[[nodiscard]] constexpr T heaviside(T x) noexcept {
+    return static_cast<T>(x > T(0));
 }
 
-template <class IntegerType, std::enable_if_t<std::is_integral<IntegerType>::value, bool> = true>
-[[nodiscard]] constexpr int power_of_minus_one(IntegerType power) {
-    return (power % IntegerType(2)) ? -1 : 1; // is there a faster way of doing it?
+// Floating point midpoint based on 'libstdc++' implementation, takes care of extreme values
+template <class T, require_float<T> = true>
+[[nodiscard]] constexpr T midpoint(T a, T b) noexcept {
+    constexpr T low  = std::numeric_limits<T>::min() * 2;
+    constexpr T high = std::numeric_limits<T>::max() / 2;
+
+    const T abs_a = abs(a);
+    const T abs_b = abs(b);
+
+    if (abs_a <= high && abs_b <= high) return (a + b) / 2; // always correctly rounded
+    if (abs_a < low) return a + b / 2;                      // not safe to halve 'a'
+    if (abs_b < low) return b + a / 2;                      // not safe to halve 'b'
+    return a / 2 + b / 2;                                   // correctly rounded for remaining cases
 }
 
-
-// --- deg/rad conversion ---
-template <class FloatType, std::enable_if_t<std::is_floating_point<FloatType>::value, bool> = true>
-[[nodiscard]] constexpr FloatType deg_to_rad(FloatType degrees) {
-    constexpr FloatType FACTOR = FloatType(PI / 180.);
-    return degrees * FACTOR;
+// Non-overflowing integer midpoint is less trivial than it might initially seem, see
+// https://lemire.me/blog/2022/12/06/fast-midpoint-between-two-integers-without-overflow/
+// https://biowpn.github.io/bioweapon/2025/03/23/generalizing-std-midpoint.html
+template <class T, require_int<T> = true>
+[[nodiscard]] constexpr T midpoint(T a, T b) noexcept {
+    return ((a ^ b) >> 1) + (a & b);
+    // fast rounding-down midpoint by Warren (Hacker's Delight section 2.5)
+    // rounding-up version would be '(a | b) - ((a ^ b) >> 1)'
+    // this is faster than C++20 'std::midpoint()' due to a different rounding mode
 }
 
-template <class FloatType, std::enable_if_t<std::is_floating_point<FloatType>::value, bool> = true>
-[[nodiscard]] constexpr FloatType rad_to_deg(FloatType radians) {
-    constexpr FloatType FACTOR = FloatType(180. / PI);
-    return radians * FACTOR;
+template <class T, require_arithmetic<T> = true>
+[[nodiscard]] constexpr T absdiff(T a, T b) noexcept {
+    return (a > b) ? (a - b) : (b - a);
 }
 
-// ====================
-// --- Memory Units ---
-// ====================
+// =======================
+// --- Power functions ---
+// =======================
 
-// Workaround for 'static_assert(false)' making program ill-formed even
-// when placed inide an 'if constexpr' branch that never compiles.
-// 'static_assert(_always_false_v<T>)' on the the other hand doesn't,
-// which means we can use it to mark branches that should never compile.
-template <class>
-inline constexpr bool _always_false_v = false;
-
-enum class MemoryUnit { BYTE, KiB, MiB, GiB, TiB, KB, MB, GB, TB };
-
-template <class T, MemoryUnit units = MemoryUnit::MiB>
-[[nodiscard]] constexpr double memory_size(std::size_t count) {
-    const double size_in_bytes = count * sizeof(T); // cast to double is critical here
-    if constexpr (units == MemoryUnit::BYTE) return size_in_bytes;
-    else if constexpr (units == MemoryUnit::KiB) return size_in_bytes / 1024.;
-    else if constexpr (units == MemoryUnit::MiB) return size_in_bytes / 1024. / 1024.;
-    else if constexpr (units == MemoryUnit::GiB) return size_in_bytes / 1024. / 1024. / 1024.;
-    else if constexpr (units == MemoryUnit::TiB) return size_in_bytes / 1024. / 1024. / 1024. / 1024.;
-    else if constexpr (units == MemoryUnit::KB) return size_in_bytes / 1000.;
-    else if constexpr (units == MemoryUnit::MB) return size_in_bytes / 1000. / 1000.;
-    else if constexpr (units == MemoryUnit::GB) return size_in_bytes / 1000. / 1000. / 1000.;
-    else if constexpr (units == MemoryUnit::TB) return size_in_bytes / 1000. / 1000. / 1000. / 1000.;
-    else static_assert(_always_false_v<T>, "Function is a non-exhaustive visitor of enum class {MemoryUnit}.");
+// Squaring algorithm for positive integer powers
+template <class T, class U, require_arithmetic<T> = true, require_int<U> = true>
+[[nodiscard]] constexpr T pow_squaring(T x, U p) noexcept {
+    if (p == U(0)) return T(1);
+    if (p == U(1)) return x;
+    const T half_pow = pow_squaring(x, p / 2);
+    return (p % U(2) == U(0)) ? half_pow * half_pow : half_pow * half_pow * x;
 }
 
-// ===============
-// --- Meshing ---
-// ===============
+template <class T, class U, require_arithmetic<T> = true, require_int<U> = true>
+[[nodiscard]] constexpr T pow(T x, U p) noexcept {
+    if constexpr (std::is_signed_v<T>) {
+        return (p < 0) ? T(1) / pow_squaring(x, -p) : pow_squaring(x, p);
+    } else {
+        return pow_squaring(x, p); // no need for the branch in unsigned case
+    }
+}
 
-// Semantic helpers that allow user to directly pass both interval/point counts for grid subdivision,
-// without thinking about whether function need +1 or -1 to its argument
-struct Points {
-    std::size_t count;
+[[nodiscard]] constexpr int signpow(int p) noexcept { return (p % 2 == 0) ? 1 : -1; }
 
-    Points() = delete;
-    explicit Points(std::size_t count) : count(count) {}
-};
+// =======================
+// --- Index functions ---
+// =======================
 
-struct Intervals {
-    std::size_t count;
+template <class T, require_int<T> = true>
+[[nodiscard]] constexpr T kronecker_delta(T i, T j) noexcept {
+    return (i == j) ? T(1) : T(0);
+}
 
-    Intervals() = delete;
-    explicit Intervals(std::size_t count) : count(count) {}
-    Intervals(Points points) : count(points.count - 1) {}
-};
+template <class T, require_int<T> = true>
+[[nodiscard]] constexpr T levi_civita(T i, T j, T k) noexcept {
+    if (i == j || j == k || k == i) return T(0);
+    const unsigned int inversions = (i > j) + (i > k) + (j > k);
+    return (inversions % 2 == 0) ? T(1) : T(-1);
+}
 
-template <class FloatType, std::enable_if_t<std::is_floating_point<FloatType>::value, bool> = true>
-[[nodiscard]] std::vector<FloatType> linspace(FloatType L1, FloatType L2, Intervals N) {
-    assert(L1 < L2);
-    assert(N.count >= 1);
+// ===================
+// --- Conversions ---
+// ===================
 
-    const FloatType step = (L2 - L1) / N.count;
+template <class T, require_float<T> = true>
+[[nodiscard]] constexpr T deg_to_rad(T degrees) noexcept {
+    constexpr T factor = T(constants::pi / 180.);
+    return degrees * factor;
+}
 
-    std::vector<FloatType> res(N.count + 1);
+template <class T, require_float<T> = true>
+[[nodiscard]] constexpr T rad_to_deg(T radians) noexcept {
+    constexpr T factor = T(180. / constants::pi);
+    return radians * factor;
+}
 
-    res[0] = L1;
-    for (std::size_t i = 1; i < res.size(); ++i) res[i] = res[i - 1] + step;
+// ===========================
+// --- Sequence operations ---
+// ===========================
 
+template <class Idx, class Func, require_invocable<Func, Idx> = true>
+[[nodiscard]] constexpr auto sum(Idx low, Idx high, Func&& func) noexcept(noexcept(func(Idx{}))) {
+    assert(low <= high);
+    std::invoke_result_t<Func, Idx> res = 0;
+    for (Idx i = low; i <= high; ++i) res += func(i);
     return res;
 }
 
-template <class FloatType, class FuncType, std::enable_if_t<std::is_floating_point<FloatType>::value, bool> = true,
-          std::enable_if_t<is_function_with_signature<FuncType, FloatType(FloatType)>::value, bool> = true>
-[[nodiscard]] FloatType integrate_trapezoidal(FuncType f, FloatType L1, FloatType L2, Intervals N) {
-    assert(L1 < L2);
-    assert(N.count >= 1);
-
-    const FloatType step = (L2 - L1) / N.count;
-
-    FloatType sum = 0;
-    FloatType x   = L1;
-
-    for (std::size_t i = 0; i < N.count; ++i, x += step) sum += f(x) + f(x + step);
-
-    return FloatType(0.5) * sum * step;
+template <class Idx, class Func, require_invocable<Func, Idx> = true>
+[[nodiscard]] constexpr auto prod(Idx low, Idx high, Func&& func) noexcept(noexcept(func(Idx{}))) {
+    assert(low <= high);
+    std::invoke_result_t<Func, Idx> res = 1;
+    for (Idx i = low; i <= high; ++i) res *= func(i);
+    return res;
 }
 
-// ====================
-// --- Permutations ---
-// ====================
+} // namespace utl::math::impl
 
-// template<class Idx = std::size_t>
-// class Range {
-//     Idx low;
-//     Idx high;
+// ______________________ PUBLIC API ______________________
 
-//     constexpr Range(Idx low, Idx high) : low(low), high(high) {}
+namespace utl::math {
 
-//     [[nodiscard]] constexpr Idx front() const noexcept { return this->low; }
-//     [[nodiscard]] constexpr Idx back() const noexcept { return this->high; }
-//     [[nodiscard]] constexpr Idx size() const noexcept { return this->high - this->low; }
-//     [[nodiscard]] constexpr Idx operator[](Idx pos) const noexcept { return this->low + pos; }
+namespace constants = impl::constants;
 
-//     // Iterator stuff
-// };
+using impl::abs;
+using impl::sign;
+using impl::bsign;
+using impl::sqr;
+using impl::cube;
+using impl::inv;
+using impl::heaviside;
 
-template <class ArrayType>
-bool is_permutation(const ArrayType& array) {
-    std::vector<std::size_t> p(array.size()); // Note: "non-allocating range adapter" would fit like a glove here
-    for (std::size_t i = 0; i < p.size(); ++i) p[i] = i;
+using impl::midpoint;
+using impl::absdiff;
 
-    return std::is_permutation(array.begin(), array.end(), p.begin()); // I'm surprised it exists in the standard
-}
+using impl::pow;
+using impl::signpow;
 
-template <class ArrayType, class PermutationType = std::initializer_list<std::size_t>>
-void apply_permutation(ArrayType& vector, const PermutationType& permutation) {
-    ArrayType res(vector.size());
+using impl::kronecker_delta;
+using impl::levi_civita;
 
-    typename ArrayType::size_type emplace_idx = 0;
-    for (auto i : permutation) res[emplace_idx++] = std::move(vector[i]);
-    vector = std::move(res);
-}
+using impl::deg_to_rad;
+using impl::rad_to_deg;
 
-template <class ArrayType, class Compare = std::less<>>
-std::vector<std::size_t> get_sorting_permutation(const ArrayType& array, Compare comp = Compare()) {
-    std::vector<std::size_t> permutation(array.size());
-    for (std::size_t i = 0; i < permutation.size(); ++i) permutation[i] = i;
-
-    std::sort(permutation.begin(), permutation.end(),
-              [&](const auto& lhs, const auto& rhs) { return comp(array[lhs], array[rhs]); });
-
-    return permutation;
-}
-
-template <class Array, class... SyncedArrays>
-void sort_together(Array& array, SyncedArrays&... synced_arrays) {
-    // Get permutation that would make the 1st array sorted
-    auto permutation = get_sorting_permutation(array);
-
-    // Apply permutation to all arrays to "sort them in sync"
-    apply_permutation(array, permutation);
-    (apply_permutation(synced_arrays, permutation), ...);
-}
-
-// ====================
-// --- Misc helpers ---
-// ====================
-
-template <class UintType, std::enable_if_t<std::is_integral<UintType>::value, bool> = true>
-[[nodiscard]] constexpr UintType uint_difference(UintType a, UintType b) {
-    // Cast to widest type if there is a change values don't fit into a regular 'int'
-    using WiderIntType = std::conditional_t<(sizeof(UintType) >= sizeof(int)), int64_t, int>;
-
-    return static_cast<UintType>(utl::math::abs(static_cast<WiderIntType>(a) - static_cast<WiderIntType>(b)));
-}
-
-template <class SizedContainer, std::enable_if_t<utl::math::is_sized<SizedContainer>::value, bool> = true>
-[[nodiscard]] int ssize(const SizedContainer& container) {
-    return static_cast<int>(container.size());
-}
-
-template <class ArithmeticType, std::enable_if_t<std::is_arithmetic<ArithmeticType>::value, bool> = true>
-[[nodiscard]] constexpr ArithmeticType ternary_branchless(bool condition, ArithmeticType return_if_true,
-                                                          ArithmeticType return_if_false) {
-    return (condition * return_if_true) + (!condition * return_if_false);
-}
-
-template <class IntType, std::enable_if_t<std::is_integral<IntType>::value, bool> = true>
-[[nodiscard]] constexpr IntType ternary_bitselect(bool condition, IntType return_if_true, IntType return_if_false) {
-    return (return_if_true & -IntType(condition)) | (return_if_false & ~(-IntType(condition)));
-}
-
-template <class IntType, std::enable_if_t<std::is_integral<IntType>::value, bool> = true>
-[[nodiscard]] constexpr IntType ternary_bitselect(bool condition, IntType return_if_true) {
-    return return_if_true & -IntType(condition);
-}
+using impl::sum;
+using impl::prod;
 
 } // namespace utl::math
 
@@ -3541,23 +5582,24 @@ template <class IntType, std::enable_if_t<std::is_integral<IntType>::value, bool
 //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-#if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_MVL)
-#ifndef UTLHEADERGUARD_MVL
-#define UTLHEADERGUARD_MVL
+#if !defined(UTL_PICK_MODULES) || defined(UTL_MODULE_MVL)
+
+#ifndef utl_mvl_headerguard
+#define utl_mvl_headerguard
+
+#define UTL_MVL_VERSION_MAJOR 0 // [!] module in early experimental stage,
+#define UTL_MVL_VERSION_MINOR 1 //     functional, but needs significant work
+#define UTL_MVL_VERSION_PATCH 3 //     to complete and bring up-to-date
 
 // _______________________ INCLUDES _______________________
 
-#include <algorithm>        // swap(), find(), count(), is_sorted(), min_element(),
-                            // max_element(), sort(), stable_sort(), min(), max(), remove_if(), copy()
+#include <algorithm>        // swap(), find(), count(), is_sorted(), min_element(), max_element(), ...
 #include <cassert>          // assert() // Note: Perhaps temporary
 #include <charconv>         // to_chars()
 #include <cmath>            // isfinite()
 #include <cstddef>          // size_t, ptrdiff_t, nullptr_t
-#include <exception>        // exception
 #include <functional>       // reference_wrapper<>, multiplies<>
 #include <initializer_list> // initializer_list<>
-#include <iomanip>          // setw()
-#include <ios>              // right(), boolalpha(), ios::boolalpha
 #include <iterator>         // random_access_iterator_tag, reverse_iterator<>
 #include <memory>           // unique_ptr<>
 #include <numeric>          // accumulate()
@@ -3572,13 +5614,16 @@ template <class IntType, std::enable_if_t<std::is_integral<IntType>::value, bool
 
 // ____________________ DEVELOPER DOCS ____________________
 
+// [experimental!] This header is still work in progress and likely to undergo significant changes to
+// its API & implementation.
+//
 // This module tries to implement an "unreasonably flexible yet convenient" template for vectors and matrices,
 // in order to do so we have to rely heavily on either conditional compilation or automatic code generation
 // (or both). There are multiple seemingly viable approaches to it, yet the most of them proved to be either
 // unsuitable or unreasonable from the implementation standpoint. Below is a little rundown of implementations
 // that were attempted and used/discared for various reasons.
 //
-// Currently matrix/vector/view/etc code reuse is implemented though a whole buch of conditional compilation with
+// Currently matrix/vector/view/etc code reuse is implemented though a whole bunch of conditional compilation with
 // SFINAE, abuse of conditional inheritance, conditional types and constexpr if's. While not perfect, this is
 // the best working approach so far. Below is a list of approaches that has been considered & tried:
 //
@@ -3586,8 +5631,8 @@ template <class IntType, std::enable_if_t<std::is_integral<IntType>::value, bool
 //
 //    => [-] UNSUITABLE APPROACH
 //
-// 2) Regular OOP with virtual classes - having vtables in lightweigh containers is highly undesirable, we can
-//    avoid this using CRTP however we run into issues with multiple inheritance (see below)
+// 2) Regular OOP with virtual classes - having vtables in lightweight containers is highly undesirable,
+//    we can avoid this using CRTP however we run into issues with multiple inheritance (see below)
 //
 //    => [-] UNSUITABLE APPROACH
 //
@@ -3625,7 +5670,7 @@ template <class IntType, std::enable_if_t<std::is_integral<IntType>::value, bool
 //
 //    => [+-] SUITABLE, BUT HEAVILY FLAWED APPROACH
 //
-// 6) A single class with all pars of API correctly enabled/disabled through SFINAE. Closes thing to a sensible
+// 6) A single class with all parts of API correctly enabled/disabled through SFINAE. Closest thing to a sensible
 //    approach with minimal (basically none) code duplication. However it has a number of non-trivial quirks
 //    when it comes to conditionally compiling member variables, types & functions (every group has a quirk of
 //    its own, functions are the least problematic). Some of such quirks limit possible conditional API (member
@@ -3659,11 +5704,10 @@ namespace utl::mvl {
 // --- Type Traits ---
 // ===================
 
-// MARK:
 // Macro for generating type traits with all their boilerplate
 //
 // While it'd be nice to avoid macro usage alltogether, having a few macros for generating standardized boilerplate
-// that gets repeated several dosen times DRASTICALLY improves the maintainability of the whole conditional compilation
+// that gets repeated several dozen times DRASTICALLY improves the maintainability of the whole conditional compilation
 // mechanism down the line. They will be later #undef'ed.
 
 #define utl_mvl_define_trait(trait_name_, ...)                                                                         \
@@ -3724,8 +5768,6 @@ utl_mvl_define_trait_has_member(_is_tensor, is_tensor);
 utl_mvl_define_trait_has_member(_is_sparse_entry_1d, is_sparse_entry_1d);
 utl_mvl_define_trait_has_member(_is_sparse_entry_2d, is_sparse_entry_2d);
 
-// MARK:
-
 // =======================
 // --- Stringification ---
 // =======================
@@ -3763,8 +5805,12 @@ constexpr int _max_float_digits =
 template <class T>
 constexpr int _max_int_digits = 2 + std::numeric_limits<T>::digits10;
 
-// --- Stringifiers ---
-// --------------------
+// --- Stringifier ---
+// -------------------
+
+// TODO:
+// Replace or rethink all of this stringifying stuff, perhaps it would be best to just have a super-simple
+// one and let other functions take custom stringifier from 'utl::log'
 
 template <class T>
 void _append_stringified(std::string& str, const T& value);
@@ -3821,13 +5867,13 @@ void _append_stringified_array(std::string& str, const T& value) {
     str += " }";
 }
 
-template <class Tuplelike, std::size_t... Idx>
-void _append_stringified_tuple_impl(std::string& str, Tuplelike value, std::index_sequence<Idx...>) {
+template <class Tuple, std::size_t... Idx>
+void _append_stringified_tuple_impl(std::string& str, Tuple value, std::index_sequence<Idx...>) {
     ((Idx == 0 ? "" : str += ", ", _append_stringified(str, std::get<Idx>(value))), ...);
 }
 
-template <template <class...> class Tuplelike, class... Args>
-void _append_stringified_tuple(std::string& str, const Tuplelike<Args...>& value) {
+template <template <class...> class Tuple, class... Args>
+void _append_stringified_tuple(std::string& str, const Tuple<Args...>& value) {
     str += "< ";
     _append_stringified_tuple_impl(str, value, std::index_sequence_for<Args...>{});
     str += " >";
@@ -3907,7 +5953,7 @@ struct default_stringifier {
 // --- Helper Functions ---
 // ========================
 
-// Shortuct for labda-type-based SFINAE.
+// Shortcut for lambda-type-based SFINAE.
 //
 // Callables in this module are usually takes as a template type since 'std::function<>' introduces very significant
 // overhead with its type erasure. With template args all lambdas and functors can be nicely inlined, however we lose
@@ -3923,18 +5969,14 @@ template <class T>
     return std::unique_ptr<T[]>(new T[size]);
 }
 
-// Marker for uncreachable code
-[[noreturn]] inline void _unreachable() {
-// (Implementation from https://en.cppreference.com/w/cpp/utility/unreachable)
-// Use compiler specific extensions if possible.
-// Even if no extension is used, undefined behavior is still raised by
-// an empty function body and the noreturn attribute.
+// Macro version of 'std::unreachable()' implementation from https://en.cppreference.com/w/cpp/utility/unreachable
+// we use macro instead of a function to work around false-positive MSVC /W4 warnings about "unreachable code"
+// in a function that exists to mark unreachable code
 #if defined(_MSC_VER) && !defined(__clang__) // MSVC
-    __assume(false);
+#define utl_mvl_unreachable static_assert(true)
 #else // GCC, Clang
-    __builtin_unreachable();
+#define utl_mvl_unreachable __builtin_unreachable()
 #endif
-}
 
 // =======================
 // --- Utility Classes ---
@@ -3949,7 +5991,7 @@ template <class T>
 // '_utl_storage_define_types' macro in every class => we have all the member types defined).
 //
 // (!) Since CRTP approach has been deprecated in favor of mixins, the original reasoning is no longer
-// accurate, however it is this a useful class whenever a pack of types have to be passed through a
+// accurate, however it is this a useful class whenever a pack of types has to be passed through a
 // template (like, for example, in iterator implementation)
 template <class T>
 struct _types {
@@ -4102,7 +6144,7 @@ private:
 // ======================================
 
 // Note:
-// All sparse entries and multi-dimensional indeces can be sorted lexicographically
+// All sparse entries and multi-dimensional indices can be sorted lexicographically
 
 template <class T>
 struct SparseEntry1D {
@@ -4191,7 +6233,9 @@ template <class L, class R, class Op, _is_sparse_entry_2d_enable_if<R> = true>
 std::decay_t<R> _apply_binary_op_to_value_and_sparse_entry(L&& left_value, R&& right, Op&& op) {
     return {right.i, right.j, std::forward<Op>(op)(std::forward<L>(left_value), std::forward<R>(right).value)};
 }
-// MARK:
+
+// TODO:
+// Fix binary ops, figure out what the hell did I even do here
 
 // =============
 // --- Enums ---
@@ -4237,7 +6281,7 @@ using _are_tensors_with_same_value_type_enable_if =
 
 #define utl_mvl_tensor_arg_vals T, _dimension, _type, _ownership, _checking, _layout
 
-// Incredibly improtant macros used for conditional compilation of member functions.
+// Incredibly important macros used for conditional compilation of member functions.
 // They automatically create the boilerplate that makes member functions dependant on the template parameters,
 // which is necessary for conditional compilation and "forward" to a 'enable_if' condition.
 //
@@ -4253,7 +6297,7 @@ using _are_tensors_with_same_value_type_enable_if =
 
 #define utl_mvl_reqs(condition_) template <utl_mvl_require(condition_)>
 
-// A somewhat scuffed version of trait-definig macro used to create SFINAE-restrictions
+// A somewhat scuffed version of trait-defining macro used to create SFINAE-restrictions
 // on tensor params in free functions. Only supports trivial conditions of the form
 // '<parameter> [==][!=] <value>'. Perhaps there is a better way of doing it, but I'm not yet sure.
 //
@@ -4278,8 +6322,8 @@ utl_mvl_define_tensor_param_restriction(_is_matrix_tensor, dimension == Dimensio
 
 // Unlike class method, member values can't be templated, which prevents us from using regular 'enable_if_t' SFINAE
 // for their conditional compilation. The (seemingly) best workaround to compile members conditionally is to inherit
-// 'std::contidional<T, EmptyClass>' where 'T' is a "dummy" class with the sole purpose of having data members to
-// inherit. This does not introduce virtualiztion (which is good, that how we want it).
+// 'std::conditional<T, EmptyClass>' where 'T' is a "dummy" class with the sole purpose of having data members to
+// inherit. This does not introduce virtualization (which is good, that how we want it).
 
 template <int id>
 struct _nothing {};
@@ -4309,7 +6353,7 @@ struct _2d_dense_data {
 private:
     using value_type = typename _types<T>::value_type;
     using _data_t    = _choose_based_on_ownership<_ownership, std::unique_ptr<value_type[]>, _observer_ptr<value_type>,
-                                               _observer_ptr<const value_type>>;
+                                                  _observer_ptr<const value_type>>;
 
 public:
     _data_t _data;
@@ -4400,81 +6444,74 @@ public:
     [[nodiscard]] const_reverse_iterator rbegin() const { return this->crbegin(); }
     [[nodiscard]] const_reverse_iterator rend() const { return this->crend(); }
 
-    utl_mvl_reqs(ownership != Ownership::CONST_VIEW) [[nodiscard]] iterator begin() { return iterator(this, 0); }
+    utl_mvl_reqs(ownership != Ownership::CONST_VIEW)
+    [[nodiscard]] iterator begin() { return iterator(this, 0); }
 
-    utl_mvl_reqs(ownership != Ownership::CONST_VIEW) [[nodiscard]] iterator end() {
-        return iterator(this, this->size());
-    }
+    utl_mvl_reqs(ownership != Ownership::CONST_VIEW)
+    [[nodiscard]] iterator end() { return iterator(this, this->size()); }
 
-    utl_mvl_reqs(ownership != Ownership::CONST_VIEW) [[nodiscard]] reverse_iterator rbegin() {
-        return reverse_iterator(this->end());
-    }
+    utl_mvl_reqs(ownership != Ownership::CONST_VIEW)
+    [[nodiscard]] reverse_iterator rbegin() { return reverse_iterator(this->end()); }
 
-    utl_mvl_reqs(ownership != Ownership::CONST_VIEW) [[nodiscard]] reverse_iterator rend() {
-        return reverse_iterator(this->begin());
-    }
+    utl_mvl_reqs(ownership != Ownership::CONST_VIEW)
+    [[nodiscard]] reverse_iterator rend() { return reverse_iterator(this->begin()); }
 
     // --- Basic getters ---
     // ---------------------
 public:
     utl_mvl_reqs(dimension == Dimension::MATRIX && (type == Type::DENSE || type == Type::STRIDED))
-        [[nodiscard]] size_type size() const noexcept {
-        return this->rows() * this->cols();
-    }
+    [[nodiscard]] size_type size() const noexcept { return this->rows() * this->cols(); }
 
-    utl_mvl_reqs(type == Type::SPARSE) [[nodiscard]] size_type size() const noexcept { return this->_data.size(); }
+    utl_mvl_reqs(type == Type::SPARSE)
+    [[nodiscard]] size_type size() const noexcept { return this->_data.size(); }
 
-    utl_mvl_reqs(dimension == Dimension::MATRIX) [[nodiscard]] size_type rows() const noexcept { return this->_rows; }
+    utl_mvl_reqs(dimension == Dimension::MATRIX)
+    [[nodiscard]] size_type rows() const noexcept { return this->_rows; }
 
-    utl_mvl_reqs(dimension == Dimension::MATRIX) [[nodiscard]] size_type cols() const noexcept { return this->_cols; }
+    utl_mvl_reqs(dimension == Dimension::MATRIX)
+    [[nodiscard]] size_type cols() const noexcept { return this->_cols; }
 
-    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::DENSE) [[nodiscard]] constexpr size_type
-        row_stride() const noexcept {
+    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::DENSE)
+    [[nodiscard]] constexpr size_type row_stride() const noexcept {
         if constexpr (self::params::layout == Layout::RC) return 0;
         if constexpr (self::params::layout == Layout::CR) return 1;
-        _unreachable();
+        utl_mvl_unreachable;
     }
 
-    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::DENSE) [[nodiscard]] constexpr size_type
-        col_stride() const noexcept {
+    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::DENSE)
+    [[nodiscard]] constexpr size_type col_stride() const noexcept {
         if constexpr (self::params::layout == Layout::RC) return 1;
         if constexpr (self::params::layout == Layout::CR) return 0;
-        _unreachable();
+        utl_mvl_unreachable;
     }
-    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::STRIDED) [[nodiscard]] size_type
-        row_stride() const noexcept {
-        return this->_row_stride;
-    }
+    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::STRIDED)
+    [[nodiscard]] size_type row_stride() const noexcept { return this->_row_stride; }
 
-    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::STRIDED) [[nodiscard]] size_type
-        col_stride() const noexcept {
-        return this->_col_stride;
-    }
+    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::STRIDED)
+    [[nodiscard]] size_type col_stride() const noexcept { return this->_col_stride; }
 
-    utl_mvl_reqs(type == Type::DENSE || type == Type::STRIDED) [[nodiscard]] const_pointer data() const noexcept {
-        return this->_data.get();
-    }
+    utl_mvl_reqs(type == Type::DENSE || type == Type::STRIDED)
+    [[nodiscard]] const_pointer data() const noexcept { return this->_data.get(); }
 
     utl_mvl_reqs(ownership != Ownership::CONST_VIEW && (type == Type::DENSE || type == Type::STRIDED))
-        [[nodiscard]] pointer data() noexcept {
-        return this->_data.get();
-    }
+    [[nodiscard]] pointer data() noexcept { return this->_data.get(); }
 
     [[nodiscard]] bool empty() const noexcept { return (this->size() == 0); }
 
     // --- Advanced getters ---
     // ------------------------
-    utl_mvl_reqs(_has_binary_op_equal<value_type>::value) [[nodiscard]] bool contains(const_reference value) const {
+    utl_mvl_reqs(_has_binary_op_equal<value_type>::value)
+    [[nodiscard]] bool contains(const_reference value) const {
         return std::find(this->cbegin(), this->cend(), value) != this->cend();
     }
 
-    utl_mvl_reqs(_has_binary_op_equal<value_type>::value) [[nodiscard]] size_type count(const_reference value) const {
+    utl_mvl_reqs(_has_binary_op_equal<value_type>::value)
+    [[nodiscard]] size_type count(const_reference value) const {
         return std::count(this->cbegin(), this->cend(), value);
     }
 
-    utl_mvl_reqs(_has_binary_op_less<value_type>::value) [[nodiscard]] bool is_sorted() const {
-        return std::is_sorted(this->cbegin(), this->cend());
-    }
+    utl_mvl_reqs(_has_binary_op_less<value_type>::value)
+    [[nodiscard]] bool is_sorted() const { return std::is_sorted(this->cbegin(), this->cend()); }
 
     template <class Compare>
     [[nodiscard]] bool is_sorted(Compare cmp) const {
@@ -4483,15 +6520,18 @@ public:
 
     [[nodiscard]] std::vector<value_type> to_std_vector() const { return std::vector(this->cbegin(), this->cend()); }
 
-    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::DENSE) self transposed() const {
+    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::DENSE)
+    self transposed() const {
         self res(this->cols(), this->rows());
         this->for_each([&](const value_type& element, size_type i, size_type j) { res(j, i) = element; });
         return res;
     }
 
-    utl_mvl_reqs(ownership == Ownership::CONTAINER) [[nodiscard]] self clone() const { return *this; }
+    utl_mvl_reqs(ownership == Ownership::CONTAINER)
+    [[nodiscard]] self clone() const { return *this; }
 
-    utl_mvl_reqs(ownership == Ownership::CONTAINER) [[nodiscard]] self move() & { return std::move(*this); }
+    utl_mvl_reqs(ownership == Ownership::CONTAINER)
+    [[nodiscard]] self move() & { return std::move(*this); }
 
     template <Type other_type, Ownership other_ownership, Checking other_checking, Layout other_layout>
     [[nodiscard]] bool
@@ -4509,7 +6549,8 @@ public:
         }
         // Different sparsity comparison
         // TODO: Impl here and use .all_of() OR .any_of()
-        return true;
+        else
+            return true;
     }
 
     // --- Indexation ---
@@ -4522,32 +6563,33 @@ public:
     [[nodiscard]] reference       back() { return this->operator[](this->size() - 1); }
 
 private:
-    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::STRIDED) [[nodiscard]] size_type
-        _get_memory_offset_strided_impl(size_type idx, size_type i, size_type j) const {
+    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::STRIDED)
+    [[nodiscard]] size_type _get_memory_offset_strided_impl(size_type idx, size_type i, size_type j) const {
         if constexpr (self::params::layout == Layout::RC) return idx * this->col_stride() + this->row_stride() * i;
         if constexpr (self::params::layout == Layout::CR) return idx * this->row_stride() + this->col_stride() * j;
-        _unreachable();
+        utl_mvl_unreachable;
     }
 
 public:
-    utl_mvl_reqs(type == Type::DENSE) [[nodiscard]] size_type get_memory_offset_of_idx(size_type idx) const {
+    utl_mvl_reqs(type == Type::DENSE)
+    [[nodiscard]] size_type get_memory_offset_of_idx(size_type idx) const {
         if constexpr (self::params::checking == Checking::BOUNDS) this->_bound_check_idx(idx);
         return idx;
     }
 
-    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::DENSE) [[nodiscard]] size_type
-        get_memory_offset_of_ij(size_type i, size_type j) const {
+    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::DENSE)
+    [[nodiscard]] size_type get_memory_offset_of_ij(size_type i, size_type j) const {
         return this->get_idx_of_ij(i, j);
     }
 
-    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::STRIDED) [[nodiscard]] size_type
-        get_memory_offset_of_idx(size_type idx) const {
+    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::STRIDED)
+    [[nodiscard]] size_type get_memory_offset_of_idx(size_type idx) const {
         const auto ij = this->get_ij_of_idx(idx);
         return _get_memory_offset_strided_impl(idx, ij.i, ij.j);
     }
 
-    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::STRIDED) [[nodiscard]] size_type
-        get_memory_offset_of_ij(size_type i, size_type j) const {
+    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::STRIDED)
+    [[nodiscard]] size_type get_memory_offset_of_ij(size_type i, size_type j) const {
         const auto idx = this->get_idx_of_ij(i, j);
         return _get_memory_offset_strided_impl(idx, i, j);
     }
@@ -4555,51 +6597,45 @@ public:
 public:
     // - Flat indexation -
     utl_mvl_reqs(ownership != Ownership::CONST_VIEW && dimension == Dimension::MATRIX &&
-                 (type == Type::DENSE || type == Type::STRIDED)) [[nodiscard]] reference
-    operator[](size_type idx) {
-        return this->data()[this->get_memory_offset_of_idx(idx)];
-    }
+                 (type == Type::DENSE || type == Type::STRIDED))
+    [[nodiscard]] reference operator[](size_type idx) { return this->data()[this->get_memory_offset_of_idx(idx)]; }
 
     utl_mvl_reqs(dimension == Dimension::MATRIX && (type == Type::DENSE || type == Type::STRIDED))
-        [[nodiscard]] const_reference
-        operator[](size_type idx) const {
+    [[nodiscard]] const_reference operator[](size_type idx) const {
         return this->data()[this->get_memory_offset_of_idx(idx)];
     }
 
     utl_mvl_reqs(ownership != Ownership::CONST_VIEW && dimension == Dimension::VECTOR || type == Type::SPARSE)
-        [[nodiscard]] reference
-        operator[](size_type idx) {
+    [[nodiscard]] reference operator[](size_type idx) {
         if constexpr (self::params::checking == Checking::BOUNDS) this->_bound_check_idx(idx);
         return this->_data[idx].value;
     }
 
-    utl_mvl_reqs(dimension == Dimension::VECTOR || type == Type::SPARSE) [[nodiscard]] const_reference
-    operator[](size_type idx) const {
+    utl_mvl_reqs(dimension == Dimension::VECTOR || type == Type::SPARSE)
+    [[nodiscard]] const_reference operator[](size_type idx) const {
         if constexpr (self::params::checking == Checking::BOUNDS) this->_bound_check_idx(idx);
         return this->_data[idx].value;
     }
 
     // - 2D indexation -
     utl_mvl_reqs(ownership != Ownership::CONST_VIEW && dimension == Dimension::MATRIX &&
-                 (type == Type::DENSE || type == Type::STRIDED)) [[nodiscard]] reference
-    operator()(size_type i, size_type j) {
+                 (type == Type::DENSE || type == Type::STRIDED))
+    [[nodiscard]] reference operator()(size_type i, size_type j) {
         return this->data()[this->get_memory_offset_of_ij(i, j)];
     }
 
     utl_mvl_reqs(dimension == Dimension::MATRIX && (type == Type::DENSE || type == Type::STRIDED))
-        [[nodiscard]] const_reference
-        operator()(size_type i, size_type j) const {
+    [[nodiscard]] const_reference operator()(size_type i, size_type j) const {
         return this->data()[this->get_memory_offset_of_ij(i, j)];
     }
 
     utl_mvl_reqs(ownership != Ownership::CONST_VIEW && dimension == Dimension::MATRIX && type == Type::SPARSE)
-        [[nodiscard]] reference
-        operator()(size_type i, size_type j) {
+    [[nodiscard]] reference operator()(size_type i, size_type j) {
         if constexpr (self::params::checking == Checking::BOUNDS) this->_bound_check_idx(i, j);
         return this->_data[this->get_idx_of_ij(i, j)].value;
     }
-    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::SPARSE) [[nodiscard]] const_reference
-    operator()(size_type i, size_type j) const {
+    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::SPARSE)
+    [[nodiscard]] const_reference operator()(size_type i, size_type j) const {
         if constexpr (self::params::checking == Checking::BOUNDS) this->_bound_check_idx(i, j);
         return this->_data[this->get_idx_of_ij(i, j)].value;
     }
@@ -4615,7 +6651,8 @@ private:
                 stringify("idx (which is ", idx, ") >= this->size() (which is ", this->size(), ")"));
     }
 
-    utl_mvl_reqs(dimension == Dimension::MATRIX) void _bound_check_ij(size_type i, size_type j) const {
+    utl_mvl_reqs(dimension == Dimension::MATRIX)
+    void _bound_check_ij(size_type i, size_type j) const {
         if (i >= this->rows())
             throw std::out_of_range(stringify("i (which is ", i, ") >= this->rows() (which is ", this->rows(), ")"));
         else if (j >= this->cols())
@@ -4625,21 +6662,21 @@ private:
     // - Dense & strided implementations -
 private:
     utl_mvl_reqs(dimension == Dimension::MATRIX && (type == Type::DENSE || type == Type::STRIDED))
-        [[nodiscard]] size_type _unchecked_get_idx_of_ij(size_type i, size_type j) const {
+    [[nodiscard]] size_type _unchecked_get_idx_of_ij(size_type i, size_type j) const {
         if constexpr (self::params::layout == Layout::RC) return i * this->cols() + j;
         if constexpr (self::params::layout == Layout::CR) return j * this->rows() + i;
-        _unreachable();
+        utl_mvl_unreachable;
     }
 
-    utl_mvl_reqs(dimension == Dimension::MATRIX && (type == Type::DENSE || type == Type::STRIDED)) [[nodiscard]] Index2D
-        _unchecked_get_ij_of_idx(size_type idx) const {
+    utl_mvl_reqs(dimension == Dimension::MATRIX && (type == Type::DENSE || type == Type::STRIDED))
+    [[nodiscard]] Index2D _unchecked_get_ij_of_idx(size_type idx) const {
         if constexpr (self::params::layout == Layout::RC) return {idx / this->cols(), idx % this->cols()};
         if constexpr (self::params::layout == Layout::CR) return {idx % this->rows(), idx / this->rows()};
-        _unreachable();
+        utl_mvl_unreachable;
     }
 
     utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::STRIDED && ownership == Ownership::CONTAINER)
-        [[nodiscard]] size_type _total_allocated_size() const noexcept {
+    [[nodiscard]] size_type _total_allocated_size() const noexcept {
         // Note 1: Allocated size of the strided matrix is NOT equal to .size() (which is same as rows * cols)
         // This is due to all the padding between the actual elements
         // Note 2: The question of whether .size() should return the number of 'strided' elements or the number
@@ -4653,40 +6690,40 @@ private:
             return (this->rows() - 1) * this->row_stride() + this->rows() * this->cols() * this->col_stride();
         if constexpr (self::params::layout == Layout::CR)
             return (this->cols() - 1) * this->col_stride() + this->rows() * this->cols() * this->row_stride();
-        _unreachable();
+        utl_mvl_unreachable;
     }
 
 public:
     utl_mvl_reqs(dimension == Dimension::MATRIX && (type == Type::DENSE || type == Type::STRIDED))
-        [[nodiscard]] size_type get_idx_of_ij(size_type i, size_type j) const {
+    [[nodiscard]] size_type get_idx_of_ij(size_type i, size_type j) const {
         if constexpr (self::params::checking == Checking::BOUNDS) this->_bound_check_ij(i, j);
         return _unchecked_get_idx_of_ij(i, j);
     }
 
-    utl_mvl_reqs(dimension == Dimension::MATRIX && (type == Type::DENSE || type == Type::STRIDED)) [[nodiscard]] Index2D
-        get_ij_of_idx(size_type idx) const {
+    utl_mvl_reqs(dimension == Dimension::MATRIX && (type == Type::DENSE || type == Type::STRIDED))
+    [[nodiscard]] Index2D get_ij_of_idx(size_type idx) const {
         if constexpr (self::params::checking == Checking::BOUNDS) this->_bound_check_idx(idx);
         return _unchecked_get_ij_of_idx(idx);
     }
 
     utl_mvl_reqs(dimension == Dimension::MATRIX && (type == Type::DENSE || type == Type::STRIDED))
-        [[nodiscard]] size_type extent_major() const noexcept {
+    [[nodiscard]] size_type extent_major() const noexcept {
         if constexpr (self::params::layout == Layout::RC) return this->rows();
         if constexpr (self::params::layout == Layout::CR) return this->cols();
-        _unreachable();
+        utl_mvl_unreachable;
     }
 
     utl_mvl_reqs(dimension == Dimension::MATRIX && (type == Type::DENSE || type == Type::STRIDED))
-        [[nodiscard]] size_type extent_minor() const noexcept {
+    [[nodiscard]] size_type extent_minor() const noexcept {
         if constexpr (self::params::layout == Layout::RC) return this->cols();
         if constexpr (self::params::layout == Layout::CR) return this->rows();
-        _unreachable();
+        utl_mvl_unreachable;
     }
 
     // - Sparse implementations -
 private:
-    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::SPARSE) [[nodiscard]] size_type
-        _search_ij(size_type i, size_type j) const noexcept {
+    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::SPARSE)
+    [[nodiscard]] size_type _search_ij(size_type i, size_type j) const noexcept {
         // Returns this->size() if {i, j} wasn't found.
         // Linear search for small .size() (more efficient fue to prediction and cache locality)
         if (true) {
@@ -4698,8 +6735,8 @@ private:
     }
 
 public:
-    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::SPARSE) [[nodiscard]] size_type
-        get_idx_of_ij(size_type i, size_type j) const {
+    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::SPARSE)
+    [[nodiscard]] size_type get_idx_of_ij(size_type i, size_type j) const {
         const size_type idx = this->_search_ij(i, j);
         // Return this->size() if {i, j} wasn't found. Throw with bound checking.
         if constexpr (self::params::checking == Checking::BOUNDS)
@@ -4708,34 +6745,32 @@ public:
         return idx;
     }
 
-    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::SPARSE) [[nodiscard]] Index2D
-        get_ij_of_idx(size_type idx) const {
+    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::SPARSE)
+    [[nodiscard]] Index2D get_ij_of_idx(size_type idx) const {
         if constexpr (self::params::checking == Checking::BOUNDS) this->_bound_check_idx(idx);
         return Index2D{this->_data[idx].i, this->_data[idx].j};
     }
 
     utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::SPARSE)
-        [[nodiscard]] bool contains_index(size_type i, size_type j) const noexcept {
+    [[nodiscard]] bool contains_index(size_type i, size_type j) const noexcept {
         return this->_search_ij(i, j) != this->size();
     }
 
     // --- Reductions ---
     // ------------------
-    utl_mvl_reqs(_has_binary_op_plus<value_type>::value) [[nodiscard]] value_type sum() const {
-        return std::accumulate(this->cbegin(), this->cend(), value_type());
-    }
+    utl_mvl_reqs(_has_binary_op_plus<value_type>::value)
+    [[nodiscard]] value_type sum() const { return std::accumulate(this->cbegin(), this->cend(), value_type()); }
 
-    utl_mvl_reqs(_has_binary_op_multiplies<value_type>::value) [[nodiscard]] value_type product() const {
+    utl_mvl_reqs(_has_binary_op_multiplies<value_type>::value)
+    [[nodiscard]] value_type product() const {
         return std::accumulate(this->cbegin(), this->cend(), value_type(), std::multiplies<value_type>());
     }
 
-    utl_mvl_reqs(_has_binary_op_less<value_type>::value) [[nodiscard]] value_type min() const {
-        return *std::min_element(this->cbegin(), this->cend());
-    }
+    utl_mvl_reqs(_has_binary_op_less<value_type>::value)
+    [[nodiscard]] value_type min() const { return *std::min_element(this->cbegin(), this->cend()); }
 
-    utl_mvl_reqs(_has_binary_op_less<value_type>::value) [[nodiscard]] value_type max() const {
-        return *std::max_element(this->cbegin(), this->cend());
-    }
+    utl_mvl_reqs(_has_binary_op_less<value_type>::value)
+    [[nodiscard]] value_type max() const { return *std::max_element(this->cbegin(), this->cend()); }
 
     // --- Predicate operations ---
     // ----------------------------
@@ -4767,14 +6802,14 @@ public:
 
     template <class PredType, _has_signature_enable_if<PredType, bool(const_reference)> = true>
     [[nodiscard]] bool true_for_all(PredType predicate) const {
-        auto inversed_predicate = [&](const_reference e) -> bool { return !predicate(e); };
-        return !this->true_for_any(inversed_predicate);
+        auto inverse_predicate = [&](const_reference e) -> bool { return !predicate(e); };
+        return !this->true_for_any(inverse_predicate);
     }
 
     template <class PredType, _has_signature_enable_if<PredType, bool(const_reference, size_type)> = true>
     [[nodiscard]] bool true_for_all(PredType predicate) const {
-        auto inversed_predicate = [&](const_reference e, size_type idx) -> bool { return !predicate(e, idx); };
-        return !this->true_for_any(inversed_predicate);
+        auto inverse_predicate = [&](const_reference e, size_type idx) -> bool { return !predicate(e, idx); };
+        return !this->true_for_any(inverse_predicate);
     }
 
     template <class PredType, _has_signature_enable_if<PredType, bool(const_reference, size_type, size_type)> = true,
@@ -4782,10 +6817,10 @@ public:
     [[nodiscard]] bool true_for_all(PredType predicate) const {
         // We can reuse .true_for_any() with inverted predicate due to following conjecture:
         // FOR_ALL (predicate)  ~  ! FOR_ANY (!predicate)
-        auto inversed_predicate = [&](const_reference e, size_type i, size_type j) -> bool {
+        auto inverse_predicate = [&](const_reference e, size_type i, size_type j) -> bool {
             return !predicate(e, i, j);
         };
-        return !this->true_for_any(inversed_predicate);
+        return !this->true_for_any(inverse_predicate);
     }
 
     // --- Const algorithms ---
@@ -4862,7 +6897,8 @@ public:
         return this->for_each(func_wrapper);
     }
 
-    utl_mvl_reqs(ownership != Ownership::CONST_VIEW) self& fill(const_reference value) {
+    utl_mvl_reqs(ownership != Ownership::CONST_VIEW)
+    self& fill(const_reference value) {
         for (size_type idx = 0; idx < this->size(); ++idx) this->operator[](idx) = value;
         return *this;
     }
@@ -4899,11 +6935,13 @@ public:
         return *this;
     }
 
-    utl_mvl_reqs(ownership != Ownership::CONST_VIEW && _has_binary_op_less<value_type>::value) self& sort() {
+    utl_mvl_reqs(ownership != Ownership::CONST_VIEW && _has_binary_op_less<value_type>::value)
+    self& sort() {
         std::sort(this->begin(), this->end());
         return *this;
     }
-    utl_mvl_reqs(ownership != Ownership::CONST_VIEW && _has_binary_op_less<value_type>::value) self& stable_sort() {
+    utl_mvl_reqs(ownership != Ownership::CONST_VIEW && _has_binary_op_less<value_type>::value)
+    self& stable_sort() {
         std::stable_sort(this->begin(), this->end());
         return *this;
     }
@@ -4956,12 +6994,13 @@ public:
         return sparse_const_view_type(this->rows(), this->cols(), std::move(triplets));
     }
 
-    utl_mvl_reqs(dimension == Dimension::MATRIX) [[nodiscard]] sparse_const_view_type diagonal() const {
+    utl_mvl_reqs(dimension == Dimension::MATRIX)
+    [[nodiscard]] sparse_const_view_type diagonal() const {
         // Sparse matrices have no better way of getting a diagonal than filtering (i ==j)
         if constexpr (self::params::type == Type::SPARSE) {
             return this->filter([](const_reference, size_type i, size_type j) { return i == j; });
         }
-        // Non-sparce matrices can just iterate over diagonal directly
+        // Non-sparse matrices can just iterate over diagonal directly
         else {
             const size_type     min_size = std::min(this->rows(), this->cols());
             _cref_triplet_array triplets;
@@ -5019,12 +7058,12 @@ public:
         return sparse_view_type(this->rows(), this->cols(), std::move(triplets));
     }
 
-    utl_mvl_reqs(dimension == Dimension::MATRIX && ownership != Ownership::CONST_VIEW) [[nodiscard]] sparse_view_type
-        diagonal() {
+    utl_mvl_reqs(dimension == Dimension::MATRIX && ownership != Ownership::CONST_VIEW)
+    [[nodiscard]] sparse_view_type diagonal() {
         /* Sparse matrices have no better way of getting a diagonal than filtering (i == j) */
         if constexpr (self::params::type == Type::SPARSE) {
             return this->filter([](const_reference, size_type i, size_type j) { return i == j; });
-        } /* Non-sparce matrices can just iterate over diagonal directly */
+        } /* Non-sparse matrices can just iterate over diagonal directly */
         else {
             const size_type    min_size = std::min(this->rows(), this->cols());
             _ref_triplet_array triplets;
@@ -5043,8 +7082,9 @@ public:
                            GenericTensor<value_type, self::params::dimension, Type::STRIDED, Ownership::CONST_VIEW,
                                          self::params::checking, self::params::layout>>;
 
-    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::SPARSE) [[nodiscard]] block_const_view_type
-        block(size_type block_i, size_type block_j, size_type block_rows, size_type block_cols) const {
+    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::SPARSE)
+    [[nodiscard]] block_const_view_type block(size_type block_i, size_type block_j, size_type block_rows,
+                                              size_type block_cols) const {
         // Sparse matrices have no better way of getting a block than filtering by { i, j }
 
         // Do the same thing as in .filter(), but shrink resulting view size to
@@ -5062,8 +7102,9 @@ public:
         return block_const_view_type(block_rows, block_cols, std::move(triplets));
     }
 
-    utl_mvl_reqs(dimension == Dimension::MATRIX && type != Type::SPARSE) [[nodiscard]] block_const_view_type
-        block(size_type block_i, size_type block_j, size_type block_rows, size_type block_cols) const {
+    utl_mvl_reqs(dimension == Dimension::MATRIX && type != Type::SPARSE)
+    [[nodiscard]] block_const_view_type block(size_type block_i, size_type block_j, size_type block_rows,
+                                              size_type block_cols) const {
         if constexpr (self::params::layout == Layout::RC) {
             const size_type row_stride = this->row_stride() + this->col_stride() * (this->cols() - block_cols);
             const size_type col_stride = this->col_stride();
@@ -5076,16 +7117,14 @@ public:
             return block_const_view_type(block_rows, block_cols, row_stride, col_stride,
                                          &this->operator()(block_i, block_j));
         }
-        _unreachable();
+        utl_mvl_unreachable;
     }
 
-    utl_mvl_reqs(dimension == Dimension::MATRIX) [[nodiscard]] block_const_view_type row(size_type i) const {
-        return this->block(i, 0, 1, this->cols());
-    }
+    utl_mvl_reqs(dimension == Dimension::MATRIX)
+    [[nodiscard]] block_const_view_type row(size_type i) const { return this->block(i, 0, 1, this->cols()); }
 
-    utl_mvl_reqs(dimension == Dimension::MATRIX) [[nodiscard]] block_const_view_type col(size_type j) const {
-        return this->block(0, j, this->rows(), 1);
-    }
+    utl_mvl_reqs(dimension == Dimension::MATRIX)
+    [[nodiscard]] block_const_view_type col(size_type j) const { return this->block(0, j, this->rows(), 1); }
 
     // - Mutable views -
     using block_view_type =
@@ -5094,8 +7133,8 @@ public:
                                          self::params::checking, self::params::layout>>;
 
     utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::SPARSE && ownership != Ownership::CONST_VIEW)
-        [[nodiscard]] block_view_type
-        block(size_type block_i, size_type block_j, size_type block_rows, size_type block_cols) {
+    [[nodiscard]] block_view_type block(size_type block_i, size_type block_j, size_type block_rows,
+                                        size_type block_cols) {
         // Sparse matrices have no better way of getting a block than filtering by { i, j }
 
         // Do the same thing as in .filter(), but shrink resulting view size to
@@ -5114,8 +7153,8 @@ public:
     }
 
     utl_mvl_reqs(dimension == Dimension::MATRIX && type != Type::SPARSE && ownership != Ownership::CONST_VIEW)
-        [[nodiscard]] block_view_type
-        block(size_type block_i, size_type block_j, size_type block_rows, size_type block_cols) {
+    [[nodiscard]] block_view_type block(size_type block_i, size_type block_j, size_type block_rows,
+                                        size_type block_cols) {
         if constexpr (self::params::layout == Layout::RC) {
             const size_type row_stride = this->row_stride() + this->col_stride() * (this->cols() - block_cols);
             const size_type col_stride = this->col_stride();
@@ -5126,18 +7165,14 @@ public:
             const size_type col_stride = this->col_stride() + this->row_stride() * (this->rows() - block_rows);
             return block_view_type(block_rows, block_cols, row_stride, col_stride, &this->operator()(block_i, block_j));
         }
-        _unreachable();
+        utl_mvl_unreachable;
     }
 
-    utl_mvl_reqs(dimension == Dimension::MATRIX && ownership != Ownership::CONST_VIEW) [[nodiscard]] block_view_type
-        row(size_type i) {
-        return this->block(i, 0, 1, this->cols());
-    }
+    utl_mvl_reqs(dimension == Dimension::MATRIX && ownership != Ownership::CONST_VIEW)
+    [[nodiscard]] block_view_type row(size_type i) { return this->block(i, 0, 1, this->cols()); }
 
-    utl_mvl_reqs(dimension == Dimension::MATRIX && ownership != Ownership::CONST_VIEW) [[nodiscard]] block_view_type
-        col(size_type j) {
-        return this->block(0, j, this->rows(), 1);
-    }
+    utl_mvl_reqs(dimension == Dimension::MATRIX && ownership != Ownership::CONST_VIEW)
+    [[nodiscard]] block_view_type col(size_type j) { return this->block(0, j, this->rows(), 1); }
 
     // --- Sparse operations ---
     // -------------------------
@@ -5150,17 +7185,14 @@ private:
 public:
     using sparse_entry_type = _triplet_t;
 
-    utl_mvl_reqs(type == Type::SPARSE) [[nodiscard]] const std::vector<sparse_entry_type>& entries() const noexcept {
-        return this->_data;
-    }
+    utl_mvl_reqs(type == Type::SPARSE)
+    [[nodiscard]] const std::vector<sparse_entry_type>& entries() const noexcept { return this->_data; }
 
     utl_mvl_reqs(type == Type::SPARSE && ownership != Ownership::CONST_VIEW)
-        [[nodiscard]] std::vector<sparse_entry_type>& entries() noexcept {
-        return this->_data;
-    }
+    [[nodiscard]] std::vector<sparse_entry_type>& entries() noexcept { return this->_data; }
 
-    utl_mvl_reqs(dimension == Dimension::MATRIX &&
-                 type == Type::SPARSE) self& insert_triplets(const std::vector<sparse_entry_type>& triplets) {
+    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::SPARSE)
+    self& insert_triplets(const std::vector<sparse_entry_type>& triplets) {
         // Bulk-insert triplets and sort by index
         const auto ordering = [](const sparse_entry_type& l, const sparse_entry_type& r) -> bool {
             return (l.i < r.i) && (l.j < r.j);
@@ -5172,8 +7204,8 @@ public:
         return *this;
     }
 
-    utl_mvl_reqs(dimension == Dimension::MATRIX &&
-                 type == Type::SPARSE) self& rewrite_triplets(std::vector<sparse_entry_type>&& triplets) {
+    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::SPARSE)
+    self& rewrite_triplets(std::vector<sparse_entry_type>&& triplets) {
         // Move-construct all triplets at once and sort by index
         const auto ordering = [](const sparse_entry_type& l, const sparse_entry_type& r) -> bool {
             return (l.i < r.i) && (l.j < r.j);
@@ -5185,8 +7217,8 @@ public:
         return *this;
     }
 
-    utl_mvl_reqs(dimension == Dimension::MATRIX &&
-                 type == Type::SPARSE) self& erase_triplets(std::vector<Index2D> indices) {
+    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::SPARSE)
+    self& erase_triplets(std::vector<Index2D> indices) {
         // Erase triplets with {i, j} from 'indices' using the fact that both
         // 'indices' and triplets are sorted. We can scan through triplets once
         // while advancing 'cursor' when 'indices[cursor]' gets deleted, which
@@ -5257,10 +7289,12 @@ public:
     }
 
     // Default-ctor (containers)
-    utl_mvl_reqs(ownership == Ownership::CONTAINER) GenericTensor() noexcept {}
+    utl_mvl_reqs(ownership == Ownership::CONTAINER)
+    GenericTensor() noexcept {}
 
     // Default-ctor (views)
-    utl_mvl_reqs(ownership != Ownership::CONTAINER) GenericTensor() noexcept = delete;
+    utl_mvl_reqs(ownership != Ownership::CONTAINER)
+    GenericTensor() noexcept = delete;
 
     // Copy-assignment over the config boundaries
     // We can change checking config, copy from matrices with different layouts,
@@ -5287,7 +7321,7 @@ public:
         this->_rows       = other.rows();
         this->_cols       = other.cols();
         this->_row_stride = other.row_stride();
-        this->_col_strude = other.col_stride();
+        this->_col_stride = other.col_stride();
         this->_data       = std::move(_make_unique_ptr_array<value_type>(this->size()));
         this->fill(value_type());
         // Not quite sure whether swapping strides when changing layouts like this is okay,
@@ -5376,10 +7410,8 @@ public:
     }
 
     // Init-with-value
-    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::DENSE &&
-                 ownership ==
-                     Ownership::CONTAINER) explicit GenericTensor(size_type rows, size_type cols,
-                                                                  const_reference value = value_type()) noexcept {
+    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::DENSE && ownership == Ownership::CONTAINER)
+    explicit GenericTensor(size_type rows, size_type cols, const_reference value = value_type()) {
         this->_rows = rows;
         this->_cols = cols;
         this->_data = std::move(_make_unique_ptr_array<value_type>(this->size()));
@@ -5399,7 +7431,7 @@ public:
 
     // Init-with-ilist
     utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::DENSE && ownership == Ownership::CONTAINER)
-        GenericTensor(std::initializer_list<std::initializer_list<value_type>> init) {
+    GenericTensor(std::initializer_list<std::initializer_list<value_type>> init) {
         this->_rows = init.size();
         this->_cols = (*init.begin()).size();
         this->_data = std::move(_make_unique_ptr_array<value_type>(this->size()));
@@ -5415,9 +7447,8 @@ public:
     }
 
     // Init-with-data
-    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::DENSE &&
-                 ownership == Ownership::CONTAINER) explicit GenericTensor(size_type rows, size_type cols,
-                                                                           pointer data_ptr) noexcept {
+    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::DENSE && ownership == Ownership::CONTAINER)
+    explicit GenericTensor(size_type rows, size_type cols, pointer data_ptr) noexcept {
         this->_rows = rows;
         this->_cols = cols;
         this->_data = std::move(decltype(this->_data)(data_ptr));
@@ -5426,9 +7457,8 @@ public:
     // - Matrix View -
 
     // Init-from-data
-    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::DENSE &&
-                 ownership == Ownership::VIEW) explicit GenericTensor(size_type rows, size_type cols,
-                                                                      pointer data_ptr) {
+    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::DENSE && ownership == Ownership::VIEW)
+    explicit GenericTensor(size_type rows, size_type cols, pointer data_ptr) {
         this->_rows = rows;
         this->_cols = cols;
         this->_data = data_ptr;
@@ -5447,9 +7477,8 @@ public:
     // - Const Matrix View -
 
     // Init-from-data
-    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::DENSE &&
-                 ownership == Ownership::CONST_VIEW) explicit GenericTensor(size_type rows, size_type cols,
-                                                                            const_pointer data_ptr) {
+    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::DENSE && ownership == Ownership::CONST_VIEW)
+    explicit GenericTensor(size_type rows, size_type cols, const_pointer data_ptr) {
         this->_rows = rows;
         this->_cols = cols;
         this->_data = data_ptr;
@@ -5469,11 +7498,9 @@ public:
     // - Strided Matrix -
 
     // Init-with-value
-    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::STRIDED &&
-                 ownership ==
-                     Ownership::CONTAINER) explicit GenericTensor(size_type rows, size_type cols, size_type row_stride,
-                                                                  size_type       col_stride,
-                                                                  const_reference value = value_type()) noexcept {
+    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::STRIDED && ownership == Ownership::CONTAINER)
+    explicit GenericTensor(size_type rows, size_type cols, size_type row_stride, size_type col_stride,
+                           const_reference value = value_type()) {
         this->_rows       = rows;
         this->_cols       = cols;
         this->_row_stride = row_stride;
@@ -5500,8 +7527,8 @@ public:
 
     // Init-with-ilist
     utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::STRIDED && ownership == Ownership::CONTAINER)
-        GenericTensor(std::initializer_list<std::initializer_list<value_type>> init, size_type row_stride,
-                      size_type col_stride) {
+    GenericTensor(std::initializer_list<std::initializer_list<value_type>> init, size_type row_stride,
+                  size_type col_stride) {
         this->_rows       = init.size();
         this->_cols       = (*init.begin()).size();
         this->_row_stride = row_stride;
@@ -5520,10 +7547,9 @@ public:
     }
 
     // Init-with-data
-    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::STRIDED &&
-                 ownership == Ownership::CONTAINER) explicit GenericTensor(size_type rows, size_type cols,
-                                                                           size_type row_stride, size_type col_stride,
-                                                                           pointer data_ptr) noexcept {
+    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::STRIDED && ownership == Ownership::CONTAINER)
+    explicit GenericTensor(size_type rows, size_type cols, size_type row_stride, size_type col_stride,
+                           pointer data_ptr) noexcept {
         this->_rows       = rows;
         this->_cols       = cols;
         this->_row_stride = row_stride;
@@ -5534,10 +7560,9 @@ public:
     // - Strided Matrix View -
 
     // Init-from-data
-    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::STRIDED &&
-                 ownership == Ownership::VIEW) explicit GenericTensor(size_type rows, size_type cols,
-                                                                      size_type row_stride, size_type col_stride,
-                                                                      pointer data_ptr) {
+    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::STRIDED && ownership == Ownership::VIEW)
+    explicit GenericTensor(size_type rows, size_type cols, size_type row_stride, size_type col_stride,
+                           pointer data_ptr) {
         this->_rows       = rows;
         this->_cols       = cols;
         this->_row_stride = row_stride;
@@ -5560,10 +7585,9 @@ public:
     // - Const Strided Matrix View -
 
     // Init-from-data
-    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::STRIDED &&
-                 ownership == Ownership::CONST_VIEW) explicit GenericTensor(size_type rows, size_type cols,
-                                                                            size_type row_stride, size_type col_stride,
-                                                                            const_pointer data_ptr) {
+    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::STRIDED && ownership == Ownership::CONST_VIEW)
+    explicit GenericTensor(size_type rows, size_type cols, size_type row_stride, size_type col_stride,
+                           const_pointer data_ptr) {
         this->_rows       = rows;
         this->_cols       = cols;
         this->_row_stride = row_stride;
@@ -5587,18 +7611,16 @@ public:
     // - Sparse Matrix / Sparse Matrix View / Sparse Matrix Const View -
 
     // Init-from-data (copy)
-    utl_mvl_reqs(dimension == Dimension::MATRIX &&
-                 type == Type::SPARSE) explicit GenericTensor(size_type rows, size_type cols,
-                                                              const std::vector<sparse_entry_type>& data) {
+    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::SPARSE)
+    explicit GenericTensor(size_type rows, size_type cols, const std::vector<sparse_entry_type>& data) {
         this->_rows = rows;
         this->_cols = cols;
         this->insert_triplets(std::move(data));
     }
 
     // Init-from-data (move)
-    utl_mvl_reqs(dimension == Dimension::MATRIX &&
-                 type == Type::SPARSE) explicit GenericTensor(size_type rows, size_type cols,
-                                                              std::vector<sparse_entry_type>&& data) {
+    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::SPARSE)
+    explicit GenericTensor(size_type rows, size_type cols, std::vector<sparse_entry_type>&& data) {
         this->_rows = rows;
         this->_cols = cols;
         this->rewrite_triplets(std::move(data));
@@ -5678,18 +7700,18 @@ template <utl_mvl_tensor_arg_defs>
     return stringify(_tensor_meta_string(tensor), "  <hidden due to large size>\n");
 }
 
-// Generic method to do "dense matrix print" with given delimers.
-// Cuts down on repitition since a lot of formats only differ in the delimers used.
+// Generic method to do "dense matrix print" with given delimiters.
+// Cuts down on repetition since a lot of formats only differ in the delimiters used.
 template <class T, Type type, Ownership ownership, Checking checking, Layout layout, class Func>
 [[nodiscard]] std::string
-_generic_dense_format(const GenericTensor<T, Dimension::MATRIX, type, ownership, checking, layout>& tensor,      //
-                      std::string_view                                                              begin,       //
-                      std::string_view                                                              row_begin,   //
-                      std::string_view                                                              col_delimer, //
-                      std::string_view                                                              row_end,     //
-                      std::string_view                                                              row_delimer, //
-                      std::string_view                                                              end,         //
-                      Func                                                                          stringifier  //
+_generic_dense_format(const GenericTensor<T, Dimension::MATRIX, type, ownership, checking, layout>& tensor,     //
+                      std::string_view                                                              begin,      //
+                      std::string_view                                                              row_begin,  //
+                      std::string_view                                                              col_delim,  //
+                      std::string_view                                                              row_end,    //
+                      std::string_view                                                              row_delim,  //
+                      std::string_view                                                              end,        //
+                      Func                                                                          stringifier //
 ) {
     if (tensor.empty()) return (std::string() += begin) += end;
 
@@ -5714,10 +7736,10 @@ _generic_dense_format(const GenericTensor<T, Dimension::MATRIX, type, ownership,
         for (std::size_t j = 0; j < strings.cols(); ++j) {
             if (strings(i, j).size() < column_widths[j]) buffer.append(column_widths[j] - strings(i, j).size(), ' ');
             buffer += strings(i, j);
-            if (j + 1 < strings.cols()) buffer += col_delimer;
+            if (j + 1 < strings.cols()) buffer += col_delim;
         }
         buffer += row_end;
-        if (i + 1 < strings.rows()) buffer += row_delimer;
+        if (i + 1 < strings.rows()) buffer += row_delim;
     }
     buffer += end;
 
@@ -5858,7 +7880,7 @@ auto operator-(L&& left) {
 
 // Doing things "in a dumb but simple way" would be to just have all operators take arguments as const-refs and
 // return a copy, however we can speed things up a lot by properly using perfect forwarding, which would reuse
-// r-lvalues if possible to avoid allocation. Doing so would effectively change something like this:
+// r-values if possible to avoid allocation. Doing so would effectively change something like this:
 //    res = A + B - C - D + E
 // from 5 (!) copies to only 1, since first operator will create an r-value that gets propagated and reused by
 // all others. This however introduces it's own set of challenges since instead of traditional overloading we
@@ -5886,7 +7908,7 @@ auto operator-(L&& left) {
 //
 // It's a good question whether to threat binary '*' as element-wise product (which would be in line with other
 // operators) or a matrix product, but in the end it seems doing it element-wise would be too confusing for the
-// user, so we leave '*' as a matrix product and declate element-wise product as a function 'elementwise_product()'
+// user, so we leave '*' as a matrix product and declare element-wise product as a function 'elementwise_product()'
 // since no existing operators seem suitable for such overload.
 
 // (1)  dense +  dense =>  dense
@@ -6152,514 +8174,742 @@ return_type operator*(const L& left, const R& right) {
 //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-#include <iterator>
-#if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_PARALLEL)
-#ifndef UTLHEADERGUARD_PARALLEL
-#define UTLHEADERGUARD_PARALLEL
+#if !defined(UTL_PICK_MODULES) || defined(UTL_MODULE_PARALLEL)
+
+#ifndef utl_parallel_headerguard
+#define utl_parallel_headerguard
+
+#define UTL_PARALLEL_VERSION_MAJOR 2
+#define UTL_PARALLEL_VERSION_MINOR 1
+#define UTL_PARALLEL_VERSION_PATCH 4
 
 // _______________________ INCLUDES _______________________
 
 #include <condition_variable> // condition_variable
-#include <cstddef>            // size_t
-#include <functional>         // bind()
-#include <future>             // future<>, packaged_task<>
-#include <mutex>              // mutex, recursive_mutex, lock_guard<>, unique_lock<>
-#include <queue>              // queue<>
+#include <cstdint>            // uint64_t
+#include <functional>         // plus<>, multiplies<>, function<>
+#include <future>             // future<>, promise<>
+#include <memory>             // shared_ptr<>
+#include <mutex>              // mutex, scoped_lock<>, unique_lock<>
+#include <optional>           // optional<>, nullopt
+#include <queue>              // queue<>, deque<>, size_t, ptrdiff_t
+#include <stdexcept>          // current_exception, runtime_error
 #include <thread>             // thread
-#include <type_traits>        // decay_t<>, invoke_result_t<>
 #include <utility>            // forward<>()
-#include <vector>             // vector
+#include <vector>             // vector<>
 
 // ____________________ DEVELOPER DOCS ____________________
 
-// In C++20 'std::jthread' can be used to simplify code a bit, no reason not to do so.
+// Work-stealing summary:
 //
-// In C++20 '_unroll<>()' template can be improved to take index as a template-lambda-explicit-argument
-// rather than a regular arg, ensuring its constexpr'ness. This may lead to a slight performance boost
-// as truly manual unrolling seems to be slightly faster than automatic one.
+//    - We use several queues:
+//         - All  threads have a global task queue
+//         - Each thread  has  a local  task deque
+//    - Tasks go into different queues depending on their source:
+//         - Work queued from a     pool thread => recursive task, goes to the front of local  deque
+//         - Work queued from a non-pool thread => external  task, goes to the back  of global queue
+//    - When threads are looking for work they search in 3 steps:
+//         1. Check local  deque,  work here can be popped from the front
+//         2. Check other  deques, work here can be stolen from the back
+//         3. Check global queue,  work here can be popped from the front
+//    - To resolve recursive deadlocks we use a custom future:
+//         - Recursive task calls '.wait()' on its future => pop / steal work from local deques until finished
+//
+// Ideally we would want to use a different algorithm with Chase-Lev lock-free local SPMC queues for work-stealing,
+// and a global lock-free MPMC queue for outside tasks, however properly implementing such queues is a task of
+// incredible complexity, which is further exacerbated by the fact that 'std::function' has a potentially throwing
+// move-assignment, which disqualifies it from ~80% of existing lock-free queue implementations.
+//
+// Newer standards would enable several improvements in terms of implementation:
+//    - In C++20 'std::jthread' can be used to simplify joining and add stop tokens
+//    - In C++23 'std::move_only_function<>' can be used as a more efficient task type,
+//      however this still doesn't resolve the issue of throwing move assignment
+//    - In C++20 atomic wait / semaphores / barriers can be used to improve efficiency
+//      of some syncronization
+//
+// It is also possible to add task priority with a bit of constexpr logic and possibly reduce locking
+// in some parts of the scheduling, this is a work for future releases.
 
 // ____________________ IMPLEMENTATION ____________________
 
-namespace utl::parallel {
+namespace utl::parallel::impl {
 
-// =============
-// --- Utils ---
-// =============
+// ============================
+// --- Thread introspection ---
+// ============================
 
-template <class T, class Mutex = std::mutex>
-class MutexProtected {
-    T             value;
-    mutable Mutex mutex;
+namespace this_thread {
 
-public:
-    MutexProtected() = default;
-    MutexProtected(const T& value) : value(value), mutex() {}
-    MutexProtected(T&& value) : value(std::move(value)), mutex() {}
+inline thread_local std::optional<std::size_t> worker_index    = std::nullopt;
+inline thread_local std::optional<void*>       thread_pool_ptr = std::nullopt;
 
-    template <class Func>
-    decltype(auto) apply(Func&& func) const {
-        const std::lock_guard lock(this->mutex);
-        return std::forward<Func>(func)(this->value);
-    }
+[[nodiscard]] inline std::optional<std::size_t> get_index() noexcept { return worker_index; }
+[[nodiscard]] inline std::optional<void*>       get_pool() noexcept { return thread_pool_ptr; }
 
-    template <class Func>
-    decltype(auto) apply(Func&& func) {
-        const std::lock_guard lock(this->mutex);
-        return std::forward<Func>(func)(this->value);
-    }
+}; // namespace this_thread
 
-    [[nodiscard]] T&& release() { return std::move(this->value); }
-};
-
-[[nodiscard]] inline std::size_t max_thread_count() noexcept {
-    const std::size_t detected_threads = std::thread::hardware_concurrency();
-    return detected_threads ? detected_threads : 1;
-    // 'hardware_concurrency()' returns '0' if it can't determine the number of threads,
-    // in this case we reasonably assume there is a single thread available
-}
-
-// No reason to include the entirety of <algorithm> just for 2 one-liner functions,
-// so we implement 'std::size_t' min/max here
-[[nodiscard]] constexpr std::size_t _min_size(std::size_t a, std::size_t b) noexcept { return (b < a) ? b : a; }
-[[nodiscard]] constexpr std::size_t _max_size(std::size_t a, std::size_t b) noexcept { return (b < a) ? a : b; }
-
-// Template for automatic loop unrolling.
-//
-// It is used in 'parallel::reduce()' to (optionally) speed up a tight loop while leaving the user
-// with ability to easily control that unrolling. By default NO unrolling is used.
-//
-// Benchmarks indicate speedups ~130% to ~400% depending on CPU, compiler and options
-// large unrolling (32) seems to be the best on benchmarks, however it may bloat the binary
-// and take over too many branch predictor slots in case of min/max reductions, 4-8 seems
-// like a reasonable sweetspot for most machines.
-//
-// One may think that it is a job of compiler to perform such optimizations, yet even with
-// GCC '-Ofast -funroll-all-loop' and GCC unroll pragmas it fails to do them reliably.
-//
-// The reason it fails to do so is pretty clear for '-O2' and below - strictly speaking, most binary
-// operations on floats are non-commutative (sum depends on the order of addition, for example), however
-// since reduction is inherently not-order-preserving there is no harm in reordering operations some more
-// and unrolling the loop so compiler will be able to use SIMD if it sees it as possile (which it often does).
-//
-// Why vectorization of simple loops still tends to fail with '-Ofast' which reduces conformance and
-// allows reordering of math operations is unclear, but this is how it happens when actually measured.
-//
-template <class T, T... indeces, class F>
-constexpr void _unroll_impl(std::integer_sequence<T, indeces...>, F&& f) {
-    (f(std::integral_constant<T, indeces>{}), ...);
-}
-template <class T, T count, class F>
-constexpr void _unroll(F&& f) {
-    _unroll_impl(std::make_integer_sequence<T, count>{}, std::forward<F>(f));
+[[nodiscard]] inline std::size_t hardware_concurrency() noexcept {
+    const std::size_t     detected_count = std::thread::hardware_concurrency();
+    constexpr std::size_t fallback_count = 4;
+    return detected_count ? detected_count : fallback_count;
+    // if 'hardware_concurrency()' struggles to determine the number of threads, we fallback onto a reasonable default
 }
 
 // ===================
 // --- Thread pool ---
 // ===================
 
-// A simple single-queue task threadpool, uploads of arbitrary callables as tasks,
-// returns optional futures, supports pausing. Work stealing would probably be better
-// in a general case, however it complicates the implementation quite noticeably and
-// doesn't provide much measurable benefit under the API of this module.
+class ThreadPool;
 
-// Note:
-// We don't use 'MutexProtected' here to make implementation a bit more decoupled, plus such idiom isn't nearly as
-// convenient once we enter the realm of non-trivial syncronization with recursive mutexes and condition variables.
+namespace ws_this_thread { // same this as thread introspection from public API, but more convenient for internal use
+inline thread_local ThreadPool* thread_pool_ptr = nullptr;
+inline thread_local std::size_t worker_index    = std::size_t(-1);
+}; // namespace ws_this_thread
+
+inline std::size_t splitmix64() noexcept {
+    thread_local std::uint64_t state = ws_this_thread::worker_index;
+
+    std::uint64_t result = (state += 0x9E3779B97f4A7C15);
+    result               = (result ^ (result >> 30)) * 0xBF58476D1CE4E5B9;
+    result               = (result ^ (result >> 27)) * 0x94D049BB133111EB;
+    return static_cast<std::size_t>(result ^ (result >> 31));
+} // very fast & simple PRNG
 
 class ThreadPool {
+    using task_type         = std::function<void()>;
+    using global_queue_type = std::queue<task_type>;
+    using local_queue_type  = std::deque<task_type>;
+
+    std::vector<std::thread> workers;
+    std::mutex               workers_mutex;
+
+    global_queue_type global_queue;
+    std::mutex        global_queue_mutex;
+
+    std::vector<local_queue_type> local_queues;
+    std::vector<std::mutex>       local_queues_mutexes;
+
+    std::condition_variable task_available_cv;
+    std::condition_variable task_done_cv;
+    std::mutex              task_mutex;
+
+    std::size_t tasks_running = 0; // protected by task mutex
+    std::size_t tasks_pending = 0;
+
+    bool waiting     = false; // protected by task mutex
+    bool terminating = true;
+
 private:
-    std::vector<std::thread>     threads;
-    mutable std::recursive_mutex thread_mutex;
+    void spawn_workers(std::size_t count) {
+        this->workers              = std::vector<std::thread>(count);
+        this->local_queues         = std::vector<local_queue_type>(count);
+        this->local_queues_mutexes = std::vector<std::mutex>(count);
+        {
+            const std::scoped_lock task_lock(this->task_mutex);
+            this->terminating = false;
+        }
+        for (std::size_t i = 0; i < count; ++i) this->workers[i] = std::thread([this, i] { this->worker_main(i); });
+    }
 
-    std::queue<std::packaged_task<void()>> tasks{};
-    mutable std::mutex                     task_mutex;
+    void terminate_workers() {
+        {
+            const std::scoped_lock polling_lock(this->task_mutex);
+            this->terminating = true;
+        }
+        this->task_available_cv.notify_all();
 
-    std::condition_variable task_cv;          // used to notify changes to the task queue
-    std::condition_variable task_finished_cv; // used to notify of finished tasks
+        for (std::size_t i = 0; i < this->workers.size(); ++i)
+            if (this->workers[i].joinable()) this->workers[i].join();
+    }
 
-    // Signals
-    bool stopping = false; // signal for workers to shut down '.worker_main()'
-    bool paused   = false; // signal for workers to not pull new tasks from the queue
-    bool waiting  = false; // signal for workers that they should notify 'task_finished_cv' when
-                           // finishing a task, which is used to implement 'wait for tasks' methods
-
-    int tasks_running = 0; // number of tasks currently executed by workers
-
-    // Main function for worker threads,
-    // here workers wait for the queue, pull new tasks from it and run them
-    void thread_main() {
-        bool task_was_finished = false;
+    void worker_main(std::size_t worker_index) {
+        this_thread::thread_pool_ptr    = this;
+        this_thread::worker_index       = worker_index;
+        ws_this_thread::thread_pool_ptr = this;
+        ws_this_thread::worker_index    = worker_index;
 
         while (true) {
-            std::unique_lock<std::mutex> task_lock(this->task_mutex);
+            std::unique_lock task_lock(this->task_mutex);
 
-            if (task_was_finished) {
-                --this->tasks_running;
-                if (this->waiting) this->task_finished_cv.notify_all();
-                // no need to set 'task_was_finished' back to 'false',
-                // the only way we get back into this condition is if another task was finished
-            }
+            // Wake up thread pool 'wait()' if necessary
+            if (this->waiting && !this->tasks_pending && !this->tasks_running) this->task_done_cv.notify_all();
 
-            // Pool isn't destructing, isn't paused and there are tasks available in the queue
-            //    => continue execution, a new task from the queue and start executing it
-            // otherwise
-            //    => unlock the mutex and wait until a new task is submitted,
-            //       pool is unpaused or destruction is initiated
-            this->task_cv.wait(task_lock, [&] { return this->stopping || (!this->paused && !this->tasks.empty()); });
+            // Tasks pending       => continue execution and pull tasks to execute
+            // Pool is terminating => continue execution and break out of the main loop
+            // otherwise           => wait
+            this->task_available_cv.wait(task_lock, [this] { return this->terminating || this->tasks_pending; });
 
-            if (this->stopping) break; // escape hatch for thread destruction
+            // Terminate if necessary
+            if (this->terminating) break;
 
-            // Pull a new task from the queue and start executing it
-            std::packaged_task<void()> task_to_execute = std::move(this->tasks.front());
-            this->tasks.pop();
-            ++this->tasks_running;
             task_lock.unlock();
 
-            task_to_execute(); // NOTE: Should I catch exceptions here?
-            task_was_finished = true;
+            // Try to pull in a task
+            task_type task;
+            if (this->try_pop_local(task) || this->try_steal(task) || this->try_pop_global(task)) {
+                task_lock.lock();
+                --this->tasks_pending;
+                ++this->tasks_running;
+                task_lock.unlock();
+
+                task();
+
+                task_lock.lock();
+                --this->tasks_running;
+                task_lock.unlock();
+            }
         }
+
+        this_thread::thread_pool_ptr    = std::nullopt;
+        this_thread::worker_index       = std::nullopt;
+        ws_this_thread::thread_pool_ptr = nullptr;
+        ws_this_thread::worker_index    = std::size_t(-1);
     }
 
-    void start_threads(std::size_t worker_count_increase) {
-        const std::lock_guard<std::recursive_mutex> thread_lock(this->thread_mutex);
-        // the mutex has to be recursive because we call '.start_threads()' inside '.set_num_threads()'
-        // which also locks 'worker_mutex', if mutex wan't recursive we would deadlock trying to lock
-        // it a 2nd time on the same thread.
+    bool try_pop_local(task_type& task) {
+        const std::scoped_lock local_queue_lock(this->local_queues_mutexes[ws_this_thread::worker_index]);
 
-        // NOTE: It feels like '.start_threads()' can be split into '.start_threads()' and
-        // '._start_threads_assuming_locked()' which would remove the need for recursive mutex
+        auto& local_queue = this->local_queues[ws_this_thread::worker_index];
 
-        for (std::size_t i = 0; i < worker_count_increase; ++i)
-            this->threads.emplace_back(&ThreadPool::thread_main, this);
+        if (local_queue.empty()) return false;
+
+        task = std::move(local_queue.front());
+        local_queue.pop_front();
+        return true;
     }
 
-    void stop_all_threads() {
-        const std::lock_guard<std::recursive_mutex> thread_lock(this->thread_mutex);
+    bool try_steal(task_type& task) {
+        for (std::size_t attempt = 0; attempt < this->workers.size(); ++attempt) {
+            const std::size_t i = splitmix64() % this->workers.size();
 
-        {
-            const std::lock_guard<std::mutex> task_lock(this->task_mutex);
-            this->stopping = true;
-            this->task_cv.notify_all();
-        } // signals to all threads that they should stop running
+            if (i == ws_this_thread::worker_index) continue; // don't steal from yourself
 
-        for (auto& worker : this->threads)
-            if (worker.joinable()) worker.join();
-        // 'joinable()' checks in needed so we don't try to join the master thread
+            const std::scoped_lock local_queue_lock(this->local_queues_mutexes[i]);
 
-        this->threads.clear();
+            auto& local_queue = this->local_queues[i];
+
+            if (local_queue.empty()) continue;
+
+            task = std::move(local_queue.back());
+            local_queue.pop_back();
+            return true;
+        }
+
+        return false;
+    }
+
+    bool try_pop_global(task_type& task) {
+        const std::scoped_lock global_queue_lock(this->global_queue_mutex);
+
+        if (this->global_queue.empty()) return false;
+
+        task = std::move(this->global_queue.front());
+        this->global_queue.pop();
+        return true;
     }
 
 public:
-    // --- Construction ---
-    // --------------------
+    explicit ThreadPool(std::size_t count = std::thread::hardware_concurrency()) { this->spawn_workers(count); }
 
-    ThreadPool() = default;
-
-    explicit ThreadPool(std::size_t thread_count) { this->start_threads(thread_count); }
-
-    ~ThreadPool() {
-        this->unpause();
-        this->wait_for_tasks();
-        this->stop_all_threads();
+    ~ThreadPool() noexcept {
+        try {
+            this->wait();
+            this->terminate_workers();
+        } catch (...) {} // no throwing from the destructor
     }
 
-    // --- Threads ---
-    // ---------------
+    template <class T = void>
+    struct future_type {
+        std::future<T> future;
 
-    [[nodiscard]] std::size_t get_thread_count() const {
-        const std::lock_guard<std::recursive_mutex> thread_lock(this->thread_mutex);
-        return this->threads.size();
-    }
+        void fallthrough() const {
+            ThreadPool* pool = ws_this_thread::thread_pool_ptr;
 
-    void set_thread_count(std::size_t thread_count) {
-        const std::size_t current_thread_count = this->get_thread_count();
+            if (!pool) return;
 
-        if (thread_count == current_thread_count) return;
-        // 'quick escape' so we don't experience too much slowdown when the user calls '.set_thread_count()' reapeatedly
+            // Execute recursive tasks from local queues until this future is ready
+            task_type task;
+            while (pool->try_pop_local(task) || pool->try_steal(task)) {
+                pool->task_mutex.lock();
+                --pool->tasks_pending;
+                ++pool->tasks_running;
+                pool->task_mutex.unlock();
 
-        if (thread_count > current_thread_count) {
-            this->start_threads(thread_count - current_thread_count);
-        } else {
-            this->stop_all_threads();
-            {
-                const std::lock_guard<std::mutex> task_lock(this->task_mutex);
-                this->stopping = false;
+                task();
+
+                pool->task_mutex.lock();
+                --pool->tasks_running;
+                pool->task_mutex.unlock();
+
+                if (this->is_ready()) return;
             }
-            this->start_threads(thread_count);
-            // It is possible to improve implementation by making the pool shrink by joining only the necessary amount
-            // of threads instead of recreating the the whole pool, however that task is non-trivial and would likely
-            // require a more granular signaling with one flag per thread instead of a global 'stopping' flag.
         }
+
+        bool is_ready() const { return this->future.wait_for(std::chrono::seconds{0}) == std::future_status::ready; }
+
+    public:
+        future_type(std::future<T>&& future) : future(std::move(future)) {} // conversion from regular future
+        future_type& operator=(std::future<T>&& future) {
+            this->future = std::move(future);
+            return *this;
+        }
+
+        using is_recursive = void;
+
+        auto get() {
+            this->fallthrough();
+            return this->future.get();
+        }
+
+        bool valid() const noexcept { return this->future.valid(); }
+
+        void wait() const {
+            this->fallthrough();
+            this->future.wait();
+        }
+
+        template <class Rep, class Period>
+        std::future_status wait_for(const std::chrono::duration<Rep, Period>& timeout_duration) const {
+            this->fallthrough();
+            return this->future.wait_for(timeout_duration);
+        }
+
+        template <class Clock, class Duration>
+        std::future_status wait_until(const std::chrono::time_point<Clock, Duration>& timeout_time) const {
+            this->fallthrough();
+            return this->future.wait_until(timeout_time);
+        }
+    };
+
+    void set_thread_count(std::size_t count) {
+        if (ws_this_thread::thread_pool_ptr == this)
+            throw std::runtime_error("Cannot resize thread pool from its own pool thread.");
+
+        const std::scoped_lock workers_lock(this->workers_mutex);
+
+        this->wait();
+        this->terminate_workers();
+        this->spawn_workers(count);
     }
 
-    // --- Task queue ---
-    // ------------------
+    [[nodiscard]] std::size_t get_thread_count() {
+        if (ws_this_thread::thread_pool_ptr == this) return this->workers.size();
+        // calls from inside the pool shouldn't lock, otherwise we could deadlock the thread by trying to
+        // query the thread count while the pool was instructed to resize, worker count is constant during
+        // a worker lifetime so it's safe to query without a lock anyways
 
-    template <class Func, class... Args>
-    void add_task(Func&& func, Args&&... args) {
-        const std::lock_guard<std::mutex> task_lock(this->task_mutex);
-        this->tasks.emplace(std::bind(std::forward<Func>(func), std::forward<Args>(args)...));
-        this->task_cv.notify_one(); // wakes up one thread (if possible) so it can pull the new task
+        const std::scoped_lock workers_lock(this->workers_mutex);
+
+        return this->workers.size();
     }
 
-    template <class Func, class... Args,
-              class FuncReturnType = std::invoke_result_t<std::decay_t<Func>, std::decay_t<Args>...>>
-    [[nodiscard]] std::future<FuncReturnType> add_task_with_future(Func&& func, Args&&... args) {
-#if defined(_MSC_VER) || defined(_MSC_FULL_VER)
-        // MSVC messed up implementation of 'std::packaged_task<>' so it is not movable (which,
-        // according to the standard, it should be) and they can't fix it for 7 (and counting) years
-        // because fixing the bug would change the ABI. See this thread about the bug report:
-        // https://developercommunity.visualstudio.com/t/unable-to-move-stdpackaged-task-into-any-stl-conta/108672
-        // As a workaround we wrap the packaged task into a shared pointer and add another layer of packaging.
-        auto new_task = std::make_shared<std::packaged_task<FuncReturnType()>>(
-            std::bind(std::forward<Func>(func), std::forward<Args>(args)...));
-        this->add_task([new_task] { (*new_task)(); }); // horrible
-        return new_task->get_future();
-#else
-        std::packaged_task<FuncReturnType()> new_task(std::bind(std::forward<Func>(func), std::forward<Args>(args)...));
-        auto                                 future = new_task.get_future();
-        this->add_task(std::move(new_task));
-        return future;
-#endif
-    }
+    void wait() {
+        std::unique_lock task_lock(this->task_mutex);
 
-    void wait_for_tasks() {
-        std::unique_lock<std::mutex> task_lock(this->task_mutex);
         this->waiting = true;
-        this->task_finished_cv.wait(task_lock, [&] { return this->tasks.empty() && this->tasks_running == 0; });
+        this->task_done_cv.wait(task_lock, [this] { return !this->tasks_pending && !this->tasks_running; });
         this->waiting = false;
     }
 
-    void clear_task_queue() {
-        const std::lock_guard<std::mutex> task_lock(this->task_mutex);
-        this->tasks = {}; // for some reason 'std::queue' has no '.clear()', complexity O(N)
+    template <class F, class... Args>
+    void detached_task(F&& f, Args&&... args) {
+        auto closure = std::bind(std::forward<F>(f), std::forward<Args>(args)...);
+
+        // Recursive task
+        if (ws_this_thread::thread_pool_ptr == this) {
+            const std::scoped_lock local_queue_lock(this->local_queues_mutexes[ws_this_thread::worker_index]);
+            this->local_queues[ws_this_thread::worker_index].push_front(std::move(closure));
+        }
+        // Regular task
+        else {
+            const std::scoped_lock global_queue_lock(this->global_queue_mutex);
+            this->global_queue.emplace(std::move(closure));
+        }
+
+        {
+            const std::scoped_lock task_lock(this->task_mutex);
+            ++this->tasks_pending;
+        }
+        this->task_available_cv.notify_one();
     }
 
-    // --- Pausing ---
-    // ---------------
+    template <class F, class... Args, class R = std::invoke_result_t<std::decay_t<F>, std::decay_t<Args>...>>
+    future_type<R> awaitable_task(F&& f, Args&&... args) {
+        auto closure = std::bind(std::forward<F>(f), std::forward<Args>(args)...);
 
-    void pause() {
-        const std::lock_guard<std::mutex> task_lock(this->task_mutex);
-        this->paused = true;
-    }
+        const std::shared_ptr<std::promise<R>> promise = std::make_shared<std::promise<R>>();
+        // ideally we could just move promise into a lambda and use it as is, however that makes the lambda
+        // non-copyable (since promise itself is move-only) which doesn't work with 'std::function<>', this
+        // is fixed in C++23 with 'std::move_only_function<>'
 
-    void unpause() {
-        const std::lock_guard<std::mutex> task_lock(this->task_mutex);
-        this->paused = false;
-        this->task_cv.notify_all();
-    }
+        future_type<R> future = promise->get_future();
 
-    [[nodiscard]] bool is_paused() const {
-        const std::lock_guard<std::mutex> task_lock(this->task_mutex);
-        return this->paused;
+        this->detached_task([closure = std::move(closure), promise = std::move(promise)]() mutable {
+            try {
+                if constexpr (std::is_void_v<R>) {
+                    closure();
+                    promise->set_value();
+                } else {
+                    promise->set_value(closure());
+                } // 'promise->set_value(f())' when 'f()' returns 'void' is a compile error, so we use a workaround
+            } catch (...) {
+                try {
+                    promise->set_exception(std::current_exception()); // this may still throw
+                } catch (...) {}
+            }
+        });
+
+        return future;
     }
 };
 
-// =====================================
-// --- Static thread pool operations ---
-// =====================================
+template <class T = void>
+using Future = ThreadPool::future_type<T>;
 
-inline ThreadPool& static_thread_pool() {
-    // no '[nodiscard]' since a call to this function might be used to initialize a threadpool
-    static ThreadPool pool(max_thread_count());
-    return pool;
-}
+// ==============
+// --- Ranges ---
+// ==============
 
-[[nodiscard]] inline std::size_t get_thread_count() { return static_thread_pool().get_thread_count(); }
+// --- SFINAE helpers ---
+// ----------------------
 
-inline void set_thread_count(std::size_t thread_count) { static_thread_pool().set_thread_count(thread_count); }
+template <bool Cond>
+using require = std::enable_if_t<Cond, bool>;
 
-// ================
-// --- Task API ---
-// ================
+template <class T, class... Args>
+using require_invocable = require<std::is_invocable_v<T, Args...>>;
+// this is simple convenience
 
-template <class Func, class... Args>
-void task(Func&& func, Args&&... args) {
-    static_thread_pool().add_task(std::forward<Func>(func), std::forward<Args>(args)...);
-}
+template <class T, class = void>
+struct has_iter : std::false_type {};
+template <class T>
+struct has_iter<T, std::void_t<decltype(std::declval<typename T::iterator>())>> : std::true_type {};
 
-template <class Func, class... Args>
-auto task_with_future(Func&& func, Args&&... args)
-    -> std::future<std::invoke_result_t<std::decay_t<Func>, std::decay_t<Args>...>> {
-    return static_thread_pool().add_task_with_future(std::forward<Func>(func), std::forward<Args>(args)...);
-}
+template <class T, class = void>
+struct has_const_iter : std::false_type {};
+template <class T>
+struct has_const_iter<T, std::void_t<decltype(std::declval<typename T::const_iterator>())>> : std::true_type {};
 
-inline void wait_for_tasks() { static_thread_pool().wait_for_tasks(); }
+template <class T>
+using require_has_some_iter = require<has_iter<T>::value || has_const_iter<T>::value>;
+// needed to restrict template 'Range' constructor from a container, otherwise it takes priority over copy / move ctors
 
-// =======================
-// --- Parallel ranges ---
-// =======================
+template <class T, class = void>
+struct is_recursive : std::false_type {};
+template <class T>
+struct is_recursive<T, std::void_t<decltype(std::declval<typename T::is_recursive>())>> : std::true_type {};
+template <class T>
+constexpr bool is_recursive_v = is_recursive<T>::value;
+
+// --- Utils ---
+// -------------
+
+[[nodiscard]] constexpr std::size_t min_size(std::size_t a, std::size_t b) noexcept { return (b < a) ? b : a; }
+[[nodiscard]] constexpr std::size_t max_size(std::size_t a, std::size_t b) noexcept { return (b < a) ? a : b; }
+// no reason to include the entirety of <algorithm> just for 2 one-liners
 
 constexpr std::size_t default_grains_per_thread = 4;
-// by default we distribute 4 tasks per thread, this number is purely empirical.
-// We don't want to split up work into too many tasks (like with 'grain_size = 1')
-// yet we want it to be a bit more granular than doing 1 task per thread since
-// that would be horrible if tasks are noticeably uneven.
+// by default we distribute 4 tasks per thread, this number is purely empirical. We don't want to split up
+// work into too many tasks (like with 'grain_size = 1'), yet we want it to be a bit more granular than
+// doing 1 task per thread since that would be horrible if tasks are noticeably uneven.
 
-// Note:
-// In range constructors we intentionally allow some possibly narrowing conversions like 'it1 - it2' to 'size_t'
-// for better compatibility with containers that can use large ints as their difference type
+// --- Range ---
+// -------------
 
-template <class Idx>
-struct IndexRange {
-    Idx         first;
-    Idx         last;
-    std::size_t grain_size;
-
-    IndexRange() = delete;
-    constexpr IndexRange(Idx first, Idx last, std::size_t grain_size)
-        : first(first), last(last), grain_size(grain_size) {}
-    IndexRange(Idx first, Idx last)
-        : IndexRange(first, last, _max_size(1, (last - first) / (get_thread_count() * default_grains_per_thread))){};
-};
-
-template <class Iter>
+template <class It>
 struct Range {
-    Iter        begin;
-    Iter        end;
+    It          begin;
+    It          end;
     std::size_t grain_size;
 
     Range() = delete;
-    constexpr Range(Iter begin, Iter end, std::size_t grain_size) : begin(begin), end(end), grain_size(grain_size) {}
-    Range(Iter begin, Iter end)
-        : Range(begin, end, _max_size(1, (end - begin) / (get_thread_count() * default_grains_per_thread))) {}
+
+    constexpr Range(It begin, It end, std::size_t grain_size) : begin(begin), end(end), grain_size(grain_size) {}
+
+    Range(It begin, It end)
+        : Range(begin, end, max_size(1, (end - begin) / (hardware_concurrency() * default_grains_per_thread))) {}
 
 
-    template <class Container>
+    template <class Container, require<has_const_iter<Container>::value> = true>
     Range(const Container& container) : Range(container.begin(), container.end()) {}
 
-    template <class Container>
+    template <class Container, require<has_iter<Container>::value> = true>
     Range(Container& container) : Range(container.begin(), container.end()) {}
-};// requires random-access iterator, but no good way to express that before C++20 concepts
+}; // requires random-access iterator, but no good way to express that before C++20 concepts
 
-// User-defined deduction guides
-//
-// By default, template constructors cannot deduce template argument 'Iter',
-// however it is possible to define a custom deduction guide and achieve what we want
-//
-// See: https://en.cppreference.com/w/cpp/language/class_template_argument_deduction#User-defined_deduction_guides
+// CTAD for deducing iterator range from a container
 template <class Container>
 Range(const Container& container) -> Range<typename Container::const_iterator>;
 
 template <class Container>
 Range(Container& container) -> Range<typename Container::iterator>;
 
-// ==========================
-// --- 'Parallel for' API ---
-// ==========================
+// --- Index range ---
+// -------------------
 
-template <class Idx, class Func>
-void for_loop(IndexRange<Idx> range, Func&& func) {
-    for (Idx i = range.first; i < range.last; i += range.grain_size)
-        task(std::forward<Func>(func), i, _min_size(i + range.grain_size, range.last));
+template <class Idx = std::ptrdiff_t>
+struct IndexRange {
+    Idx         first;
+    Idx         last;
+    std::size_t grain_size;
 
-    wait_for_tasks();
-}
+    IndexRange() = delete;
 
-template <class Iter, class Func>
-void for_loop(Range<Iter> range, Func&& func) {
-    for (Iter i = range.begin; i < range.end; i += range.grain_size)
-        task(std::forward<Func>(func), i, i + _min_size(range.grain_size, range.end - i));
+    constexpr IndexRange(Idx first, Idx last, std::size_t grain_size)
+        : first(first), last(last), grain_size(grain_size) {}
 
-    wait_for_tasks();
-}
+    IndexRange(Idx first, Idx last)
+        : IndexRange(first, last, max_size(1, (last - first) / (hardware_concurrency() * default_grains_per_thread))) {}
 
-template <class Container, class Func>
-void for_loop(Container&& container, Func&& func) {
-    for_loop(Range{std::forward<Container>(container)}, std::forward<Func>(func));
-}
-// couldn't figure out how to make it work perfect-forwared 'Container&&',
-// for some reason it would always cause template deduction to fail
+    template <class Idx1, class Idx2>
+    constexpr IndexRange(Idx1 first, Idx2 last, std::size_t grain_size)
+        : first(first), last(last), grain_size(grain_size) {}
 
-// =============================
-// --- 'Parallel reduce' API ---
-// =============================
+    template <class Idx1, class Idx2>
+    IndexRange(Idx1 first, Idx2 last)
+        : IndexRange(first, last, max_size(1, (last - first) / (hardware_concurrency() * default_grains_per_thread))) {}
+};
 
-constexpr std::size_t default_unroll = 1;
+// Note: It is common to have a ranges from 'int' to 'std::size_t' (for example 'IndexRange{0, vec.size()}'),
+//       in such cases we assume 'std::ptrdiff_t' as a reasonable default
 
-template <std::size_t unroll = default_unroll, class BinaryOp, class Iter, class T = typename Iter::value_type>
-auto reduce(Range<Iter> range, BinaryOp&& op) -> T {
+// =================
+// --- Scheduler ---
+// =================
 
-    MutexProtected<T> result = *range.begin;
-    // we have to start from the 1st element and not 'T{}' because there is no guarantee
-    // than doing so would be correct for some non-trivial 'T' and 'op'
+// There is a ton of boilerplate since we need a whole bunch of convenience overloads
+// (ranges / index ranges / containers, blocked functions / iteration functions, etc.),
+// but conceptually it's all quite simple we end up with 2 overloads for tasks,
+// 6+6+3=15 overloads for parallel-for and 4+4+2=10 overloads for reduce
 
-    for_loop(Range<Iter>{range.begin + 1, range.end, range.grain_size}, [&](Iter low, Iter high) {
-        const std::size_t range_size = high - low;
+#define utl_parallel_assert_message                                                                                    \
+    "Awaitable loops require recursive task support from the 'future_type' of 'Scheduler' backend. "                   \
+    "Future can signal such support by  providing a 'using is_recursive = void' member typedef."
+// 'static_assert()' only supports string literals, cannot use constexpr variable here, assert itself
+// shouldn't be included in the macro as it makes error messages uglier due to macro expansion
 
-        // Execute unrolled loop if unrolling is enabled and the range is sufficiently large
-        if constexpr (unroll > 1)
-            if (range_size > unroll) {
-                // (parallel section) Compute partial result (unrolled for SIMD)
-                // Reduce unrollable part
-                std::array<T, unroll> partial_results;
-                _unroll<std::size_t, unroll>([&](std::size_t j) { partial_results[j] = *(low + j); });
-                Iter it = low + unroll;
-                for (; it < high - unroll; it += unroll)
-                    _unroll<std::size_t, unroll>(
-                        [&, it](std::size_t j) { partial_results[j] = op(partial_results[j], *(it + j)); });
-                // Reduce remaining elements
-                for (; it < high; ++it) partial_results[0] = op(partial_results[0], *it);
-                // Collect the result
-                for (std::size_t i = 1; i < partial_results.size(); ++i)
-                    partial_results[0] = op(partial_results[0], partial_results[i]);
+template <class Backend = ThreadPool>
+struct Scheduler {
 
-                // (critical section) Add partial result to the global one
-                result.apply([&](auto&& res) { res = op(std::forward<decltype(res)>(res), partial_results[0]); });
+    // --- Backend ---
+    // ---------------
 
-                return; // skip the non-unrolled version
-            }
+    Backend backend; // underlying thread pool
 
-        // Fallback onto a regular reduction loop otherwise
-        // (parallel section) Compute partial result
-        T partial_result = *low;
-        for (auto it = low + 1; it != high; ++it) partial_result = op(partial_result, *it);
+    template <class T = void>
+    using future_type = typename Backend::template future_type<T>;
 
-        // (critical section) Add partial result to the global one
-        result.apply([&](auto&& res) { res = op(std::forward<decltype(res)>(res), partial_result); });
-    });
+    template <class... Args>
+    explicit Scheduler(Args&&... args) : backend(std::forward<Args>(args)...) {}
 
-    // Note 1:
-    // We could also collect results into an array of partial results and then reduce it on the
-    // main thread at the end, but that leads to a much less clean implementation and doesn't
-    // seem to be measurably faster.
+    // --- Task API ---
+    // ----------------
 
-    // Note 2:
-    // 'if constexpr (unroll > 1)' ensures that unrolling logic will have no effect
-    //  whatsoever on the non-unrolled version of the template, it will not even compile.
+    template <class F, class... Args>
+    void detached_task(F&& f, Args&&... args) {
+        this->backend.detached_task(std::forward<F>(f), std::forward<Args>(args)...);
+    }
 
-    return result.release();
-}
+    template <class F, class... Args, class R = std::invoke_result_t<std::decay_t<F>, std::decay_t<Args>...>>
+    future_type<R> awaitable_task(F&& f, Args&&... args) {
+        return this->backend.awaitable_task(std::forward<F>(f), std::forward<Args>(args)...);
+    }
 
-template <std::size_t unroll = default_unroll, class BinaryOp, class Container>
-auto reduce(Container&& container, BinaryOp&& op) -> typename std::decay_t<Container>::value_type {
-    return reduce<unroll>(Range{std::forward<Container>(container)}, std::forward<BinaryOp>(op));
-}
+    // --- Parallel-for API ---
+    // ------------------------
 
-// --- Pre-defined binary ops ---
-// ------------------------------
+    // - 'Range' overloads (6) -
+
+    template <class It, class F, require_invocable<F, It, It> = true> // blocked loop iteration overload
+    void detached_loop(Range<It> range, F&& f) {
+        for (It it = range.begin; it < range.end; it += min_size(range.grain_size, range.end - it))
+            this->detached_task(f, it, it + min_size(range.grain_size, range.end - it));
+        // 'min_size(...)' bit takes care of the unevenly sized tail segment
+    }
+
+    template <class It, class F, require_invocable<F, It> = true> // single loop iteration overload
+    void detached_loop(Range<It> range, F&& f) {
+        auto iterate_block = [f = std::forward<F>(f)](It low, It high) { // combine individual index
+            for (It it = low; it < high; ++it) f(it);                    // calls into blocks and forward
+        }; // into a blocked loop iteration overload
+        this->detached_loop(range, std::move(iterate_block));
+    }
+
+    template <class It, class F, require_invocable<F, It, It> = true>
+    void blocking_loop(Range<It> range, F&& f) {
+        std::vector<future_type<>> futures;
+
+        for (It it = range.begin; it < range.end; it += min_size(range.grain_size, range.end - it))
+            futures.emplace_back(this->awaitable_task(f, it, it + min_size(range.grain_size, range.end - it)));
+
+        for (auto& future : futures) future.wait();
+    }
+
+    template <class It, class F, require_invocable<F, It> = true>
+    void blocking_loop(Range<It> range, F&& f) {
+        auto iterate_block = [f = std::forward<F>(f)](It low, It high) {
+            for (It it = low; it < high; ++it) f(it);
+        };
+        this->blocking_loop(range, std::move(iterate_block));
+    }
+
+    template <class It, class F, require_invocable<F, It, It> = true>
+    future_type<> awaitable_loop(Range<It> range, F&& f) {
+        static_assert(is_recursive_v<future_type<>>, utl_parallel_assert_message);
+
+        auto submit_loop = [this, range, f = std::forward<F>(f)] { this->blocking_loop(range, f); };
+        return this->awaitable_task(std::move(submit_loop));
+        // to wait for multiple tasks we need a vector of futures, since logically we want API to return regular
+        // 'future_type<>' rather than some composite construct, we can wrap block awaiting into another task
+        // that will "merge" all those futures into a single one for the user, this requires recursive task
+        // support from the backend so it's provided conditionally
+    }
+
+    template <class It, class F, require_invocable<F, It> = true>
+    future_type<> awaitable_loop(Range<It> range, F&& f) {
+        static_assert(is_recursive_v<future_type<>>, utl_parallel_assert_message);
+
+        auto iterate_block = [f = std::forward<F>(f)](It low, It high) {
+            for (It it = low; it < high; ++it) f(it);
+        };
+        return this->awaitable_loop(range, std::move(iterate_block));
+    }
+
+    // - 'IndexRange' overloads (6) -
+
+    template <class Idx, class F, require_invocable<F, Idx, Idx> = true>
+    void detached_loop(IndexRange<Idx> range, F&& f) {
+        for (Idx i = range.first; i < range.last; i += static_cast<Idx>(range.grain_size))
+            this->detached_task(f, i, static_cast<Idx>(min_size(i + range.grain_size, range.last)));
+    }
+
+    template <class Idx, class F, require_invocable<F, Idx> = true>
+    void detached_loop(IndexRange<Idx> range, F&& f) {
+        auto iterate_block = [f = std::forward<F>(f)](Idx low, Idx high) {
+            for (Idx i = low; i < high; ++i) f(i);
+        };
+        this->detached_loop(range, std::move(iterate_block));
+    }
+
+    template <class Idx, class F, require_invocable<F, Idx, Idx> = true>
+    void blocking_loop(IndexRange<Idx> range, F&& f) {
+        std::vector<future_type<>> futures;
+
+        for (Idx i = range.first; i < range.last; i += static_cast<Idx>(range.grain_size))
+            futures.emplace_back(
+                this->awaitable_task(f, i, static_cast<Idx>(min_size(i + range.grain_size, range.last))));
+
+        for (auto& future : futures) future.wait();
+    }
+
+    template <class Idx, class F, require_invocable<F, Idx> = true>
+    void blocking_loop(IndexRange<Idx> range, F&& f) {
+        auto iterate_block = [f = std::forward<F>(f)](Idx low, Idx high) {
+            for (Idx i = low; i < high; ++i) f(i);
+        };
+        this->blocking_loop(range, std::move(iterate_block));
+    }
+
+    template <class Idx, class F, require_invocable<F, Idx, Idx> = true>
+    future_type<> awaitable_loop(IndexRange<Idx> range, F&& f) {
+        static_assert(is_recursive_v<future_type<>>, utl_parallel_assert_message);
+
+        auto submit_loop = [this, range, f = std::forward<F>(f)] { this->blocking_loop(range, f); };
+        return this->awaitable_task(std::move(submit_loop));
+    }
+
+    template <class Idx, class F, require_invocable<F, Idx> = true>
+    future_type<> awaitable_loop(IndexRange<Idx> range, F&& f) {
+        static_assert(is_recursive_v<future_type<>>, utl_parallel_assert_message);
+
+        auto iterate_block = [f = std::forward<F>(f)](Idx low, Idx high) {
+            for (Idx i = low; i < high; ++i) f(i);
+        };
+        return this->awaitable_loop(range, std::move(iterate_block));
+    }
+
+    // - 'Container' overloads (3) -
+
+    template <class Container, class F, require_has_some_iter<std::decay_t<Container>> = true> // without SFINAE reqs
+    void detached_loop(Container&& container, F&& f) {                                         // such overloads would
+        this->detached_loop(Range{std::forward<Container>(container)}, std::forward<F>(f));    // always get picked
+    } // over the others
+
+    template <class Container, class F, require_has_some_iter<std::decay_t<Container>> = true>
+    void blocking_loop(Container&& container, F&& f) {
+        this->blocking_loop(Range{std::forward<Container>(container)}, std::forward<F>(f));
+    }
+
+    template <class Container, class F, require_has_some_iter<std::decay_t<Container>> = true>
+    future_type<> awaitable_loop(Container&& container, F&& f) {
+        return this->awaitable_loop(Range{std::forward<Container>(container)}, std::forward<F>(f));
+    }
+
+    // --- Parallel-reduce API ---
+    // ---------------------------
+
+    // - 'Range' overloads (2) -
+
+    template <class It, class Op, class R = typename It::value_type>
+    R blocking_reduce(Range<It> range, Op&& op) {
+        if (range.begin == range.end) throw std::runtime_error("Reduction over an empty range is undefined");
+
+        R          result = *range.begin;
+        std::mutex result_mutex;
+
+        this->blocking_loop(Range<It>{range.begin + 1, range.end}, [&](It low, It high) {
+            R partial_result = *low;
+            for (auto it = low + 1; it != high; ++it) partial_result = op(partial_result, *it);
+
+            const std::scoped_lock result_lock(result_mutex);
+            result = op(result, partial_result);
+        });
+
+        return result;
+    }
+
+    template <class It, class Op, class R = typename It::value_type>
+    future_type<R> awaitable_reduce(Range<It> range, Op&& op) {
+        auto submit_reduce = [this, range, op = std::forward<Op>(op)] { return this->blocking_reduce(range, op); };
+        return this->awaitable_task(std::move(submit_reduce));
+    }
+
+    // - 'Container' overloads (2) -
+
+    template <class Container, class Op, class R = typename std::decay_t<Container>::value_type>
+    R blocking_reduce(Container&& container, Op&& op) {
+        return this->blocking_reduce(Range{std::forward<Container>(container)}, std::forward<Op>(op));
+    }
+
+    template <class Container, class Op, class R = typename std::decay_t<Container>::value_type>
+    future_type<R> awaitable_reduce(Container&& container, Op&& op) {
+        return this->awaitable_reduce(Range{std::forward<Container>(container)}, std::forward<Op>(op));
+    }
+};
+
+#undef utl_parallel_assert_message
+
+// =========================
+// --- Binary operations ---
+// =========================
 
 // Note 1:
-// Defining binary operations as free-standing functions has a huge negative
-// effect on parallel::reduce performance, for example on 4 threads:
-//    binary op is 'sum'        => speedup ~90%-180%
-//    binary op is 'struct sum' => speedup ~370%
-// This is caused by failed inlining and seems to be the reason why standard library implements
-// 'std::plus' as a functor class and not a free-standing function. I spent 2 hours of my life
-// and 4 rewrites of 'parallel::reduce()' on this.
+// Binary operations should be implemented as functors similarly to 'std::plus<>',
+// defining them as free-standing functions poses a huge challenge for inlining due
+// to function pointer indirection, this can cause x2-x4 performance degradation.
 
 // Note 2:
-// 'sum' & 'prod' can are just aliases for standard functors, 'min' & 'max' on the other hand
-// require custom, implementation. Note the '<void>' specialization for transparent functors,
-// see https://en.cppreference.com/w/cpp/utility/functional
+// Sum / prod can be defined as aliases for standard functors. Min / max require custom implementation.
+// Note the '<void>' specialization for transparent functors, see "transparent function objects" on
+// https://en.cppreference.com/w/cpp/functional.html
 
-template <class... Args>
-using sum = std::plus<Args...>; // without variadic 'Args...' we wouldn't be able to alias 'std::plus<>'
+template <class T = void>
+using sum = std::plus<T>;
 
-template <class... Args>
-using prod = std::multiplies<Args...>;
+template <class T = void>
+using prod = std::multiplies<T>;
 
-template <class T>
+template <class T = void>
 struct min {
     constexpr const T& operator()(const T& lhs, const T& rhs) const noexcept(noexcept((lhs < rhs) ? lhs : rhs)) {
         return (lhs < rhs) ? lhs : rhs;
@@ -6678,7 +8928,7 @@ struct min<void> {
     using is_transparent = std::less<>::is_transparent;
 };
 
-template <class T>
+template <class T = void>
 struct max {
     constexpr const T& operator()(const T& lhs, const T& rhs) const noexcept(noexcept((lhs < rhs) ? rhs : lhs)) {
         return (lhs < rhs) ? rhs : lhs;
@@ -6696,6 +8946,149 @@ struct max<void> {
 
     using is_transparent = std::less<>::is_transparent;
 };
+
+// =======================
+// --- Global executor ---
+// =======================
+
+// A convenient copy of the threadpool & scheduler API hooked up to a global lazily-initialized thread pool
+
+inline auto& global_scheduler() {
+    static Scheduler scheduler;
+    return scheduler;
+}
+
+// --- Thread pool API ---
+// -----------------------
+
+inline void set_thread_count(std::size_t count = hardware_concurrency()) {
+    global_scheduler().backend.set_thread_count(count);
+}
+
+inline std::size_t get_thread_count() { return global_scheduler().backend.get_thread_count(); }
+
+inline void wait() { global_scheduler().backend.wait(); }
+
+// --- Scheduler API ---
+// ---------------------
+
+// Note: We could significantly reduce boilerplate by just using a macro to define functions forwarding everything to
+//       global scheduler and returning auto, however this messes up LSP autocomplete for users, so we do it manually
+
+// - Task API -
+
+template <class F, class... Args>
+void detached_task(F&& f, Args&&... args) {
+    global_scheduler().detached_task(std::forward<F>(f), std::forward<Args>(args)...);
+}
+
+template <class F, class... Args, class R = std::invoke_result_t<std::decay_t<F>, std::decay_t<Args>...>>
+Future<R> awaitable_task(F&& f, Args&&... args) {
+    return global_scheduler().awaitable_task(std::forward<F>(f), std::forward<Args>(args)...);
+}
+
+// - Parallel-for API -
+
+template <class It, class F>
+void detached_loop(Range<It> range, F&& f) {
+    global_scheduler().detached_loop(range, std::forward<F>(f));
+}
+
+template <class It, class F>
+void blocking_loop(Range<It> range, F&& f) {
+    global_scheduler().blocking_loop(range, std::forward<F>(f));
+}
+
+template <class It, class F>
+auto awaitable_loop(Range<It> range, F&& f) {
+    return global_scheduler().awaitable_loop(range, std::forward<F>(f));
+}
+
+template <class Idx, class F>
+void detached_loop(IndexRange<Idx> range, F&& f) {
+    global_scheduler().detached_loop(range, std::forward<F>(f));
+}
+
+template <class Idx, class F>
+void blocking_loop(IndexRange<Idx> range, F&& f) {
+    global_scheduler().blocking_loop(range, std::forward<F>(f));
+}
+
+template <class Idx, class F>
+Future<> awaitable_loop(IndexRange<Idx> range, F&& f) {
+    return global_scheduler().awaitable_loop(range, std::forward<F>(f));
+}
+
+template <class Container, class F, require_has_some_iter<std::decay_t<Container>> = true>
+void detached_loop(Container&& container, F&& f) {
+    global_scheduler().detached_loop(std::forward<Container>(container), std::forward<F>(f));
+}
+
+template <class Container, class F, require_has_some_iter<std::decay_t<Container>> = true>
+void blocking_loop(Container&& container, F&& f) {
+    global_scheduler().blocking_loop(std::forward<Container>(container), std::forward<F>(f));
+}
+
+template <class Container, class F, require_has_some_iter<std::decay_t<Container>> = true>
+Future<> awaitable_loop(Container&& container, F&& f) {
+    return global_scheduler().awaitable_loop(std::forward<Container>(container), std::forward<F>(f));
+}
+
+template <class It, class Op, class R = typename It::value_type>
+R blocking_reduce(Range<It> range, Op&& op) {
+    return global_scheduler().blocking_reduce(range, std::forward<Op>(op));
+}
+
+template <class It, class Op, class R = typename It::value_type>
+Future<R> awaitable_reduce(Range<It> range, Op&& op) {
+    return global_scheduler().awaitable_reduce(range, std::forward<Op>(op));
+}
+
+template <class Container, class Op, class R = typename std::decay_t<Container>::value_type>
+R blocking_reduce(Container&& container, Op&& op) {
+    return global_scheduler().blocking_reduce(std::forward<Container>(container), std::forward<Op>(op));
+}
+
+template <class Container, class Op, class R = typename std::decay_t<Container>::value_type>
+Future<R> awaitable_reduce(Container&& container, Op&& op) {
+    return global_scheduler().awaitable_reduce(std::forward<Container>(container), std::forward<Op>(op));
+}
+
+} // namespace utl::parallel::impl
+
+// ______________________ PUBLIC API ______________________
+
+namespace utl::parallel {
+
+using impl::Scheduler;
+using impl::ThreadPool;
+using impl::Future;
+
+using impl::Range;
+using impl::IndexRange;
+
+using impl::sum;
+using impl::prod;
+using impl::min;
+using impl::max;
+
+using impl::set_thread_count;
+using impl::get_thread_count;
+using impl::wait;
+
+using impl::detached_task;
+using impl::awaitable_task;
+
+using impl::detached_loop;
+using impl::blocking_loop;
+using impl::awaitable_loop;
+
+using impl::blocking_reduce;
+using impl::awaitable_reduce;
+
+namespace this_thread = impl::this_thread;
+
+using impl::hardware_concurrency;
 
 } // namespace utl::parallel
 
@@ -6717,23 +9110,24 @@ struct max<void> {
 //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-#if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_PREDEF)
-#ifndef UTLHEADERGUARD_PREDEF
-#define UTLHEADERGUARD_PREDEF
+#if !defined(UTL_PICK_MODULES) || defined(UTL_MODULE_PREDEF)
+
+#ifndef utl_predef_headerguard
+#define utl_predef_headerguard
+
+#define UTL_PREDEF_VERSION_MAJOR 3
+#define UTL_PREDEF_VERSION_MINOR 0
+#define UTL_PREDEF_VERSION_PATCH 2
 
 // _______________________ INCLUDES _______________________
 
-#include <algorithm>   // fill_n()
-#include <cctype>      // isspace()
-#include <cstdlib>     // exit()
-#include <iostream>    // cerr
-#include <iterator>    // ostreambuf_iterator<>
-#include <new>         // hardware_destructive_interference_size, hardware_constructive_interference_size
-#include <ostream>     // endl
-#include <sstream>     // istringstream
-#include <string>      // string, getline()
+#include <cassert>     // assert()
+#include <string>      // string, to_string()
 #include <string_view> // string_view
-#include <utility>     // declval<>()
+
+#ifdef __cpp_lib_hardware_interference_size
+#include <new> // hardware_destructive_interference_size, hardware_constructive_interference_size
+#endif
 
 // ____________________ DEVELOPER DOCS ____________________
 
@@ -6741,19 +9135,18 @@ struct max<void> {
 // compiler, platform, architecture, compilation info and etc.
 //
 // Boost Predef (https://www.boost.org/doc/libs/1_55_0/libs/predef/doc/html/index.html) provides
-// a more complete package when it comes to supporing some esoteric platforms & compilers,
+// a more complete package when it comes to supporting some esoteric platforms & compilers,
 // but has a rather (in my opinion) ugly API.
 //
 // In addition utl::predef also provides some miscellaneous macros for automatic codegen, such as:
 //    UTL_PREDEF_VA_ARGS_COUNT(args...)
-//    UTL_PREDEF_ENUM_WITH_STRING_CONVERSION(enum_name, enum_values...)
 //    UTL_PREDEF_IS_FUNCTION_DEFINED() - a nightmare of implementation, but it works
 // some implementations may be rather sketchy due to trying to achieve things that weren't really
 // meant to be achieved, but at the end of the day everything is standard-compliant.
 
 // ____________________ IMPLEMENTATION ____________________
 
-namespace utl::predef {
+namespace utl::predef::impl {
 
 // ================================
 // --- Compiler Detection Macro ---
@@ -6811,7 +9204,7 @@ constexpr std::string_view compiler_full_name =
 #elif defined(UTL_PREDEF_COMPILER_IS_LLVM)
     "LLVM Compiler"
 #elif defined(UTL_PREDEF_COMPILER_IS_ICC)
-    "Inter C/C++ Compiler"
+    "Intel C/C++ Compiler"
 #elif defined(UTL_PREDEF_COMPILER_IS_PGI)
     "Portland Group C/C++ Compiler"
 #elif defined(UTL_PREDEF_COMPILER_IS_IBMCPP)
@@ -6901,28 +9294,25 @@ constexpr std::string_view architecture_name =
 // =========================================
 
 #if defined(UTL_PREDEF_COMPILER_IS_MSVC)
-#define UTL_PREDEF_CPP_VERSION _MSVC_LANG
+#define utl_predef_cpp_version _MSVC_LANG
 #else
-#define UTL_PREDEF_CPP_VERSION __cplusplus
+#define utl_predef_cpp_version __cplusplus
 #endif
-// Note 1:
-// MSVC '__cplusplus' is defined, but stuck at '199711L'. It uses '_MSVC_LANG' instead.
-//
-// Note 2:
-// '__cplusplus' is defined by the standard, it's only Microsoft who think standards are for other people.
-//
-// Note 3:
-// MSVC has a flag '/Zc:__cplusplus' that enables standard behaviour for '__cplusplus'
 
-#if (UTL_PREDEF_CPP_VERSION >= 202302L)
+// Note:
+// MSVC defines '__cplusplus', but it's stuck at '199711L'. We should use '_MSVC_LANG' instead.
+// Since this macro is a part of the standard, this is a case of MSVC being non-compliant.
+// Standard-compliant behavior for MSVC can be enabled with '/Zc:__cplusplus'.
+
+#if (utl_predef_cpp_version >= 202302L)
 #define UTL_PREDEF_STANDARD_IS_23_PLUS
-#elif (UTL_PREDEF_CPP_VERSION >= 202002L)
+#elif (utl_predef_cpp_version >= 202002L)
 #define UTL_PREDEF_STANDARD_IS_20_PLUS
-#elif (UTL_PREDEF_CPP_VERSION >= 201703L)
+#elif (utl_predef_cpp_version >= 201703L)
 #define UTL_PREDEF_STANDARD_IS_17_PLUS
-#elif (UTL_PREDEF_CPP_VERSION >= 201402L)
+#elif (utl_predef_cpp_version >= 201402L)
 #define UTL_PREDEF_STANDARD_IS_14_PLUS
-#elif (UTL_PREDEF_CPP_VERSION >= 201103L)
+#elif (utl_predef_cpp_version >= 201103L)
 #define UTL_PREDEF_STANDARD_IS_11_PLUS
 #else // everything below C++11 has the same value of '199711L'
 #define UTL_PREDEF_STANDARD_IS_UNKNOWN
@@ -6951,15 +9341,19 @@ constexpr std::string_view standard_name =
 // --- Compilation Mode Detection Macro ---
 // ========================================
 
-#if defined(_DEBUG)
+#if defined(NDEBUG)
+#define UTL_PREDEF_MODE_IS_RELEASE
+#else
 #define UTL_PREDEF_MODE_IS_DEBUG
 #endif
 
-constexpr bool debug =
-#if defined(UTL_PREDEF_MODE_IS_DEBUG)
-    true
+constexpr std::string_view mode_name =
+#if defined(UTL_PREDEF_MODE_IS_RELEASE)
+    "Release"
+#elif defined(UTL_PREDEF_MODE_IS_DEBUG)
+    "Debug"
 #else
-    false
+    "<unknown>"
 #endif
     ;
 
@@ -6967,61 +9361,58 @@ constexpr bool debug =
 // --- Optimization macros ---
 // ===========================
 
-// Note:
+// Note 1:
 // These are mainly valuable as a reference implementation for portable optimization built-ins,
 // which is why they are made to independent of other macros in this module.
 
+// Note 2:
+// While https://en.cppreference.com/w/cpp/utility/unreachable.html suggests implementing
+// unreachable as a function, this approach ends up being incompatible with MSVC at W4
+// warning level, which warns about unreachable functions regardless of their nature.
+
+// Unreachable code
+#if defined(UTL_PREDEF_STANDARD_IS_23_PLUS)
+#define UTL_PREDEF_UNREACHABLE std::unreachable()
+#elif defined(UTL_PREDEF_COMPILER_IS_MSVC)
+#define UTL_PREDEF_UNREACHABLE __assume(false)
+#elif defined(UTL_PREDEF_COMPILER_IS_GCC) || defined(UTL_PREDEF_COMPILER_IS_CLANG)
+#define UTL_PREDEF_UNREACHABLE __builtin_unreachable()
+#else
+#define UTL_PREDEF_UNREACHABLE static_assert(true)
+#endif
+
 // Force inline
-// (requires regular 'inline' after the macro)
 #if defined(_MSC_VER)
 #define UTL_PREDEF_FORCE_INLINE __forceinline
 #elif defined(__GNUC__) || defined(__clang__) || defined(__INTEL_COMPILER)
-#define UTL_PREDEF_FORCE_INLINE __attribute__((always_inline))
+#define UTL_PREDEF_FORCE_INLINE __attribute__((always_inline)) inline
 #else
-#define UTL_PREDEF_FORCE_INLINE
+#define UTL_PREDEF_FORCE_INLINE inline
 #endif
 
 // Force noinline
 #if defined(_MSC_VER)
-#define UTL_PREDEF_FORCE_NOINLINE __declspec((noinline))
+#define UTL_PREDEF_NO_INLINE __declspec((noinline))
 #elif defined(__GNUC__) || defined(__clang__) || defined(__INTEL_COMPILER)
-#define UTL_PREDEF_FORCE_NOINLINE __attribute__((noinline))
-#endif
-
-// Branch prediction hints
-// (legacy, use '[[likely]]', '[[unlikely]] in C++20 and on)
-#if defined(__GNUC__) || defined(__clang__)
-#define UTL_PREDEF_LEGACY_LIKELY(x) __builtin_expect(!!(x), 1)
-#else
-#define UTL_PREDEF_LEGACY_LIKELY(x) (x)
-#endif
-
-#if defined(__GNUC__) || defined(__clang__)
-#define UTL_PREDEF_LEGACY_UNLIKELY(x) __builtin_expect(!!(x), 0)
-#else
-#define UTL_PREDEF_LEGACY_UNLIKELY(x) (x)
+#define UTL_PREDEF_NO_INLINE __attribute__((noinline))
 #endif
 
 // Assume condition
+// Note: 'assert()' ensures the assumption actually holds true in Debug
 #if defined(UTL_PREDEF_STANDARD_IS_23_PLUS)
-#define UTL_PREDEF_ASSUME(...) [[assume(__VA_ARGS__))]]
+#define UTL_PREDEF_ASSUME(...) [[assume(__VA_ARGS__))]];                                                               \
+    assert(__VA_ARGS__)
 #elif defined(UTL_PREDEF_COMPILER_IS_MSVC)
-#define UTL_PREDEF_ASSUME(...) __assume(__VA_ARGS__)
+#define UTL_PREDEF_ASSUME(...)                                                                                         \
+    __assume(__VA_ARGS__);                                                                                             \
+    assert(__VA_ARGS__)
 #elif defined(UTL_PREDEF_COMPILER_IS_CLANG)
-#define UTL_PREDEF_ASSUME(...) __builtin_assume(__VA_ARGS__)
+#define UTL_PREDEF_ASSUME(...)                                                                                         \
+    __builtin_assume(__VA_ARGS__);                                                                                     \
+    assert(__VA_ARGS__)
 #else // no equivalent GCC built-in
-#define UTL_PREDEF_ASSUME(...) __VA_ARGS__
+#define UTL_PREDEF_ASSUME(...) assert(__VA_ARGS__)
 #endif
-
-[[noreturn]] inline void unreachable() {
-#if defined(UTL_PREDEF_STANDARD_IS_23_PLUS)
-    std::unreachable();
-#elif defined(UTL_PREDEF_COMPILER_IS_MSVC)
-    __assume(false);
-#elif defined(UTL_PREDEF_COMPILER_IS_GCC) || defined(UTL_PREDEF_COMPILER_IS_CLANG)
-    __builtin_unreachable();
-#endif
-}
 
 // ===================
 // --- Other Utils ---
@@ -7041,19 +9432,19 @@ constexpr bool debug =
     buffer += "Architecture:      ";
     buffer += architecture_name;
     buffer += '\n';
-    
-    #ifdef __cpp_lib_hardware_interference_size
-    buffer += "L1 cache line (D):  ";
+
+#ifdef __cpp_lib_hardware_interference_size
+    buffer += "L1 cache line (D): ";
     buffer += std::to_string(std::hardware_destructive_interference_size);
     buffer += '\n';
-    
-    buffer += "L1 cache line (C):  ";
+
+    buffer += "L1 cache line (C): ";
     buffer += std::to_string(std::hardware_constructive_interference_size);
     buffer += '\n';
-    #endif // not (currently) implemented in GCC / clang despite being a C++17 feature
+#endif // not (currently) implemented in GCC / clang despite being a C++17 feature
 
-    buffer += "Compiled in DEBUG: ";
-    buffer += debug ? "true" : "false";
+    buffer += "Compiled in mode:  ";
+    buffer += mode_name;
     buffer += '\n';
 
     buffer += "Compiled under OS: ";
@@ -7069,228 +9460,34 @@ constexpr bool debug =
     return buffer;
 }
 
-// ===================
-// --- Macro Utils ---
-// ===================
+} // namespace utl::predef::impl
 
-// --- Size of __VA_ARGS__ in variadic macros ---
-// ----------------------------------------------
+// ______________________ PUBLIC API ______________________
 
-#define utl_predef_expand_va_args(x_) x_ // a fix for MSVC bug not expanding __VA_ARGS__ properly
+namespace utl::predef {
 
-#define utl_predef_va_args_count_impl(x01_, x02_, x03_, x04_, x05_, x06_, x07_, x08_, x09_, x10_, x11_, x12_, x13_,    \
-                                      x14_, x15_, x16_, x17_, x18_, x19_, x20_, x21_, x22_, x23_, x24_, x25_, x26_,    \
-                                      x27_, x28_, x29_, x30_, x31_, x32_, x33_, x34_, x35_, x36_, x37_, x38_, x39_,    \
-                                      x40_, x41_, x42_, x43_, x44_, x45_, x46_, x47_, x48_, x49_, N_, ...)             \
-    N_
+// macro -> UTL_PREDEF_COMPILER_IS_...
+using impl::compiler_name;
+using impl::compiler_full_name;
 
-#define UTL_PREDEF_VA_ARGS_COUNT(...)                                                                                  \
-    utl_predef_expand_va_args(utl_predef_va_args_count_impl(                                                           \
-        __VA_ARGS__, 49, 48, 47, 46, 45, 44, 43, 42, 41, 40, 39, 38, 37, 36, 35, 34, 33, 32, 31, 30, 29, 28, 27, 26,   \
-        25, 24, 23, 22, 21, 20, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0))
+// macro -> UTL_PREDEF_PLATFORM_IS_...
+using impl::platform_name;
 
-// --- Map function macro to __VA_ARGS__ ---
-// -----------------------------------------
+// macro -> UTL_PREDEF_ARCHITECTURE_IS_...
+using impl::architecture_name;
 
-#define utl_predef_map_eval_0(...) __VA_ARGS__
-#define utl_predef_map_eval_1(...) utl_predef_map_eval_0(utl_predef_map_eval_0(utl_predef_map_eval_0(__VA_ARGS__)))
-#define utl_predef_map_eval_2(...) utl_predef_map_eval_1(utl_predef_map_eval_1(utl_predef_map_eval_1(__VA_ARGS__)))
-#define utl_predef_map_eval_3(...) utl_predef_map_eval_2(utl_predef_map_eval_2(utl_predef_map_eval_2(__VA_ARGS__)))
-#define utl_predef_map_eval_4(...) utl_predef_map_eval_3(utl_predef_map_eval_3(utl_predef_map_eval_3(__VA_ARGS__)))
-#define utl_predef_map_eval(...) utl_predef_map_eval_4(utl_predef_map_eval_4(utl_predef_map_eval_4(__VA_ARGS__)))
+// macro -> UTL_PREDEF_STANDARD_IS_...
+using impl::standard_name;
 
-#define utl_predef_map_end(...)
-#define utl_predef_map_out
-#define utl_predef_map_comma ,
+// macro -> UTL_PREDEF_MODE_IS_...
+using impl::mode_name;
 
-#define utl_predef_map_get_end_2() 0, utl_predef_map_end
-#define utl_predef_map_get_end_1(...) utl_predef_map_get_end2
-#define utl_predef_map_get_end(...) utl_predef_map_get_end_1
-#define utl_predef_map_next_0(test, next, ...) next utl_predef_map_out
-#define utl_predef_map_next_1(test, next) utl_predef_map_next_0(test, next, 0)
-#define utl_predef_map_next(test, next) utl_predef_map_next_1(utl_predef_map_get_end test, next)
+// macro -> UTL_UNREACHABLE
+// macro -> UTL_PREDEF_FORCE_INLINE
+// macro -> UTL_PREDEF_NO_INLINE
+// macro -> UTL_PREDEF_ASSUME
 
-#define utl_predef_map_0(f, x, peek, ...) f(x) utl_predef_map_next(peek, utl_predef_map_1)(f, peek, __VA_ARGS__)
-#define utl_predef_map_1(f, x, peek, ...) f(x) utl_predef_map_next(peek, utl_predef_map_0)(f, peek, __VA_ARGS__)
-
-#define utl_predef_map_list_next_1(test, next) utl_predef_map_next_0(test, utl_predef_map_comma next, 0)
-#define utl_predef_map_list_next(test, next) utl_predef_map_list_next_1(utl_predef_map_get_end test, next)
-
-#define utl_predef_map_list_0(f, x, peek, ...)                                                                         \
-    f(x) utl_predef_map_list_next(peek, utl_predef_map_list_1)(f, peek, __VA_ARGS__)
-#define utl_predef_map_list_1(f, x, peek, ...)                                                                         \
-    f(x) utl_predef_map_list_next(peek, utl_predef_map_list_0)(f, peek, __VA_ARGS__)
-
-// Applies the function macro `f` to each of the remaining parameters.
-#define UTL_PREDEF_MAP(f, ...) utl_predef_map_eval(utl_predef_map_1(f, __VA_ARGS__, ()()(), ()()(), ()()(), 0))
-
-// Applies the function macro `f` to each of the remaining parameters and
-// inserts commas between the results.
-#define UTL_PREDEF_MAP_LIST(f, ...)                                                                                    \
-    utl_predef_map_eval(utl_predef_map_list_1(f, __VA_ARGS__, ()()(), ()()(), ()()(), 0))
-
-// ===============
-// --- Codegen ---
-// ===============
-
-// --- Type trait generation ---
-// -----------------------------
-
-// This macro generates a type trait 'trait_name_' that returns 'true' for any 'T'
-// such that 'T'-dependent expression passed into '...' compiles.
-//
-// Also generates as helper-constant 'trait_name_##_v` like the one all standard traits provide.
-//
-// Also generates as shortcut for 'enable_if' based on that trait.
-//
-// This macro saves MASSIVE amount of boilerplate in some cases, making for a much more expressive "trait definitions".
-
-#define UTL_PREDEF_TYPE_TRAIT(trait_name_, ...)                                                                        \
-    template <class T, class = void>                                                                                   \
-    struct trait_name_ : std::false_type {};                                                                           \
-                                                                                                                       \
-    template <class T>                                                                                                 \
-    struct trait_name_<T, std::void_t<decltype(__VA_ARGS__)>> : std::true_type {};                                     \
-                                                                                                                       \
-    template <class T>                                                                                                 \
-    constexpr bool trait_name_##_v = trait_name_<T>::value;                                                            \
-                                                                                                                       \
-    template <class T>                                                                                                 \
-    using trait_name_##_enable_if = std::enable_if_t<trait_name_<T>::value, bool>
-
-// Shortcuts for different types of requirements
-#define UTL_PREDEF_TYPE_TRAIT_HAS_BINARY_OP(trait_name_, op_)                                                          \
-    UTL_PREDEF_TYPE_TRAIT(trait_name_, std::declval<std::decay_t<T>>() op_ std::declval<std::decay_t<T>>())
-
-#define UTL_PREDEF_TYPE_TRAIT_HAS_ASSIGNMENT_OP(trait_name_, op_)                                                      \
-    UTL_PREDEF_TYPE_TRAIT(trait_name_, std::declval<std::decay_t<T>&>() op_ std::declval<std::decay_t<T>>())
-// for operators like '+=' lhs should be a reference
-
-#define UTL_PREDEF_TYPE_TRAIT_HAS_UNARY_OP(trait_name_, op_)                                                           \
-    UTL_PREDEF_TYPE_TRAIT(trait_name_, op_ std::declval<std::decay_t<T>>())
-
-#define UTL_PREDEF_TYPE_TRAIT_HAS_MEMBER(trait_name_, member_)                                                         \
-    UTL_PREDEF_TYPE_TRAIT(trait_name_, std::declval<std::decay_t<T>>().member_)
-
-#define UTL_PREDEF_TYPE_TRAIT_HAS_MEMBER_TYPE(trait_name_, member_)                                                    \
-    UTL_PREDEF_TYPE_TRAIT(trait_name_, std::declval<typename std::decay_t<T>::member_>())
-
-// --- Enum with string conversion ---
-// -----------------------------------
-
-[[nodiscard]] inline std::string _trim_enum_string(const std::string& str) {
-    std::string::const_iterator left_it = str.begin();
-    while (left_it != str.end() && std::isspace(*left_it)) ++left_it;
-
-    std::string::const_reverse_iterator right_it = str.rbegin();
-    while (right_it.base() != left_it && std::isspace(*right_it)) ++right_it;
-
-    return std::string(left_it, right_it.base()); // return string with whitespaces trimmed at both sides
-}
-
-inline void _split_enum_args(const char* va_args, std::string* strings, int count) {
-    std::istringstream ss(va_args);
-    std::string        buffer;
-
-    for (int i = 0; ss.good() && (i < count); ++i) {
-        std::getline(ss, buffer, ',');
-        strings[i] = _trim_enum_string(buffer);
-    }
-};
-
-#define UTL_PREDEF_ENUM_WITH_STRING_CONVERSION(enum_name_, ...)                                                        \
-    namespace enum_name_ {                                                                                             \
-    enum enum_name_ { __VA_ARGS__, _count };                                                                           \
-                                                                                                                       \
-    inline std::string _strings[_count];                                                                               \
-                                                                                                                       \
-    inline std::string to_string(enum_name_ enum_val) {                                                                \
-        if (_strings[0].empty()) { utl::predef::_split_enum_args(#__VA_ARGS__, _strings, _count); }                    \
-        return _strings[enum_val];                                                                                     \
-    }                                                                                                                  \
-                                                                                                                       \
-    inline enum_name_ from_string(const std::string& enum_str) {                                                       \
-        if (_strings[0].empty()) { utl::predef::_split_enum_args(#__VA_ARGS__, _strings, _count); }                    \
-        for (int i = 0; i < _count; ++i) {                                                                             \
-            if (_strings[i] == enum_str) { return static_cast<enum_name_>(i); }                                        \
-        }                                                                                                              \
-        return _count;                                                                                                 \
-    }                                                                                                                  \
-    }
-    // We declare namespace with enum inside to simulate enum-class while having '_strings' array
-    // and 'to_string()', 'from_string()' methods bundled with it.
-    //
-    // To count number of enum elements we add fake '_count' value at the end, which ends up being enum size
-    //
-    // '_strings' is declared compile-time, but gets filled through lazy evaluation upon first
-    // 'to_string()' or 'from_string()' call. To fill it we interpret #__VA_ARGS__ as a single string
-    // with some comma-separated identifiers. Those identifiers get split by commas, trimmed from
-    // whitespaces and added to '_strings'
-    //
-    // Upon further calls (enum -> string) conversion is done though taking '_strings[enum_val]',
-    // while (string -> enum) conversion requires searching through '_strings' to find enum index
-
-#define UTL_PREDEF_IS_FUNCTION_DEFINED(function_name_, return_type_, ...)                                              \
-    template <class ReturnType, class... ArgTypes>                                                                     \
-    class utl_is_function_defined_impl_##function_name_ {                                                              \
-    private:                                                                                                           \
-        typedef char no[sizeof(ReturnType) + 1];                                                                       \
-                                                                                                                       \
-        template <class... C>                                                                                          \
-        static auto test(C... arg) -> decltype(function_name_(arg...));                                                \
-                                                                                                                       \
-        template <class... C>                                                                                          \
-        static no& test(...);                                                                                          \
-                                                                                                                       \
-    public:                                                                                                            \
-        enum { value = (sizeof(test<ArgTypes...>(std::declval<ArgTypes>()...)) == sizeof(ReturnType)) };               \
-    };                                                                                                                 \
-                                                                                                                       \
-    using is_function_defined_##function_name_ =                                                                       \
-        utl_is_function_defined_impl_##function_name_<return_type_, __VA_ARGS__>;
-// TASK:
-// We need to detect at compile time if function FUNC(ARGS...) exists.
-// FUNC identifier isn't guaranteed to be declared.
-//
-// Ideal method would look like UTL_FUNC_EXISTS(FUNC, RETURN_TYPE, ARG_TYPES...) -> true/false
-// This does not seem to be possible, we have to declare integral constant instead, see explanation below.
-//
-// WHY IS IT SO HARD:
-// (1) Can this be done through preprocessor macros?
-// No, preprocessor has no way to tell whether C++ identifier is defined or not.
-//
-// (2) Is there a compiler-specific way to do it?
-// Doesn't seem to be the case.
-//
-// (3) Why not use some sort of template with FUNC as a parameter?
-// Essentially we have to evaluate undeclared identifier, while compiler exits with error upon
-// encountering anything undeclared. The only way to detect whether undeclared identifier exists
-// or not seems to be through SFINAE.
-//
-// IMPLEMENTATION COMMENTS:
-// We declate integral constant class with 2 functions 'test()', first one takes priority during overload
-// resolution and compiles if FUNC(ARGS...) is defined, otherwise it's {Substitution Failure} which is
-// {Is Not An Error} and second function compiles.
-//
-// To resolve which overload of 'test()' was selected we check the sizeof() return type, 2nd overload
-// has a return type 'char[sizeof(ReturnType) + 1]' so it's always different from 1st overload.
-// Resolution result (true/false) gets stored to '::value'.
-//
-// Note that we can't pass 'ReturnType' and 'ArgTypes' directly through '__VA_ARGS__' because
-// to call function 'test(ARGS...)' in general case we have to 'std::declval<>()' all 'ARGS...'.
-// To do so we can use variadic template syntax and then just forward '__VA_ARGS__' to the template
-// through 'using is_function_present = is_function_present_impl<ReturnType, __VA_ARGS__>'.
-//
-// ALTERNATIVES: Perhaps some sort of tricky inline SFINAE can be done through C++14 generic lambdas.
-//
-// NOTE 1: Some versions of 'clangd' give a 'bugprone-sizeof-expression' warning for sizeof(*A),
-// this is a false alarm.
-//
-// NOTE 2: Frankly, the usefullness of this is rather dubious since constructs like
-//     if constexpr (is_function_defined_windown_specific) { <call the windows-specific function> }
-//     else { <call the linux-specific function> }
-// are still illegal due to 'if constexpr' requiting both branches to have defined identifiers,
-// but since this arcane concept is already implemented why not keep it.
+using impl::compilation_summary;
 
 } // namespace utl::predef
 
@@ -7312,437 +9509,825 @@ inline void _split_enum_args(const char* va_args, std::string* strings, int coun
 //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-#if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_PROFILER)
-#ifndef UTLHEADERGUARD_PROFILER
-#define UTLHEADERGUARD_PROFILER
+#if !defined(UTL_PICK_MODULES) || defined(UTL_MODULE_PROFILER)
+
+#ifndef utl_profiler_headerguard
+#define utl_profiler_headerguard
+
+#define UTL_PROFILER_VERSION_MAJOR 1
+#define UTL_PROFILER_VERSION_MINOR 0
+#define UTL_PROFILER_VERSION_PATCH 2
 
 // _______________________ INCLUDES _______________________
 
-#include <algorithm>   // sort()
-#include <chrono>      // chrono::steady_clock, chrono::duration_cast<>, std::chrono::milliseconds
-#include <cstdlib>     // atexit()
-#include <fstream>     // ofstream
-#include <iomanip>     // setprecision(), setw()
-#include <ios>         // streamsize, fixed,
-#include <iostream>    // cout
-#include <ostream>     // ostream
-#include <sstream>     // ostringstream
-#include <string>      // string
-#include <string_view> // string_view
-#include <vector>      // vector<>
+#ifndef UTL_PROFILER_DISABLE
+
+#include <array>         // array<>, size_t
+#include <cassert>       // assert()
+#include <charconv>      // to_chars()
+#include <chrono>        // steady_clock, duration<>
+#include <cstdint>       // uint16_t, uint32_t
+#include <iostream>      // cout
+#include <mutex>         // mutex, lock_guard
+#include <string>        // string, to_string()
+#include <string_view>   // string_view
+#include <thread>        // thread::id, this_thread::get_id()
+#include <type_traits>   // enable_if_t<>, is_enum_v<>, is_invokable_v<>, underlying_type_t<>
+#include <unordered_map> // unordered_map<>
+#include <vector>        // vector<>
+
+#endif // no need to pull all these headers with profiling disabled
 
 // ____________________ DEVELOPER DOCS ____________________
 
-// Macros for quick code profiling.
-// Trivially simple, yet effective way of finding bottlenecks without any tooling.
+// Optional macros:
+// - #define UTL_PROFILER_DISABLE                            // disable all profiling
+// - #define UTL_PROFILER_USE_INTRINSICS_FOR_FREQUENCY 3.3e9 // use low-overhead rdtsc timestamps
+// - #define UTL_PROFILER_USE_SMALL_IDS                      // use 16-bit ids
 //
-// Can also be used to benchmark stuff "quick & dirty" due to doing all the time measuring
-// and table formatting one would usually implement in their benchmarks. A proper bechmark
-// suite of course would include support for automatic reruns and gather statistical data,
-// but in prototying this is often not necessary.
+// This used to be a much simpler header with a few macros to profile scope & print a flat table, it
+// already applied the idea of using static variables to mark callsites efficiently and later underwent
+// a full rewrite to add proper threading & call graph support.
 //
-// Resolving time recording inside recursion took some thinking, but ended up being quite simple in
-// implementation. See the docs for more details on that.
+// A lot of thought went into making it fast. The key idea is to use 'thread_local' callsite
+// markers to associate callsites with linearly growing thread-specific IDs and reduce all call
+// graph traversal logic to traversing a matrix of integers. Store everything we can densely,
+// minimize locks, delay formatting and result evaluation as much as possible.
 //
-// Currently, the overhead of profiling is barely different to the overhead of just time measurement,
-// this also took a bit of thinking but in the end there is a nice solution that uses static variables
-// to offload things that can only be done once to their initialization, and then links local variables
-// to 'static' markers of the callsite recording. See 'UTL_PROFILE' macro for some more details.
+// Docs & comments scattered through code should explain the details decently well.
 
 // ____________________ IMPLEMENTATION ____________________
 
-namespace utl::profiler {
+#ifndef UTL_PROFILER_DISABLE
+// '#ifndef' that wraps almost entire header,
+// in '#else' branch only no-op mocks of the public API are compiled
 
-// ==========================
-// --- Profiler Internals ---
-// ==========================
+// ==================================
+// --- Optional __rdtsc() support ---
+// ==================================
 
-inline std::string _format_call_site(std::string_view file, int line, std::string_view func) {
-    const std::string_view filename = file.substr(file.find_last_of("/\\") + 1);
+#ifdef UTL_PROFILER_USE_INTRINSICS_FOR_FREQUENCY
 
-    return (std::ostringstream() << filename << ":" << line << ", " << func << "()").str();
+#ifdef _MSC_VER
+#include <intrin.h>
+#else
+#include <x86intrin.h>
+#endif
+
+#define utl_profiler_cpu_counter __rdtsc()
+
+#endif
+
+// ====================
+// --- String utils ---
+// ====================
+
+namespace utl::profiler::impl {
+
+constexpr std::size_t max(std::size_t a, std::size_t b) noexcept {
+    return (a < b) ? b : a;
+} // saves us a heavy <algorithm> include
+
+template <class... Args>
+void append_fold(std::string& str, const Args&... args) {
+    ((str += args), ...);
+} // faster than 'std::ostringstream' and saves us an include
+
+inline std::string format_number(double value, std::chars_format format, int precision) {
+    std::array<char, 30> buffer; // 80-bit 'long double' fits in 29, 64-bit 'double' in 24, this is always enough
+    const auto end_ptr = std::to_chars(buffer.data(), buffer.data() + buffer.size(), value, format, precision).ptr;
+    return std::string(buffer.data(), end_ptr);
 }
 
-#if !defined(UTL_PROFILER_OPTION_USE_x86_INTRINSICS_FOR_FREQUENCY)
-using clock = std::chrono::steady_clock;
-#else
+inline std::string format_call_site(std::string_view file, int line, std::string_view func) {
+    const std::string_view filename = file.substr(file.find_last_of("/\\") + 1);
+
+    std::string res;
+    res.reserve(filename.size() + func.size() + 10); // +10 accounts for formatting chars and up to 5 line digits
+    append_fold(res, filename, ":", std::to_string(line), ", ", func, "()");
+    return res;
+}
+
+inline void append_aligned_right(std::string& str, const std::string& source, std::size_t width, char fill = ' ') {
+    assert(width >= source.size());
+
+    const std::size_t pad_left = width - source.size();
+    str.append(pad_left, fill) += source;
+}
+
+inline void append_aligned_left(std::string& str, const std::string& source, std::size_t width, char fill = ' ') {
+    assert(width >= source.size());
+
+    const std::size_t pad_right = width - source.size();
+    (str += source).append(pad_right, fill);
+}
+
+// ==============
+// --- Timing ---
+// ==============
+
+// If we know CPU frequency at compile time we can wrap '__rdtsc()' into a <chrono>-compatible
+// clock and use it seamlessly, no need for conditional compilation anywhere else
+
+#ifdef UTL_PROFILER_USE_INTRINSICS_FOR_FREQUENCY
 struct clock {
     using rep                   = unsigned long long int;
-    using period                = std::ratio<1, UTL_PROFILER_OPTION_USE_x86_INTRINSICS_FOR_FREQUENCY>;
+    using period                = std::ratio<1, static_cast<rep>(UTL_PROFILER_USE_INTRINSICS_FOR_FREQUENCY)>;
     using duration              = std::chrono::duration<rep, period>;
     using time_point            = std::chrono::time_point<clock>;
     static const bool is_steady = true;
 
-    static time_point now() noexcept {
-        unsigned int low, high;
-        asm volatile("rdtsc" : "=a"(low), "=d"(high)); // GCC/clang asm intrinsic, MSVC uses __asm() with more overhead
-        return time_point(duration(static_cast<rep>(high) << 32 | low));
-    }
+    static time_point now() noexcept { return time_point(duration(utl_profiler_cpu_counter)); }
 };
+#else
+using clock = std::chrono::steady_clock;
 #endif
 
 using duration   = clock::duration;
 using time_point = clock::time_point;
 
-inline const time_point _program_entry_time_point = clock::now();
+using ms = std::chrono::duration<double, std::chrono::milliseconds::period>;
+// float time makes conversions more convenient
 
-struct _record {
-    const char* file;
-    int         line;
-    const char* func;
-    const char* label;
-    duration    accumulated_time;
-};
+// =====================
+// --- Type-safe IDs ---
+// =====================
 
-inline void _utl_profiler_atexit(); // predeclaration, implementation has circular dependency with 'RecordManager'
-
-// =========================
-// --- Profiler Classess ---
-// =========================
-
-class _record_manager {
-private:
-    _record data;
-
-public:
-    inline static std::vector<_record> records;
-    inline static int                  exclusive_recursion{};
-    int                                recursion{};
-
-    void add_time(duration time) noexcept { this->data.accumulated_time += time; }
-
-    _record_manager() = delete;
-
-    _record_manager(const char* file, int line, const char* func, const char* label)
-        : data({file, line, func, label, duration(0)}) {
-        // 'file', 'func', 'label' are guaranteed to be string literals, since we want to
-        // have as little overhead as possible during runtime, we can just save raw pointers
-        // and convert them to nicer types like 'std::string_view' later in the formatting stage
-
-        // Profiler ever gets called => register result output at 'std::exit()'
-        static bool first_call = true;
-        if (first_call) {
-            std::atexit(_utl_profiler_atexit);
-            first_call = false;
-        }
-    }
-
-    ~_record_manager() { records.emplace_back(this->data); }
-};
-
-// We need 4 slightly different timer classes, so might as well deduplicate some code by moving it into a base class
-struct _timer_base {
-protected:
-    time_point       start;
-    _record_manager* record_manager;
-    // we could use 'std::optional<std::reference_wrapper<RecordManager>>',
-    // but that would inctroduce more dependencies for no real reason
-public:
-    constexpr operator bool() const noexcept { return true; }
-
-    _timer_base(_record_manager* manager) : record_manager(manager) {}
-};
-
-// Simple class that records the time of its creation and destruction and records it into the connected 'RecordManager'
-struct _scope_timer : public _timer_base {
-    _scope_timer(_record_manager* manager) : _timer_base(manager) {
-        if (this->record_manager->recursion++ == 0) this->start = clock::now();
-        // this check prevent timer from double-counting time spent inside
-        // of it's own scope due to recursive calls
-    }
-
-    ~_scope_timer() {
-        if (--this->record_manager->recursion == 0) this->record_manager->add_time(clock::now() - this->start);
-    }
-};
-
-// Same thing as '_scope_timer' except it uses global static 'exclusive_recursion' instead of regular 'recursion' that
-// is specific to each '_record_manager'. This effecively means no '_exclusive_scope_timer''s will count time as long a
-// single instance of another exclusive timer exists. This allows us to resolve som tricky situations such as recursion
-struct _exclusive_scope_timer : public _timer_base {
-    _exclusive_scope_timer(_record_manager* manager) : _timer_base(manager) {
-        if (this->record_manager->exclusive_recursion++ == 0) this->start = clock::now();
-    }
-
-    ~_exclusive_scope_timer() {
-        if (--this->record_manager->exclusive_recursion == 0)
-            this->record_manager->add_time(clock::now() - this->start);
-    }
-};
-
-// Same thing as '_scope_timer', except instead of destructor it uses an explicitly called method to record time.
-// We need it to implement code-segment profiling with 'UTL_PROFILER_BEGIN' and 'UTL_PROFILER_END'
-struct _segment_timer : public _timer_base {
-    _segment_timer(_record_manager* manager) : _timer_base(manager) {
-        if (this->record_manager->recursion++ == 0) this->start = clock::now();
-    }
-
-    void finish() {
-        if (--this->record_manager->recursion == 0) this->record_manager->add_time(clock::now() - this->start);
-    }
-};
-
-struct _exclusive_segment_timer : public _timer_base {
-    _exclusive_segment_timer(_record_manager* manager) : _timer_base(manager) {
-        if (this->record_manager->exclusive_recursion++ == 0) this->start = clock::now();
-    }
-
-    void finish() {
-        if (--this->record_manager->exclusive_recursion == 0)
-            this->record_manager->add_time(clock::now() - this->start);
-    }
-};
-
-// ==================================
-// --- Profiler Exit & Formatting ---
-// ==================================
-
-inline void _utl_profiler_atexit() {
-    // NOTE:
-    // Lots of ugly formatting stuff here, but it works, so a nicer rewrite is low-priority.
-    // Would make a lot more sense to format all the stuff into a `matrix` of strings first,
-    // and then do all the sorting/column width adjustment and etc. Should be faster (which
-    // doesn't really matter here) and more concise too.
-
-    const auto total_runtime = clock::now() - _program_entry_time_point;
-
-    std::ostream* os = &std::cout;
-
-    // Convenience functions
-    const auto duration_to_sec = [](duration duration) -> double {
-        return std::chrono::duration_cast<std::chrono::nanoseconds>(duration).count() / 1e9;
-    };
-
-    const auto duration_percentage = [&](double duration_sec) -> double {
-        const double total_runtime_sec = duration_to_sec(total_runtime);
-        return (duration_sec / total_runtime_sec) * 100.;
-    };
-
-    const auto float_printed_size = [](double value, std::streamsize precision, decltype(std::fixed) format,
-                                       std::string_view postfix) -> std::streamsize {
-        std::ostringstream ss;
-        ss << std::setprecision(precision) << format << value << postfix;
-        return ss.str().size(); // can be done faster but we don't really care here
-    };
-
-    const auto repeat_hline_symbol = [](std::streamsize repeats) -> std::string {
-        return std::string(static_cast<size_t>(repeats), '-');
-    };
-
-    constexpr std::streamsize  duration_precision = 2;
-    constexpr auto             duration_format    = std::fixed;
-    constexpr std::string_view duration_postfix   = " s";
-
-    constexpr std::streamsize  percentage_precision = 1;
-    constexpr auto             percentage_format    = std::fixed;
-    constexpr std::string_view percentage_postfix   = "%";
-
-    // Sort records by their accumulated time
-    std::sort(_record_manager::records.begin(), _record_manager::records.end(),
-              [](const _record& l, const _record& r) { return l.accumulated_time > r.accumulated_time; });
-
-    // Collect max length of each column (for proper formatting)
-    constexpr std::string_view column_name_call_site  = "Call Site";
-    constexpr std::string_view column_name_label      = "Label";
-    constexpr std::string_view column_name_duration   = "Time";
-    constexpr std::string_view column_name_percentage = "Time %";
-
-    std::streamsize max_length_call_site  = column_name_call_site.size();
-    std::streamsize max_length_label      = column_name_label.size();
-    std::streamsize max_length_duration   = column_name_duration.size();
-    std::streamsize max_length_percentage = column_name_percentage.size();
-
-    for (const auto& record : _record_manager::records) {
-        const std::string call_site    = _format_call_site(record.file, record.line, record.func);
-        const std::string label        = record.label;
-        const double      duration_sec = duration_to_sec(record.accumulated_time);
-
-        // 'Call Site' column
-        const std::streamsize length_call_site = call_site.size();
-        if (max_length_call_site < length_call_site) max_length_call_site = length_call_site;
-
-        // 'Label' column
-        const std::streamsize length_label = label.size();
-        if (max_length_label < length_label) max_length_label = length_label;
-
-        // 'Time' column
-        const std::streamsize length_duration =
-            float_printed_size(duration_sec, duration_precision, duration_format, duration_postfix);
-        if (max_length_duration < length_duration) max_length_duration = length_duration;
-
-        // 'Time %' column
-        const auto            percentage = duration_percentage(duration_sec);
-        const std::streamsize length_percentage =
-            float_printed_size(percentage, percentage_precision, percentage_format, percentage_postfix);
-        if (max_length_percentage < length_percentage) max_length_percentage = length_percentage;
-    }
-
-    // Print formatted profiler header
-    constexpr std::string_view HEADER_TEXT = " UTL PROFILING RESULTS ";
-
-    const std::streamsize total_table_length = sizeof("| ") - 1 + max_length_call_site + sizeof(" | ") - 1 +
-                                               max_length_label + sizeof(" | ") - 1 + max_length_duration +
-                                               sizeof(" | ") - 1 + max_length_percentage + sizeof(" |") -
-                                               1; // -1 because sizeof(char[]) accounts for invisible '\0' at the end
-
-    const std::streamsize header_text_length = HEADER_TEXT.size();
-    const std::streamsize header_left_pad    = (total_table_length - header_text_length) / 2;
-    const std::streamsize header_right_pad   = total_table_length - header_text_length - header_left_pad;
-
-    *os << "\n"
-        << repeat_hline_symbol(header_left_pad + 1) << HEADER_TEXT << repeat_hline_symbol(header_right_pad + 1)
-        << '\n'
-        // + 1 makes header hline extend 1 character past the table on both sides
-        << "\n"
-        << " Total runtime -> " << std::setprecision(duration_precision) << duration_format
-        << duration_to_sec(total_runtime) << " sec\n"
-        << "\n";
-
-    // Print formatted table header
-    *os << " | " << std::setw(max_length_call_site) << column_name_call_site << " | " << std::setw(max_length_label)
-        << column_name_label << " | " << std::setw(max_length_duration) << column_name_duration << " | "
-        << std::setw(max_length_percentage) << column_name_percentage << " |\n";
-
-    *os << " |"
-        << repeat_hline_symbol(max_length_call_site + 2) // add 2 to account for delimers not having spaces in hline
-        << "|" << repeat_hline_symbol(max_length_label + 2) << "|" << repeat_hline_symbol(max_length_duration + 2)
-        << "|" << repeat_hline_symbol(max_length_percentage + 2) << "|\n";
-
-    *os << std::setfill(' '); // reset the fill so we don't mess with table contents
-
-
-    // Print formatted table contents
-    for (const auto& record : _record_manager::records) {
-        const std::string call_site    = _format_call_site(record.file, record.line, record.func);
-        const std::string label        = record.label;
-        const double      duration_sec = duration_to_sec(record.accumulated_time);
-        const double      percentage   = duration_percentage(duration_sec);
-
-        // Join floats with their postfixes into a single string so they are properly handled by std::setw()
-        // (which only affects the first value leading to a table misaligned by postfix size)
-        std::ostringstream ss_duration;
-        ss_duration << std::setprecision(duration_precision) << duration_format << duration_sec << duration_postfix;
-
-        std::ostringstream ss_percentage;
-        ss_percentage << std::setprecision(percentage_precision) << percentage_format << percentage
-                      << percentage_postfix;
-
-        *os << " | " << std::setw(max_length_call_site) << call_site << " | " << std::setw(max_length_label) << label
-            << " | " << std::setw(max_length_duration) << ss_duration.str() << " | " << std::setw(max_length_percentage)
-            << ss_percentage.str() << " |\n";
-    }
+template <class Enum, std::enable_if_t<std::is_enum_v<Enum>, bool> = true>
+[[nodiscard]] constexpr auto to_int(Enum value) noexcept {
+    return static_cast<std::underlying_type_t<Enum>>(value);
 }
 
-// ========================
-// --- Profiler Codegen ---
-// ========================
+#ifdef UTL_PROFILER_USE_SMALL_IDS
+using id_type = std::uint16_t;
+#else
+using id_type = std::uint32_t;
+#endif
 
-#define _utl_profiler_concat_tokens(a, b) a##b
-#define _utl_profiler_concat_tokens_wrapper(a, b) _utl_profiler_concat_tokens(a, b)
-#define _utl_profiler_add_uuid(varname_) _utl_profiler_concat_tokens_wrapper(varname_, __LINE__)
-// This macro creates token 'varname_##__LINE__' from 'varname_'.
-//
-// The reason we can't just write it as is, is that function-macros only expands their macro-arguments
-// if neither the stringizing operator # nor the token-pasting operator ## are applied to the arguments
-// inside the macro body.
-//
-// Which means in a simple 'varname_##__LINE__' macro '__LINE__' doesn't expand to it's value.
-//
-// We can get around this fact by introducing indirection,
-// '__LINE__' gets expanded in '_utl_profiler_concat_tokens_wrapper()'
-// and then tokenized and concatenated in '_utl_profiler_concat_tokens()'
+enum class CallsiteId : id_type { empty = id_type(-1) };
+enum class NodeId : id_type { root = 0, empty = id_type(-1) };
 
-// --- Scope profiling ---
-// -----------------------
+struct CallsiteInfo {
+    const char* file;
+    const char* func;
+    const char* label;
+    int         line;
+    // 'file', 'func', 'label' are guaranteed to be string literals, since we want to
+    // have as little overhead as possible during runtime, we can just save raw pointers
+    // and convert them to nicer types like 'std::string_view' later in the formatting stage
+};
 
-#define UTL_PROFILER(label_)                                                                                           \
-    constexpr bool _utl_profiler_add_uuid(utl_profiler_macro_guard_) = true;                                           \
-                                                                                                                       \
-    static_assert(_utl_profiler_add_uuid(utl_profiler_macro_guard_), "UTL_PROFILE is a multi-line macro.");            \
-                                                                                                                       \
-    static utl::profiler::_record_manager _utl_profiler_add_uuid(utl_profiler_record_manager_)(__FILE__, __LINE__,     \
-                                                                                               __func__, label_);      \
-                                                                                                                       \
-    if constexpr (const utl::profiler::_scope_timer _utl_profiler_add_uuid(utl_profiler_scope_timer_){                 \
-                      &_utl_profiler_add_uuid(utl_profiler_record_manager_)})
-// Note 1:
-//
-//    constexpr bool ... = true;
-//    static_assert(..., "UTL_PROFILE is a multi-line macro.");
-//
-// is reponsible for preventing accidental errors caused by using macro like this:
-//
-//    for (...) UTL_PROFILER("") function(); // will only loop the first line of the multi-line macro
-//
-// If someone tries to write it like this, the constexpr bool variable will be "pulled" into a narrower scope,
-// causing 'static_assert()' to fail due to using undeclared identifier. Since the line with undeclared identifier
-// gets expanded, the user will be able to see the assert message.
-//
-// Note 2:
-//
-// By separating "record management" into a static variable and "actual timing" into a non-static one,
-// we can avoid additional overhead from having to locate the record, corresponding to the profiled source location.
-// (an operation that requires a non-trivial vector/map lookup with string comparisons)
-//
-// Static variable initializes its record once and timer does the bare minimum of work - 2 calls to 'now()' to get
-// timing, one addition to accumulated time and a check for recursion (so it can skip time appropriately).
-//
-//  Note 3:
-//
-// _utl_profiler_add_uuid(...) ensures no identifier collisions when several profilers exist in a single scope.
-// Since in this context 'uuid' is a line number, the only case in which ids can collide is when multiple profilers
-// are declated on the same line, which I assume no sane person would do. And even if they would, that would simply
-// lead to a compiler error. Can't really do better than that without resorting to non-standard macros like
-// '__COUNTER__' for 'uuid' creation
+// ==================
+// --- Formatting ---
+// ==================
 
-#define UTL_PROFILER_EXCLUSIVE(label_)                                                                                 \
-    constexpr bool _utl_profiler_add_uuid(utl_profiler_macro_guard_) = true;                                           \
-                                                                                                                       \
-    static_assert(_utl_profiler_add_uuid(utl_profiler_macro_guard_), "UTL_PROFILER_EXCLUSIVE is a multi-line macro."); \
-                                                                                                                       \
-    static utl::profiler::_record_manager _utl_profiler_add_uuid(utl_profiler_record_manager_)(__FILE__, __LINE__,     \
-                                                                                               __func__, label_);      \
-                                                                                                                       \
-    if constexpr (const utl::profiler::_exclusive_scope_timer _utl_profiler_add_uuid(utl_profiler_scope_timer_){       \
-                      &_utl_profiler_add_uuid(utl_profiler_record_manager_)})
-// Note:
-//
-// Exact same thing as a regular UTL_PROFILER() but uses '_exclusive_scope_timer' instead.
-// The reason we need this for recursion is nicely explained in the docs.
+struct Style {
+    std::size_t indent = 2;
+    bool        color  = true;
 
-// --- Segment profiling ---
-// -------------------------
+    double cutoff_red    = 0.40; // > 40% of total runtime
+    double cutoff_yellow = 0.20; // > 20% of total runtime
+    double cutoff_gray   = 0.01; // <  1% of total runtime
+};
 
-#define UTL_PROFILER_BEGIN(segment_label_, label_)                                                                     \
-    static utl::profiler::_record_manager utl_profiler_record_manager_##segment_label_(__FILE__, __LINE__, __func__,   \
-                                                                                       label_);                        \
-    utl::profiler::_segment_timer         utl_profiler_segment_timer_##segment_label_(                                 \
-        &utl_profiler_record_manager_##segment_label_)
+namespace color {
 
-#define UTL_PROFILER_END(segment_label_) utl_profiler_segment_timer_##segment_label_.finish()
-// Note 1:
-//
-// Last semicolon is intentiomally skipped so macro requires it at the end and
-// doesn't mess up auto code formatters that have a dislike for statement macros.
-//
-// Note 2:
-//
-// The idea here exactly the same as with scope profiles, except instead of '_scope_timer' we use '_segment_timer'
-// that records time on a '.finish()' call instead of destructor. We can put this call inside the END macro
-// and have a nice 2-macro API for profiling segments without creating a scope.
+constexpr std::string_view red          = "\033[31m";   // call graph rows that take very significant time
+constexpr std::string_view yellow       = "\033[33m";   // call graph rows that take significant time
+constexpr std::string_view gray         = "\033[90m";   // call graph rows that take very little time
+constexpr std::string_view bold_cyan    = "\033[36;1m"; // call graph headings
+constexpr std::string_view bold_green   = "\033[32;1m"; // joined  threads
+constexpr std::string_view bold_magenta = "\033[35;1m"; // running threads
+constexpr std::string_view bold_blue    = "\033[34;1m"; // thread runtime
 
-#define UTL_PROFILER_EXCLUSIVE_BEGIN(segment_label_, label_)                                                           \
-    static utl::profiler::_record_manager   utl_profiler_record_manager_##segment_label_(__FILE__, __LINE__, __func__, \
-                                                                                         label_);                      \
-    utl::profiler::_exclusive_segment_timer utl_profiler_segment_timer_##segment_label_(                               \
-        &utl_profiler_record_manager_##segment_label_)
+constexpr std::string_view reset = "\033[0m";
 
-#define UTL_PROFILER_EXCLUSIVE_END(segment_label_) utl_profiler_segment_timer_##segment_label_.finish()
+} // namespace color
+
+struct FormattedRow {
+    CallsiteInfo callsite;
+    duration     time;
+    std::size_t  depth;
+    double       percentage;
+};
+
+// =================================
+// --- Call graph core structure ---
+// =================================
+
+class NodeMatrix {
+    template <class T>
+    using array_type = std::vector<T>;
+    // Note: Using 'std::unique_ptr<T[]> arrays would shave off 64 bytes from 'sizeof(NodeMatrix)',
+    //       but it's cumbersome and not particularly important for performance
+
+    constexpr static std::size_t col_growth_mul = 2;
+    constexpr static std::size_t row_growth_add = 4;
+    // - rows capacity grows additively in fixed increments
+    // - cols capacity grows multiplicatively
+    // this unusual growth strategy is due to our anticipated growth pattern - callsites are few, every
+    // one needs to be manually created by the user, nodes can quickly grow in number due to recursion
+
+    array_type<NodeId> prev_ids;
+    // [ nodes ] dense vector encoding backwards-traversal of a call graph
+    // 'prev_ids[node_id]' -> id of the previous node in the call graph for 'node_id'
+
+    array_type<NodeId> next_ids;
+    // [ callsites x nodes ] dense matrix encoding forward-traversal of a call graph
+    // 'next_ids(callsite_id, node_id)' -> id of the next node in the call graph for 'node_id' at 'callsite_id',
+    //                                     storage is col-major due to our access pattern
+
+    // Note: Both 'prev_ids' and 'next_ids' will contain 'NodeId::empty' values at positions with no link
+
+    array_type<duration> times;
+    // [ nodes ] dense vector containing time spent at each node of the call graph
+    // 'times[node_id]' -> total time spent at 'node_id'
+
+    array_type<CallsiteInfo> callsites;
+    // [ callsites ] dense vector containing info about the callsites
+    // 'callsites[callsite_id]' -> pointers to file/function/label & line
+
+    std::size_t rows_size     = 0;
+    std::size_t cols_size     = 0;
+    std::size_t rows_capacity = 0;
+    std::size_t cols_capacity = 0;
+
+public:
+    std::size_t rows() const noexcept { return this->rows_size; }
+    std::size_t cols() const noexcept { return this->cols_size; }
+
+    bool empty() const noexcept { return this->rows() == 0 || this->cols() == 0; }
+
+    // - Access (mutable) -
+
+    NodeId& prev_id(NodeId node_id) {
+        assert(to_int(node_id) < this->cols());
+        return this->prev_ids[to_int(node_id)];
+    }
+
+    NodeId& next_id(CallsiteId callsite_id, NodeId node_id) {
+        assert(to_int(callsite_id) < this->rows());
+        assert(to_int(node_id) < this->cols());
+        return this->next_ids[to_int(callsite_id) + to_int(node_id) * this->rows_capacity];
+    }
+
+    duration& time(NodeId node_id) {
+        assert(to_int(node_id) < this->cols());
+        return this->times[to_int(node_id)];
+    }
+
+    CallsiteInfo& callsite(CallsiteId callsite_id) {
+        assert(to_int(callsite_id) < this->rows());
+        return this->callsites[to_int(callsite_id)];
+    }
+
+    // - Access (const) -
+
+    const NodeId& prev_id(NodeId node_id) const {
+        assert(to_int(node_id) < this->cols());
+        return this->prev_ids[to_int(node_id)];
+    }
+
+    const NodeId& next_id(CallsiteId callsite_id, NodeId node_id) const {
+        assert(to_int(callsite_id) < this->rows());
+        assert(to_int(node_id) < this->cols());
+        return this->next_ids[to_int(callsite_id) + to_int(node_id) * this->rows_capacity];
+    }
+
+    const duration& time(NodeId node_id) const {
+        assert(to_int(node_id) < this->cols());
+        return this->times[to_int(node_id)];
+    }
+
+    const CallsiteInfo& callsite(CallsiteId callsite_id) const {
+        assert(to_int(callsite_id) < this->rows());
+        return this->callsites[to_int(callsite_id)];
+    }
+
+    // - Resizing -
+
+    void resize(std::size_t new_rows, std::size_t new_cols) {
+        const bool new_rows_over_capacity = new_rows > this->rows_capacity;
+        const bool new_cols_over_capacity = new_cols > this->cols_capacity;
+        const bool requires_reallocation  = new_rows_over_capacity || new_cols_over_capacity;
+
+        // No reallocation case
+        if (!requires_reallocation) {
+            this->rows_size = new_rows;
+            this->cols_size = new_cols;
+            return;
+        }
+
+        // Reallocate
+        const std::size_t new_rows_capacity =
+            new_rows_over_capacity ? new_rows + NodeMatrix::row_growth_add : this->rows_capacity;
+        const std::size_t new_cols_capacity =
+            new_cols_over_capacity ? new_cols * NodeMatrix::col_growth_mul : this->cols_capacity;
+
+        array_type<NodeId>       new_prev_ids(new_cols_capacity, NodeId::empty);
+        array_type<NodeId>       new_next_ids(new_rows_capacity * new_cols_capacity, NodeId::empty);
+        array_type<duration>     new_times(new_cols_capacity, duration{});
+        array_type<CallsiteInfo> new_callsites(new_rows_capacity, CallsiteInfo{});
+
+        // Copy old data
+        for (std::size_t j = 0; j < this->cols_size; ++j) new_prev_ids[j] = this->prev_ids[j];
+        for (std::size_t j = 0; j < this->cols_size; ++j)
+            for (std::size_t i = 0; i < this->rows_size; ++i)
+                new_next_ids[i + j * new_rows_capacity] = this->next_ids[i + j * this->rows_capacity];
+        for (std::size_t j = 0; j < this->cols_size; ++j) new_times[j] = this->times[j];
+        for (std::size_t i = 0; i < this->rows_size; ++i) new_callsites[i] = this->callsites[i];
+
+        // Assign new data
+        this->prev_ids  = std::move(new_prev_ids);
+        this->next_ids  = std::move(new_next_ids);
+        this->times     = std::move(new_times);
+        this->callsites = std::move(new_callsites);
+
+        this->rows_size     = new_rows;
+        this->cols_size     = new_cols;
+        this->rows_capacity = new_rows_capacity;
+        this->cols_capacity = new_cols_capacity;
+    }
+
+    void grow_callsites() { this->resize(this->rows_size + 1, this->cols_size); }
+
+    void grow_nodes() { this->resize(this->rows_size, this->cols_size + 1); }
+
+    template <class Func, std::enable_if_t<std::is_invocable_v<Func, CallsiteId, NodeId, std::size_t>, bool> = true>
+    void node_apply_recursively(CallsiteId callsite_id, NodeId node_id, Func func, std::size_t depth) const {
+        func(callsite_id, node_id, depth);
+
+        for (std::size_t i = 0; i < this->rows(); ++i) {
+            const CallsiteId next_callsite_id = CallsiteId(i);
+            const NodeId     next_node_id     = this->next_id(next_callsite_id, node_id);
+            if (next_node_id != NodeId::empty)
+                this->node_apply_recursively(next_callsite_id, next_node_id, func, depth + 1);
+        }
+        // 'node_is' corresponds to a matrix column, to iterate over all
+        // "next" nodes we iterate rows (callsites) in a column
+    }
+
+    template <class Func, std::enable_if_t<std::is_invocable_v<Func, CallsiteId, NodeId, std::size_t>, bool> = true>
+    void root_apply_recursively(Func func) const {
+        if (!this->rows_size || !this->cols_size) return; // possibly redundant
+
+        func(CallsiteId::empty, NodeId::root, 0);
+
+        for (std::size_t i = 0; i < this->rows(); ++i) {
+            const CallsiteId next_callsite_id = CallsiteId(i);
+            const NodeId     next_node_id     = this->next_id(next_callsite_id, NodeId::root);
+            if (next_node_id != NodeId::empty) this->node_apply_recursively(next_callsite_id, next_node_id, func, 1);
+        }
+    }
+};
+
+// ================
+// --- Profiler ---
+// ================
+
+struct ThreadLifetimeData {
+    NodeMatrix mat;
+    bool       joined = false;
+};
+
+struct ThreadIdData {
+    std::vector<ThreadLifetimeData> lifetimes;
+    std::size_t                     readable_id;
+    // since we need a map from 'std::thread::id' to both lifetimes and human-readable id mappings,
+    // and those maps would be accessed at the same time, it makes sense to instead avoid a second
+    // map lookup and merge both values into a single struct
+};
+
+class Profiler {
+    // header-inline, only one instance exists, this instance is effectively a persistent
+    // "database" responsible for collecting & formatting results
+
+    using call_graph_storage = std::unordered_map<std::thread::id, ThreadIdData>;
+    // thread ID by itself is not enough to identify a distinct thread with a finite lifetime, OS only guarantees
+    // unique thread ids for currently existing threads, new threads may reuse IDs of the old joined threads,
+    // this is why for every thread ID we store a vector - this vector grows every time a new thread with a given
+    // id is created
+
+    friend struct ThreadCallGraph;
+
+    call_graph_storage call_graph_info;
+    std::mutex         call_graph_mutex;
+
+    std::thread::id main_thread_id = std::this_thread::get_id();
+    std::size_t     thread_counter = 0;
+
+    bool       print_at_destruction = true;
+    std::mutex setter_mutex;
+
+    bool results_are_empty() {
+        // A check used to deduce whether we have any meaningful results to automatically print after exit,
+        // all threads joined, yet none of them contain any profiling records <=> no profiling was ever invoked
+        for (const auto& [thread_id, thread_lifetimes] : this->call_graph_info)
+            for (const auto& lifetime : thread_lifetimes.lifetimes)
+                if (lifetime.joined == false || !lifetime.mat.empty()) return false;
+
+        return true;
+    }
+
+    std::string format_available_results(const Style& style = Style{}) {
+        const std::lock_guard lock(this->call_graph_mutex);
+
+        std::vector<FormattedRow> rows;
+        std::string               res;
+
+        // Format header
+        if (style.color) res += color::bold_cyan;
+        append_fold(res, "\n-------------------- UTL PROFILING RESULTS ---------------------\n");
+        if (style.color) res += color::reset;
+
+        for (const auto& [thread_id, thread_lifetimes] : this->call_graph_info) {
+            for (std::size_t reuse = 0; reuse < thread_lifetimes.lifetimes.size(); ++reuse) {
+                const auto&       mat         = thread_lifetimes.lifetimes[reuse].mat;
+                const bool        joined      = thread_lifetimes.lifetimes[reuse].joined;
+                const std::size_t readable_id = thread_lifetimes.readable_id;
+
+                rows.clear();
+                rows.reserve(mat.cols());
+
+                const std::string thread_str      = (readable_id == 0) ? "main" : std::to_string(readable_id);
+                const bool        thread_uploaded = !mat.empty();
+
+                // Format thread header
+                if (style.color) res += color::bold_cyan;
+                append_fold(res, "\n# Thread [", thread_str, "] (reuse ", std::to_string(reuse), ")");
+                if (style.color) res += color::reset;
+
+                // Format thread status
+                if (style.color) res += joined ? color::bold_green : color::bold_magenta;
+                append_fold(res, joined ? " (joined)" : " (running)");
+                if (style.color) res += color::reset;
+
+                // Early escape for lifetimes that haven't uploaded yet
+                if (!thread_uploaded) {
+                    append_fold(res, '\n');
+                    continue;
+                }
+
+                // Format thread runtime
+                const ms   runtime     = mat.time(NodeId::root);
+                const auto runtime_str = format_number(runtime.count(), std::chars_format::fixed, 2);
+
+                if (style.color) res += color::bold_blue;
+                append_fold(res, " (runtime -> ", runtime_str, " ms)\n");
+                if (style.color) res += color::reset;
+
+                // Gather call graph data in a digestible format
+                mat.root_apply_recursively([&](CallsiteId callsite_id, NodeId node_id, std::size_t depth) {
+                    if (callsite_id == CallsiteId::empty) return;
+
+                    const auto&  callsite   = mat.callsite(callsite_id);
+                    const auto&  time       = mat.time(node_id);
+                    const double percentage = time / runtime;
+
+                    rows.push_back(FormattedRow{callsite, time, depth, percentage});
+                });
+
+                // Format call graph columns row by row
+                std::vector<std::array<std::string, 4>> rows_str;
+                rows_str.reserve(rows.size());
+
+                for (const auto& row : rows) {
+                    const auto percentage_num_str = format_number(row.percentage * 100, std::chars_format::fixed, 2);
+
+                    auto percentage_str = std::string(style.indent * row.depth, ' ');
+                    append_fold(percentage_str, " - ", percentage_num_str, "% ");
+
+                    auto time_str     = format_number(ms(row.time).count(), std::chars_format::fixed, 2) + " ms";
+                    auto label_str    = std::string(row.callsite.label);
+                    auto callsite_str = format_call_site(row.callsite.file, row.callsite.line, row.callsite.func);
+
+                    rows_str.push_back({std::move(percentage_str), std::move(time_str), std::move(label_str),
+                                        std::move(callsite_str)});
+                }
+
+                // Gather column widths for alignment
+                std::size_t width_percentage = 0, width_time = 0, width_label = 0, width_callsite = 0;
+                for (const auto& row : rows_str) {
+                    width_percentage = max(width_percentage, row[0].size());
+                    width_time       = max(width_time, row[1].size());
+                    width_label      = max(width_label, row[2].size());
+                    width_callsite   = max(width_callsite, row[3].size());
+                }
+
+                assert(rows.size() == rows_str.size());
+
+                // Format resulting string with colors & alignment
+                for (std::size_t i = 0; i < rows.size(); ++i) {
+                    const bool color_row_red     = style.color && rows[i].percentage > style.cutoff_red;
+                    const bool color_row_yellow  = style.color && rows[i].percentage > style.cutoff_yellow;
+                    const bool color_row_gray    = style.color && rows[i].percentage < style.cutoff_gray;
+                    const bool color_was_applied = color_row_red || color_row_yellow || color_row_gray;
+
+                    if (color_row_red) res += color::red;
+                    else if (color_row_yellow) res += color::yellow;
+                    else if (color_row_gray) res += color::gray;
+
+                    append_aligned_left(res, rows_str[i][0], width_percentage, '-');
+                    append_fold(res, " | ");
+                    append_aligned_right(res, rows_str[i][1], width_time);
+                    append_fold(res, " | ");
+                    append_aligned_right(res, rows_str[i][2], width_label);
+                    append_fold(res, " | ");
+                    append_aligned_left(res, rows_str[i][3], width_callsite);
+                    append_fold(res, " |");
+
+                    if (color_was_applied) res += color::reset;
+
+                    res += '\n';
+                }
+            }
+        }
+
+        return res;
+    }
+
+    void call_graph_add(std::thread::id thread_id) {
+        const std::lock_guard lock(this->call_graph_mutex);
+
+        const auto [it, emplaced] = this->call_graph_info.try_emplace(thread_id);
+
+        // Emplacement took place =>
+        // This is the first time inserting this thread id, add human-readable mapping that grows by 1 for each new
+        // thread, additional checks are here to ensure that main thread is always '0' and other threads are always
+        // '1+' even if main thread wasn't the first one to register a profiler. This is important because formatting
+        // prints zero-thread as '[main]' and we don't want this title to go to some other thread
+        if (emplaced) it->second.readable_id = (thread_id == this->main_thread_id) ? 0 : ++this->thread_counter;
+
+        // Add a default-constructed call graph matrix to lifetimes,
+        // - if this thread ID was emplaced      then this is a non-reused thread ID
+        // - if this thread ID was already there then this is a     reused thread ID
+        // regardless, our actions are the same
+        it->second.lifetimes.emplace_back();
+    }
+
+    void call_graph_upload(std::thread::id thread_id, NodeMatrix&& info, bool joined) {
+        const std::lock_guard lock(this->call_graph_mutex);
+
+        auto& lifetime  = this->call_graph_info.at(thread_id).lifetimes.back();
+        lifetime.mat    = std::move(info);
+        lifetime.joined = joined;
+    }
+
+public:
+    void upload_this_thread(); // depends on the 'ThreadCallGraph', defined later
+
+    void print_at_exit(bool value) noexcept {
+        const std::lock_guard lock(this->setter_mutex);
+        // useless most of the time, but allows public API to be completely thread-safe
+
+        this->print_at_destruction = value;
+    }
+
+    std::string format_results(const Style& style = Style{}) {
+        this->upload_this_thread();
+        // Call graph from current thread is not yet uploaded by its 'thread_local' destructor, we need to
+        // explicitly pull it which we can easily do since current thread can't contest its own resources
+
+        return this->format_available_results(style);
+    }
+
+    ~Profiler() {
+        if (!this->print_at_destruction) return; // printing was manually disabled
+        if (this->results_are_empty()) return;   // no profiling was ever invoked
+        std::cout << format_available_results();
+    }
+};
+
+inline Profiler profiler;
+
+// =========================
+// --- Thread Call Graph ---
+// =========================
+
+struct ThreadCallGraph {
+    // header-inline-thread_local, gets created whenever we create a new thread anywhere,
+    // this class is responsible for managing some thread-specific things on top of our
+    // core graph traversal structure and provides an actual high-level API for graph traversal
+
+    NodeMatrix      mat;
+    NodeId          current_node_id  = NodeId::empty;
+    time_point      entry_time_point = clock::now();
+    std::thread::id thread_id        = std::this_thread::get_id();
+
+    NodeId create_root_node() {
+        const NodeId prev_node_id = this->current_node_id;
+        this->current_node_id     = NodeId::root; // advance to a new node
+
+        this->mat.grow_nodes();
+        this->mat.prev_id(this->current_node_id) = prev_node_id;
+        // link new node backwards, since this is a root the prev. one is empty and doesn't need to link forwards
+
+        return this->current_node_id;
+    }
+
+    NodeId create_node(CallsiteId callsite_id) {
+        const NodeId prev_node_id = this->current_node_id;
+        this->current_node_id     = NodeId(this->mat.cols()); // advance to a new node
+
+        this->mat.grow_nodes();
+        this->mat.prev_id(this->current_node_id)     = prev_node_id;          // link new node backwards
+        this->mat.next_id(callsite_id, prev_node_id) = this->current_node_id; // link prev. node forwards
+
+        return this->current_node_id;
+    }
+
+    void upload_results(bool joined) {
+        this->mat.time(NodeId::root) = clock::now() - this->entry_time_point;
+        // root node doesn't get time updates from timers, we need to collect total runtime manually
+
+        profiler.call_graph_upload(this->thread_id, NodeMatrix(this->mat), joined); // deep copy & mutex lock, slow
+    }
+
+public:
+    ThreadCallGraph() {
+        profiler.call_graph_add(this->thread_id);
+
+        this->create_root_node();
+    }
+
+    ~ThreadCallGraph() { this->upload_results(true); }
+
+    NodeId traverse_forward(CallsiteId callsite_id) {
+        const NodeId next_node_id = this->mat.next_id(callsite_id, this->current_node_id);
+        // 1 dense matrix lookup to advance the node forward, 1 branch to check its existence
+        // 'callsite_id' is always valid due to callsite & timer initialization order
+
+        // - node missing  => create new node and return its id
+        if (next_node_id == NodeId::empty) return this->create_node(callsite_id);
+
+        // - node exists   =>  return existing id
+        return this->current_node_id = next_node_id;
+    }
+
+    void traverse_back() { this->current_node_id = this->mat.prev_id(this->current_node_id); }
+
+    void record_time(duration time) { this->mat.time(this->current_node_id) += time; }
+
+    CallsiteId callsite_add(const CallsiteInfo& info) { // adds new callsite & returns its id
+        const CallsiteId new_callsite_id = CallsiteId(this->mat.rows());
+
+        this->mat.grow_callsites();
+        this->mat.callsite(new_callsite_id) = info;
+
+        return new_callsite_id;
+    }
+};
+
+inline thread_local ThreadCallGraph thread_call_graph;
+
+inline void Profiler::upload_this_thread() { thread_call_graph.upload_results(false); }
+
+// =======================
+// --- Callsite Marker ---
+// =======================
+
+struct Callsite {
+    // local-thread_local, small marker binding a numeric ID to a callsite
+
+    CallsiteId callsite_id;
+
+public:
+    Callsite(const CallsiteInfo& info) { this->callsite_id = thread_call_graph.callsite_add(info); }
+
+    CallsiteId get_id() const noexcept { return this->callsite_id; }
+};
+
+// =============
+// --- Timer ---
+// =============
+
+class Timer {
+    time_point entry = clock::now();
+
+public:
+    Timer(CallsiteId callsite_id) { thread_call_graph.traverse_forward(callsite_id); }
+
+    void finish() const {
+        thread_call_graph.record_time(clock::now() - this->entry);
+        thread_call_graph.traverse_back();
+    }
+};
+
+struct ScopeTimer : public Timer { // just like regular timer, but finishes at the end of the scope
+    ScopeTimer(CallsiteId callsite_id) : Timer(callsite_id) {}
+
+    constexpr operator bool() const noexcept { return true; }
+    // allows us to use create scope timers inside 'if constexpr' & have applies-to-next-expression semantics for macro
+
+    ~ScopeTimer() { this->finish(); }
+};
+
+} // namespace utl::profiler::impl
+
+// =====================
+// --- Helper macros ---
+// =====================
+
+#define utl_profiler_concat_tokens(a, b) a##b
+#define utl_profiler_concat_tokens_wrapper(a, b) utl_profiler_concat_tokens(a, b)
+#define utl_profiler_uuid(varname_) utl_profiler_concat_tokens_wrapper(varname_, __LINE__)
+// creates token 'varname_##__LINE__' from 'varname_', necessary
+// to work around some macro expansion order shenanigans
+
+// ______________________ PUBLIC API ______________________
+
+// ==========================================
+// --- Definitions with profiling enabled ---
+// ==========================================
+
+namespace utl::profiler {
+
+using impl::Profiler;
+using impl::profiler;
+using impl::Style;
 
 } // namespace utl::profiler
 
+#define UTL_PROFILER_SCOPE(label_)                                                                                     \
+    constexpr bool utl_profiler_uuid(utl_profiler_macro_guard_) = true;                                                \
+    static_assert(utl_profiler_uuid(utl_profiler_macro_guard_), "UTL_PROFILER is a multi-line macro.");                \
+                                                                                                                       \
+    const thread_local utl::profiler::impl::Callsite utl_profiler_uuid(utl_profiler_callsite_)(                        \
+        utl::profiler::impl::CallsiteInfo{__FILE__, __func__, label_, __LINE__});                                      \
+                                                                                                                       \
+    const utl::profiler::impl::ScopeTimer utl_profiler_uuid(utl_profiler_scope_timer_) {                               \
+        utl_profiler_uuid(utl_profiler_callsite_).get_id()                                                             \
+    }
+
+// all variable names are concatenated with a line number to prevent shadowing when then there are multiple nested
+// profilers, this isn't a 100% foolproof solution, but it works reasonably well. Shadowed variables don't have any
+// effect on functionality, but might cause warnings from some static analysis tools
+//
+// 'constexpr bool' and 'static_assert()' are here to improve error messages when this macro is misused as an
+// expression, when someone writes 'if (...) UTL_PROFILER_SCOPE(...) func()' instead of many ugly errors they
+// will see a macro expansion that contains a 'static_assert()' with a proper message
+
+#define UTL_PROFILER(label_)                                                                                           \
+    constexpr bool utl_profiler_uuid(utl_profiler_macro_guard_) = true;                                                \
+    static_assert(utl_profiler_uuid(utl_profiler_macro_guard_), "UTL_PROFILER is a multi-line macro.");                \
+                                                                                                                       \
+    const thread_local utl::profiler::impl::Callsite utl_profiler_uuid(utl_profiler_callsite_)(                        \
+        utl::profiler::impl::CallsiteInfo{__FILE__, __func__, label_, __LINE__});                                      \
+                                                                                                                       \
+    if constexpr (const utl::profiler::impl::ScopeTimer utl_profiler_uuid(utl_profiler_scope_timer_){                  \
+                      utl_profiler_uuid(utl_profiler_callsite_).get_id()})
+
+// 'if constexpr (timer)' allows this macro to "capture" the scope of the following expression
+
+#define UTL_PROFILER_BEGIN(segment_, label_)                                                                           \
+    const thread_local utl::profiler::impl::Callsite utl_profiler_callsite_##segment_(                                 \
+        utl::profiler::impl::CallsiteInfo{__FILE__, __func__, label_, __LINE__});                                      \
+                                                                                                                       \
+    const utl::profiler::impl::Timer utl_profiler_timer_##segment_ { utl_profiler_callsite_##segment_.get_id() }
+
+#define UTL_PROFILER_END(segment_) utl_profiler_timer_##segment_.finish()
+
+// ===========================================
+// --- Definitions with profiling disabled ---
+// ===========================================
+
+// No-op mocks of the public API and minimal necessary includes
+
+#else
+
+#include <cstddef> // size_t
+#include <string>  // string
+
+namespace utl::profiler {
+struct Style {
+    std::size_t indent = 2;
+    bool        color  = true;
+
+    double cutoff_red    = 0.40;
+    double cutoff_yellow = 0.20;
+    double cutoff_gray   = 0.01;
+};
+
+struct Profiler {
+    void print_at_exit(bool) noexcept {}
+
+    void upload_this_thread() {}
+
+    std::string format_results(const Style = Style{}) { return "<profiling is disabled>"; }
+};
+} // namespace utl::profiler
+
+#define UTL_PROFILER_SCOPE(label_) static_assert(true)
+#define UTL_PROFILER(label_)
+#define UTL_PROFILER_BEGIN(segment_, label_) static_assert(true)
+#define UTL_PROFILER_END(segment_) static_assert(true)
+
+// 'static_assert(true)' emulates the "semicolon after the macro" requirement
+
 #endif
-#endif // macro-module UTL_PROFILER
+
+#endif
+#endif // module utl::profiler
 
 
 
@@ -7759,197 +10344,276 @@ inline void _utl_profiler_atexit() {
 //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-#if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_PROGRESSBAR)
-#ifndef UTLHEADERGUARD_PROGRESSBAR
-#define UTLHEADERGUARD_PROGRESSBAR
+#if !defined(UTL_PICK_MODULES) || defined(UTL_MODULE_PROGRESSBAR)
+
+#ifndef utl_progressbar_headerguard
+#define utl_progressbar_headerguard
+
+#define UTL_PROGRESSBAR_VERSION_MAJOR 1
+#define UTL_PROGRESSBAR_VERSION_MINOR 0
+#define UTL_PROGRESSBAR_VERSION_PATCH 1
 
 // _______________________ INCLUDES _______________________
 
-#include <algorithm> // fill_n
-#include <chrono>    // chrono::steady_clock, chrono::time_point<>, chrono::duration_cast<>, chrono::seconds
-#include <cmath>     // floor()
-#include <cstddef>   // size_t
-#include <iomanip>   // setprecision()
-#include <ios>       // fixed
-#include <iostream>  // cout
-#include <iterator>  // ostreambuf_iterator<>
-#include <ostream>   // ostream
-#include <sstream>   // ostringstream
-#include <string>    // string
+#include <algorithm>   // max(), clamp()
+#include <array>       // array
+#include <charconv>    // to_chars
+#include <chrono>      // chrono::steady_clock, chrono::time_point<>, chrono::duration_cast<>
+#include <cstddef>     // size_t
+#include <iostream>    // cout
+#include <iterator>    // ostream_iterator<>
+#include <string>      // string
+#include <string_view> // string_view
 
 // ____________________ DEVELOPER DOCS ____________________
 
 // Simple progress bars for terminal applications. Rendered in ASCII on the main thread with manual updates
 // for maximal compatibility. Perhaps can be extended with some fancier async options that display animations.
 //
-// # ::set_ostream() #
-// Sets ostream used for progress bars.
-//
-// # ::Percentage #
-// Proper progress bar, uses carriage return escape sequence (\r) to render new states in the same spot.
-// Shows an estimate of remaining time.
-//
-// # ::Ruler #
-// Primitive & lightweight progress bar, useful when terminal has no proper support for escape sequences.
+// Used to be implemented in terms of 'std::stringstream' but later got rewritten to improve performance,
+// reduce includes, allow more style configuration and make API more robust against misuse.
 
 // ____________________ IMPLEMENTATION ____________________
 
+namespace utl::progressbar::impl {
+
+// Proper progress bar, uses '\r' to render new state in the same spot.
+// Allocates when formatting things for the first time, after that storage gets reused.
+class Percentage {
+public:
+    // - Public parameters -
+    struct Style {
+        char        fill            = '#';
+        char        empty           = '.';
+        char        left            = '[';
+        char        right           = ']';
+        std::string estimate_prefix = "(remaining: ";
+        std::string estimate_suffix = ")";
+    } style;
+
+    bool show_bar        = true;
+    bool show_percentage = true;
+    bool show_estimate   = true;
+
+    std::size_t bar_length  = 30;
+    double      update_rate = 2.5e-3; // every quarter of a % feels like a good default
+
+    // - Public API -
+    Percentage() : start_time_point(clock::now()) {
+        std::cout << '\n';
+        this->draw();
+        std::cout.flush();
+    }
+
+    void set_progress(double value) {
+        value = std::clamp(value, 0., 1.);
+
+        if (value - this->progress < this->update_rate) return; // prevents progress decrement
+
+        this->progress = value;
+
+        this->draw();
+        std::cout.flush();
+    }
+
+    void finish() {
+        if (this->finished) return; // prevents weird formatting from multiple 'finish()' calls
+
+        this->progress = 1.;
+        this->finished = true;
+
+        this->draw();
+        std::cout << '\n';
+        std::cout.flush();
+    }
+
+    void update_style() {
+        this->draw();
+        std::cout.flush();
+    }
+
+private:
+    // - Internal state -
+    using clock = std::chrono::steady_clock;
+
+    clock::time_point start_time_point = clock::now();
+    std::size_t       max_drawn_length = 0;
+    double            progress         = 0;
+    bool              finished         = false;
+
+    std::string buffer; // keep the buffer so we don't have to reallocate each time
+
+    void format_bar() {
+        if (!this->show_bar) return;
+
+        const std::size_t fill_length  = static_cast<std::size_t>(this->progress * this->bar_length);
+        const std::size_t empty_length = this->bar_length - fill_length;
+
+        this->buffer += this->style.left;
+        this->buffer.append(fill_length, this->style.fill);
+        this->buffer.append(empty_length, this->style.empty);
+        this->buffer += this->style.right;
+        this->buffer += ' ';
+    }
+
+    void format_percentage() {
+        if (!this->show_percentage) return;
+
+        constexpr auto        format    = std::chars_format::fixed;
+        constexpr std::size_t precision = 2;
+        constexpr std::size_t max_chars = 6; // enough for for '0.xx' to '100.xx',
+
+        std::array<char, max_chars> chars;
+        const double                percentage = this->progress * 100; // 'set_progress()' enforces 0 <= progress <= 1
+
+        const auto end_ptr = std::to_chars(chars.data(), chars.data() + max_chars, percentage, format, precision).ptr;
+        // can't error, buffer size is guaranteed to be enough
+
+        this->buffer.append(chars.data(), end_ptr - chars.data());
+        this->buffer += '%';
+        this->buffer += ' ';
+    }
+
+    void format_estimate() {
+        if (!this->show_estimate) return;
+        if (!this->progress) return;
+
+        const auto elapsed  = clock::now() - this->start_time_point;
+        const auto estimate = elapsed * (1. - this->progress) / this->progress;
+
+        const auto hours   = std::chrono::duration_cast<std::chrono::hours>(estimate);
+        const auto minutes = std::chrono::duration_cast<std::chrono::minutes>(estimate - hours);
+        const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(estimate - hours - minutes);
+
+        this->buffer += this->style.estimate_prefix;
+
+        if (hours.count()) {
+            this->buffer += std::to_string(hours.count());
+            this->buffer += " hours ";
+            this->buffer += std::to_string(minutes.count());
+            this->buffer += " min ";
+            this->buffer += std::to_string(seconds.count());
+            this->buffer += " sec";
+        } else if (minutes.count()) {
+            this->buffer += std::to_string(minutes.count());
+            this->buffer += " min ";
+            this->buffer += std::to_string(seconds.count());
+            this->buffer += " sec";
+        } else {
+            this->buffer += std::to_string(seconds.count());
+            this->buffer += " sec";
+        }
+
+        this->buffer += this->style.estimate_suffix;
+    }
+
+    void draw() {
+        this->buffer.clear();
+        this->buffer += '\r';
+
+        // Draw progressbar
+        this->format_bar();
+        this->format_percentage();
+        this->format_estimate();
+
+        // Draw spaces over potential remains of the previous bar (which could be longer due to time estimate)
+        this->max_drawn_length = std::max(this->max_drawn_length, this->buffer.size());
+        this->buffer.append(this->max_drawn_length - this->buffer.size(), ' ');
+
+        std::cout << this->buffer;
+    }
+};
+
+// Minimalistic progress bar, used when terminal doesn't support '\r' (they exist).
+// Does not allocate.
+class Ruler {
+    constexpr static std::string_view ticks      = "0    10   20   30   40   50   60   70   80   90   100%";
+    constexpr static std::string_view ruler      = "|----|----|----|----|----|----|----|----|----|----|";
+    constexpr static std::size_t      bar_length = ruler.size();
+
+public:
+    // - Public parameters -
+    struct Style {
+        char fill            = '#';
+        char ruler_line      = '-';
+        char ruler_delimiter = '|';
+    } style;
+
+    bool show_ticks = true;
+    bool show_ruler = true;
+    bool show_bar   = true; // useless, but might as well have it for uniformity
+
+    // - Public API -
+    Ruler() {
+        std::cout << '\n';
+        this->draw_ticks();
+        std::cout << '\n';
+        this->draw_ruler();
+        std::cout << '\n';
+        std::cout.flush();
+    }
+
+    void set_progress(double value) {
+        value = std::clamp(value, 0., 1.);
+
+        this->progress_in_chars = static_cast<std::size_t>(this->bar_length * value);
+
+        this->draw_bar();
+        std::cout.flush();
+    }
+
+    void finish() {
+        if (this->finished) return; // prevents weird formatting from multiple 'finish()' calls
+
+        this->progress_in_chars = this->bar_length;
+        this->finished          = true;
+
+        this->draw_bar();
+        std::cout << '\n';
+        std::cout.flush();
+    }
+
+private:
+    // - Internal state -
+    std::size_t progress_in_chars = 0;
+    std::size_t chars_drawn       = 0;
+    bool        finished          = false;
+
+    void draw_ticks() {
+        if (!this->show_ticks) return;
+        std::cout << this->ticks;
+    }
+
+    void draw_ruler() {
+        if (!this->show_ruler) return;
+
+        std::array<char, ruler.size()> buffer;
+        for (std::size_t i = 0; i < ruler.size(); ++i)
+            buffer[i] = (this->ruler[i] == '|') ? this->style.ruler_delimiter : this->style.ruler_line;
+        // formats ruler without allocating
+
+        std::cout.write(buffer.data(), buffer.size());
+    }
+
+    void draw_bar() {
+        if (!this->show_bar) return;
+
+        if (this->progress_in_chars > this->chars_drawn)
+            std::fill_n(std::ostream_iterator<char>(std::cout), this->progress_in_chars - this->chars_drawn,
+                        this->style.fill);
+
+        this->chars_drawn = this->progress_in_chars;
+    }
+};
+
+} // namespace utl::progressbar::impl
+
+// ______________________ PUBLIC API ______________________
+
 namespace utl::progressbar {
 
-inline std::ostream* _output_stream = &std::cout;
-
-inline void set_ostream(std::ostream& new_ostream) { _output_stream = &new_ostream; }
-
-class Percentage {
-private:
-    char done_char;
-    char not_done_char;
-    bool show_time_estimate;
-
-    std::size_t length_total;   // full   bar length
-    std::size_t length_current; // filled bar length
-
-    double last_update_percentage;
-    double update_rate;
-
-    using Clock     = std::chrono::steady_clock;
-    using TimePoint = std::chrono::time_point<Clock>;
-
-    TimePoint timepoint_start; // used to estimate remaining time
-    TimePoint timepoint_current;
-
-    int previous_string_length; // used to properly return the carriage when dealing with changed string size
-
-    void draw_progressbar(double percentage) {
-        const auto displayed_percentage = this->update_rate * std::floor(percentage / this->update_rate);
-        // floor percentage to a closest multiple of 'update_rate' for nicer display
-        // since actual updates are only required to happen no more ofter than 'update_rate'
-        // and don't have to correspond to exact multiples of it
-
-        // Estimate remaining time (linearly) and format it min + sec
-        const auto time_elapsed       = this->timepoint_current - this->timepoint_start;
-        const auto estimate_full      = time_elapsed / percentage;
-        const auto estimate_remaining = estimate_full - time_elapsed;
-
-        const auto estimate_remaining_sec = std::chrono::duration_cast<std::chrono::seconds>(estimate_remaining);
-
-        const auto displayed_min = (estimate_remaining_sec / 60ll).count();
-        const auto displayed_sec = (estimate_remaining_sec % 60ll).count();
-
-        const bool show_min  = (displayed_min != 0);
-        const bool show_sec  = (displayed_sec != 0) && !show_min;
-        const bool show_time = (estimate_remaining_sec.count() > 0);
-
-        std::ostringstream ss;
-
-        // Print bar
-        ss << '[';
-        std::fill_n(std::ostreambuf_iterator<char>(ss), this->length_current, this->done_char);
-        std::fill_n(std::ostreambuf_iterator<char>(ss), this->length_total - this->length_current, this->not_done_char);
-        ss << ']';
-
-        // Print percentage
-        ss << ' ' << std::fixed << std::setprecision(2) << 100. * displayed_percentage << '%';
-
-        // Print time estimate
-        if (this->show_time_estimate && show_time) {
-            ss << " (remaining:";
-            if (show_min) ss << ' ' << displayed_min << " min";
-            if (show_sec) ss << ' ' << displayed_sec << " sec";
-            ss << ')';
-        }
-
-        const std::string bar_string = ss.str();
-
-        // Add spaces at the end to overwrite the previous string if it was longer that current
-        const int current_string_length = static_cast<int>(bar_string.length());
-        const int string_length_diff    = this->previous_string_length - current_string_length;
-
-        if (string_length_diff > 0) { std::fill_n(std::ostreambuf_iterator<char>(ss), string_length_diff, ' '); }
-
-        this->previous_string_length = current_string_length;
-
-        // Return the carriage
-        (*_output_stream) << ss.str(); // don't reuse 'bar_string', now 'ss' can also contain spaces at the end
-        (*_output_stream) << '\r';
-        (*_output_stream).flush();
-        // '\r' returns cursor to the beginning of the line => most sensible consoles will
-        // render render new lines over the last one. Otherwise every update produces a
-        // bar on a new line, which looks worse but isn't critical for the purpose.
-    }
-
-public:
-    Percentage(char done_char = '#', char not_done_char = '.', std::size_t bar_length = 30, double update_rate = 1e-2,
-               bool show_time_estimate = true)
-        : done_char(done_char), not_done_char(not_done_char), show_time_estimate(show_time_estimate),
-          length_total(bar_length), length_current(0), last_update_percentage(0), update_rate(update_rate),
-          timepoint_start(Clock::now()), previous_string_length(static_cast<int>(bar_length) + sizeof("[] 100.00%")) {}
-
-    void start() {
-        this->last_update_percentage = 0.;
-        this->length_current         = 0;
-        this->timepoint_start        = Clock::now();
-        (*_output_stream) << '\n';
-    }
-
-    void set_progress(double percentage) {
-        if (percentage - this->last_update_percentage <= this->update_rate) return;
-
-        this->last_update_percentage = percentage;
-        this->length_current         = static_cast<std::size_t>(percentage * static_cast<double>(this->length_total));
-        this->timepoint_current      = Clock::now();
-        this->draw_progressbar(percentage);
-    }
-
-    void finish() {
-        this->last_update_percentage = 1.;
-        this->length_current         = this->length_total;
-        this->draw_progressbar(1.);
-        (*_output_stream) << '\n';
-    }
-};
-
-class Ruler {
-private:
-    char done_char;
-
-    std::size_t length_total;
-    std::size_t length_current;
-
-public:
-    Ruler(char done_char = '#') : done_char(done_char), length_total(51), length_current(0) {}
-
-    void start() {
-        this->length_current = 0;
-
-        (*_output_stream) << '\n'
-                          << " 0    10   20   30   40   50   60   70   80   90   100%\n"
-                          << " |----|----|----|----|----|----|----|----|----|----|\n"
-                          << ' ';
-    }
-
-    void set_progress(double percentage) {
-        const std::size_t length_new = static_cast<std::size_t>(percentage * static_cast<double>(this->length_total));
-
-        if (length_new > length_current) {
-            const auto chars_to_add = length_new - this->length_current;
-            std::fill_n(std::ostreambuf_iterator<char>(*_output_stream), chars_to_add, this->done_char);
-        }
-
-        this->length_current = length_new;
-    }
-
-    void finish() {
-        if (this->length_total > this->length_current) {
-            const auto chars_to_add = this->length_total - this->length_current;
-            std::fill_n(std::ostreambuf_iterator<char>(*_output_stream), chars_to_add, this->done_char);
-        }
-
-        this->length_current = this->length_total;
-
-        (*_output_stream) << '\n';
-    }
-};
+using impl::Percentage;
+using impl::Ruler;
 
 } // namespace utl::progressbar
 
@@ -7971,208 +10635,280 @@ public:
 //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-#if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_RANDOM)
-#ifndef UTLHEADERGUARD_RANDOM
-#define UTLHEADERGUARD_RANDOM
+#if !defined(UTL_PICK_MODULES) || defined(UTL_MODULE_RANDOM)
+
+#ifndef utl_random_headerguard
+#define utl_random_headerguard
+
+#define UTL_RANDOM_VERSION_MAJOR 2
+#define UTL_RANDOM_VERSION_MINOR 1
+#define UTL_RANDOM_VERSION_PATCH 7
 
 // _______________________ INCLUDES _______________________
 
 #include <array>            // array<>
 #include <cassert>          // assert()
 #include <chrono>           // high_resolution_clock
-#include <cstdint>          // uint64_t
+#include <cstdint>          // uint8_t, uint16_t, uint32_t, uint64_t
 #include <initializer_list> // initializer_list<>
 #include <limits>           // numeric_limits<>::digits, numeric_limits<>::min(), numeric_limits<>::max()
 #include <mutex>            // mutex, lock_guard<>
-#include <random>           // random_device, std::uniform_int_distribution<>,
-                            // std::uniform_real_distribution<>, generate_canonical<>
-#include <type_traits>      // is_integral_v<>
+#include <random>           // random_device, uniform_..._distribution<>, generate_canonical<>, seed_seq<>
+#include <thread>           // thread::id, this_thread::get_id()
+#include <type_traits>      // enable_if_t<>, is_integral<>, is_unsigned<>, is_floating_point<>
 #include <utility>          // declval<>()
 #include <vector>           // vector<>, hash<>
 
 // ____________________ DEVELOPER DOCS ____________________
 
-// Implements a proper modern PRNG engine, compatible with std <random>.
-// Adds 'sensible std <random> wrappers' for people who aren't fond of writing
-// 3 lines code just to get a simple rand value.
+// Several <random> compatible PRNGs, slightly improved re-implementations of uniform distributions,
+// "better" entropy sources and several convenience wrappers for rng.
 //
-// # XorShift64StarGenerator #
-// Random 'std::uint64_t' generator that satisfies uniform random number generator requirements
-// from '<random>' (see https://en.cppreference.com/w/cpp/named_req/UniformRandomBitGenerator).
-// Implementation "XorShift64* suggested by Marsaglia G. in 2003 "Journal of Statistical Software"
-// (see https://www.jstatsoft.org/article/view/v008i14).
-// Slightly faster than 'std::rand()', while providing higher quality random.
-// Significantly faster than 'std::mt19937'.
-// State consists of a single 'std::uint64_t', requires seed >= 1.
+// Everything implemented here should be portable assuming reasonable assumptions (like existence of
+// uint32_t, uint64_t, 8-bit bytes, 32-bit floats, 64-bit doubles and etc.) which hold for most platforms.
 //
-// # xorshift64star #
-// Global instance of XorShift64StarGenerator.
-//
-// # ::seed(), ::seed_with_time(), ::seed_with_random_device() #
-// Seeds random with value/current_time/random_device.
-// Random device is a better source of entropy, however it's more expensive to initialize
-// than just taking current time with <ctime>, in some cases a "worse by lightweigh" can
-// be prefered.
-//
-// # ::rand_int(), ::rand_uint(), ::rand_float(), ::rand_double() #
-// Random value in [min, max] range.
-// Floats with no parameters assume range [0, 1].
-//
-// # ::rand_bool() #
-// Randomly chooses 0 or 1.
-//
-// # ::rand_choice() #
-// Randomly chooses a value from initializer list.
-//
-// # ::rand_linear_combination() #
-// Produces "c A + (1-c) B" with random "0 < c < 1" assuming objects "A", "B" support arithmetic operations.
-// Useful for vector and color operations.
+// Optional macros:
+// - #define UTL_RANDOM_USE_INTRINSICS // use rdtsc timestamps for entropy
 
 // ____________________ IMPLEMENTATION ____________________
 
-// ======================================
-// --- Ugly platform-specific entropy ---
-// ======================================
+// ==================================
+// --- Optional __rdtsc() support ---
+// ==================================
 
-// MSVC
-#if defined(UTL_RANDOM_USE_INTRINSICS) && !defined(utl_random_cpu_counter) && defined(_MSC_VER)
-#if defined(_M_IX86)
+#ifdef UTL_RANDOM_USE_INTRINSICS
+
+// x86 RDTSC timestamps make for a good source of entropy
+#ifdef _MSC_VER
 #include <intrin.h>
+#else
+#include <x86intrin.h>
+#endif
+
 #define utl_random_cpu_counter __rdtsc()
-#endif
-#endif
 
-// GCC
-#if defined(UTL_RANDOM_USE_INTRINSICS) && !defined(utl_random_cpu_counter) && defined(__GNUC__)
-#if __has_builtin(__builtin_ia32_rdtsc)
-#define utl_random_cpu_counter __builtin_ia32_rdtsc()
-#endif
-#endif
+#else
 
-// clang
-#if defined(UTL_RANDOM_USE_INTRINSICS) && !defined(utl_random_cpu_counter) && !defined(__GNUC__) && defined(__clang__)
-#if __has_builtin(__builtin_readcyclecounter) && __has_include(<xmmintrin.h>)
-#include <xmmintrin.h>
-#define utl_random_cpu_counter __builtin_readcyclecounter()
-#endif
-#endif
-
-// Fallback onto a constant that changes with each compilation,
-// not good, but better than nothing
-#if !defined(utl_random_cpu_counter)
-#include <string>
+// Fallback onto a constant that changes with each compilation, not good, but better than nothing
+#include <string> // string
 #define utl_random_cpu_counter std::hash<std::string>{}(std::string(__TIME__))
+
 #endif
 
-namespace utl::random {
+namespace utl::random::impl {
 
 // ============================
-// --- Implementation utils ---
+// --- SFINAE & type traits ---
 // ============================
 
+template <class T, class = void>
+struct is_seed_seq : std::false_type {};
 
-// --- Type traits ---
-// -------------------
+template <class T>
+struct is_seed_seq<T, std::void_t<decltype(std::declval<T>().generate(
+                          std::declval<std::uint32_t*>(), std::declval<std::uint32_t*>()))>> : std::true_type {};
 
-#define utl_random_define_trait(trait_name_, ...)                                                                      \
-    template <class T, class = void>                                                                                   \
-    struct trait_name_ : std::false_type {};                                                                           \
-                                                                                                                       \
-    template <class T>                                                                                                 \
-    struct trait_name_<T, std::void_t<decltype(__VA_ARGS__)>> : std::true_type {};                                     \
-                                                                                                                       \
-    template <class T>                                                                                                 \
-    constexpr bool trait_name_##_v = trait_name_<T>::value;                                                            \
-                                                                                                                       \
-    template <class T>                                                                                                 \
-    using trait_name_##_enable_if = std::enable_if_t<trait_name_<T>::value, bool>
+template <class T>
+constexpr bool is_seed_seq_v = is_seed_seq<T>::value;
 
+template <class T>
+using require_is_seed_seq = std::enable_if_t<is_seed_seq<T>::value, bool>;
 
-utl_random_define_trait(_is_seed_seq,
-                        std::declval<T>().generate(std::declval<std::uint32_t*>(), std::declval<std::uint32_t*>()));
-// this type trait is necessary to restrict template constructors & seed function that take 'SeedSeq&& seq', otherwise
-// they will get pick instead of regular seeding methods for even for integer conversions. This is how standard library
-// seems to do it (based on GCC implementation) so we follow their API.
-
-#undef utl_random_define_trait
+// this type trait is necessary to restrict template constructors & seed functions that take 'SeedSeq&& seq',
+// otherwise they will get picked instead of regular seeding methods even for integer arguments.
+// This is how standard library seems to do it (based on GCC implementation) so we follow their API.
 
 template <class>
-constexpr bool _always_false_v = false;
+constexpr bool always_false_v = false;
 
 template <bool Cond>
-using _require = std::enable_if_t<Cond, bool>; // makes SFINAE a bit less cumbersome
+using require = std::enable_if_t<Cond, bool>; // makes SFINAE a bit less cumbersome
+
+template <class T>
+using require_integral = require<std::is_integral_v<T>>;
+
+template <class T>
+using require_bool = require<std::is_same_v<T, bool>>;
+
+template <class T>
+using require_not_bool = require<!std::is_same_v<T, bool>>;
+
+template <class T>
+using require_float = require<std::is_floating_point_v<T>>;
+
+template <class T>
+using require_uint = require<std::is_integral_v<T> && std::is_unsigned_v<T>>;
+
+// ====================
+// --- 128-bit uint ---
+// ====================
+
+// We need 128-bit uint for Lemire's uniform integer distribution algorithm,
+// some PRNGs can also make use of wide integers
+
+// GCC & clang provide 128-bit integers as compiler extension
+#if defined(__SIZEOF_INT128__) && !defined(__wasm__)
+using Uint128 = __uint128_t;
+
+// Otherwise fallback onto either MSVC intrinsics or manual emulation
+#else
+
+// Emulation of 128-bit unsigned integer tailored specifically for usage in 64-bit Lemire's algorithm,
+// this allows us to skip a lot of generic logic since we really only need 3 things:
+//
+//    1) 'uint128(x) * uint128(y)'       that performs 64x64 -> 128 bit multiplication
+//    2) 'static_cast<std::uint64_t>(x)' that returns lower 64 bits
+//    3) 'x >> 64'                       that returns upper 64 bits
+//
+struct Uint128 {
+    std::uint64_t low{}, high{};
+
+    constexpr Uint128(std::uint64_t low) noexcept : low(low) {}
+    constexpr explicit Uint128(std::uint64_t low, std::uint64_t high) noexcept : low(low), high(high) {}
+
+    [[nodiscard]] constexpr operator std::uint64_t() const noexcept { return this->low; }
+
+    [[nodiscard]] constexpr Uint128 operator*(Uint128 other) const noexcept {
+#if defined(UTL_RANDOM_USE_INTRINSICS) && defined(_MSC_VER) && (defined(__x86_64__) || defined(__amd64__))
+        // Unlike GCC, MSVC also requires 'UTL_RANDOM_USE_INTRINSICS' flag since it also needs '#include <intrin.h>'
+        // for 128-bit multiplication, which could be considered a somewhat intrusive thing to include
+
+        std::uint64_t upper = 0;
+        std::uint64_t lower = _umul128(this->low, other.low, &upper);
+
+        return Uint128{lower, upper};
+
+#else
+
+        // Compute all of the cross products
+        const std::uint64_t lo_lo = (this->low & 0xFFFFFFFF) * (other.low & 0xFFFFFFFF);
+        const std::uint64_t hi_lo = (this->low >> 32) * (other.low & 0xFFFFFFFF);
+        const std::uint64_t lo_hi = (this->low & 0xFFFFFFFF) * (other.low >> 32);
+        const std::uint64_t hi_hi = (this->low >> 32) * (other.low >> 32);
+
+        // Add products together, this will never overflow
+        const std::uint64_t cross = (lo_lo >> 32) + (hi_lo & 0xFFFFFFFF) + lo_hi;
+        const std::uint64_t upper = (hi_lo >> 32) + (cross >> 32) + hi_hi;
+        const std::uint64_t lower = (cross << 32) | (lo_lo & 0xFFFFFFFF);
+
+        return Uint128{lower, upper};
+
+#endif
+    }
+
+    [[nodiscard]] constexpr Uint128 operator>>(int) const noexcept { return this->high; }
+};
+
+#endif
 
 // clang-format off
-template<class T> struct _wider { static_assert(_always_false_v<T>, "Missing specialization."); };
+template<class T> struct wider { static_assert(always_false_v<T>, "Missing specialization."); };
 
-template<> struct _wider<std::uint8_t > { using type = std::uint16_t; };
-template<> struct _wider<std::uint16_t> { using type = std::uint32_t; };
-template<> struct _wider<std::uint32_t> { using type = std::uint64_t; };
-template<> struct _wider<std::uint64_t> { using type = void; };
+template<> struct wider<std::uint8_t > { using type = std::uint16_t; };
+template<> struct wider<std::uint16_t> { using type = std::uint32_t; };
+template<> struct wider<std::uint32_t> { using type = std::uint64_t; };
+template<> struct wider<std::uint64_t> { using type = Uint128;       };
 
-template<class T> using _wider_t = typename _wider<T>::type;
-
-template <class T> constexpr bool _has_wider = !std::is_void_v<_wider_t<T>>;
+template<class T> using wider_t = typename wider<T>::type;
 // clang-format on
 
-// --- Bit twiddling utils ---
-// ---------------------------
+// ===========================
+// --- Bit-twiddling utils ---
+// ===========================
+
+template <class T, require_uint<T> = true>
+[[nodiscard]] constexpr T uint_minus(T value) noexcept {
+    return ~value + T(1);
+    // MSVC with '/W2' warning level gives a warning when using unary minus with an unsigned value, this warning
+    // gets elevated to a compilation error by '/sdl' flag, see
+    // https://learn.microsoft.com/en-us/cpp/error-messages/compiler-warnings/compiler-warning-level-2-c4146
+    //
+    // This is a case of MSVC not being standard-compliant, as unsigned '-x' is a perfectly defined operation which
+    // evaluates to the same thing as '~x + 1u'. To work around such warning we define this function
+}
 
 // Merging integers into the bits of a larger one
-[[nodiscard]] constexpr std::uint64_t _merge_uint32_into_uint64(std::uint32_t a, std::uint32_t b) {
+[[nodiscard]] constexpr std::uint64_t merge_uint32_into_uint64(std::uint32_t a, std::uint32_t b) noexcept {
     return static_cast<std::uint64_t>(a) | (static_cast<std::uint64_t>(b) << 32);
 }
 
 // Helper method to crush large uints to uint32_t,
 // inspired by Melissa E. O'Neil's randutils https://gist.github.com/imneme/540829265469e673d045
-template <class T, std::enable_if_t<std::is_integral_v<T> && sizeof(T) <= 8, bool> = true>
-[[nodiscard]] constexpr std::uint32_t _crush_to_uint32(T value) {
+template <class T, require_integral<T> = true, require<sizeof(T) <= 8> = true>
+[[nodiscard]] constexpr std::uint32_t crush_to_uint32(T value) noexcept {
     if constexpr (sizeof(value) <= 4) {
         return std::uint32_t(value);
     } else {
-        std::uint64_t res = value;
-        res *= 0xbc2ad017d719504d;
+        const std::uint64_t res = static_cast<std::uint64_t>(value) * 0xbc2ad017d719504d;
         return static_cast<std::uint32_t>(res ^ (res >> 32));
     }
 }
 
 // Seed sequence helpers
-template <class SeedSeq, _is_seed_seq_enable_if<SeedSeq> = true>
-std::uint32_t _seed_seq_to_uint32(SeedSeq&& seq) {
+template <class SeedSeq, std::size_t size, require_is_seed_seq<SeedSeq> = true>
+void seed_seq_generate(SeedSeq&& seq, std::array<std::uint32_t, size>& dest) noexcept {
+    seq.generate(dest.begin(), dest.end());
+}
+
+template <class SeedSeq, std::size_t size, require_is_seed_seq<SeedSeq> = true>
+void seed_seq_generate(SeedSeq&& seq, std::array<std::uint64_t, size>& dest) noexcept {
+    // since seed_seq produces 32-bit ints, for 64-bit state arrays we have to
+    // generate twice as much values to properly initialize the entire state
+
+    std::array<std::uint32_t, size * 2> temp;
+    seq.generate(temp.begin(), temp.end());
+
+    for (std::size_t i = 0; i < size; ++i) dest[i] = merge_uint32_into_uint64(temp[2 * i], temp[2 * i + 1]);
+}
+
+template <class SeedSeq, require_is_seed_seq<SeedSeq> = true>
+void seed_seq_generate(SeedSeq&& seq, std::uint32_t& dest) noexcept {
     std::array<std::uint32_t, 1> temp;
-    seq.generate(temp.begin(), temp.end());
-    return temp[0];
+    seed_seq_generate(std::forward<SeedSeq>(seq), temp);
+    dest = temp[0];
 }
 
-template <class SeedSeq, _is_seed_seq_enable_if<SeedSeq> = true>
-std::uint64_t _seed_seq_to_uint64(SeedSeq&& seq) {
-    std::array<std::uint32_t, 2> temp;
-    seq.generate(temp.begin(), temp.end());
-    return _merge_uint32_into_uint64(temp[0], temp[1]);
+template <class SeedSeq, require_is_seed_seq<SeedSeq> = true>
+void seed_seq_generate(SeedSeq&& seq, std::uint64_t& dest) noexcept {
+    std::array<std::uint64_t, 1> temp;
+    seed_seq_generate(std::forward<SeedSeq>(seq), temp);
+    dest = temp[0];
 }
 
-// 'std::rotl()' from C++20, used by many PRNGs,
-// have to use long name because platform-specific includes declare '_rotl' as a macro
-template <class T>
-[[nodiscard]] constexpr T _rotl_value(T x, int k) noexcept {
+// Note: 'SeedSeq::generate()' should only throw when used with potentially throwing iterators,
+//       since 'std::array<>::iterator' is non-throwing we can safely mark the functions 'noexcept'
+
+// 'std::rotl()' from C++20, used by many PRNGs
+template <class T, require_uint<T> = true>
+[[nodiscard]] constexpr T rotl(T x, int k) noexcept {
     return (x << k) | (x >> (std::numeric_limits<T>::digits - k));
 }
 
 // Some generators shouldn't be zero initialized, in a perfect world the user would never
 // do that, but in case they happened to do so regardless we can remap 0 to some "weird"
-// value that isn't like to intersect with any other seeds generated by the user. Rejecting
-// zero seeds completely wouldn't be appropriate for compatibility reasons.
-template <class T, std::size_t N>
-[[nodiscard]] constexpr bool _is_zero_state(const std::array<T, N>& state) {
+// value that isn't likely to intersect with any other seeds generated by the user.
+// Rejecting zero seeds completely wouldn't be appropriate for compatibility reasons.
+template <class T, std::size_t N, require_uint<T> = true>
+[[nodiscard]] constexpr bool is_zero_state(const std::array<T, N>& state) {
     for (const auto& e : state)
-        if (e != 0) return false;
+        if (e != T(0)) return false;
     return true;
 }
 
-template <class T>
-constexpr T _default_seed = std::numeric_limits<T>::max() / 2 + 1;
-// an "overall decent" default seed - doesn't gave too many zeroes,
-// unlikely to accidentaly match with a user-defined seed
+template <class ResultType>
+[[nodiscard]] constexpr ResultType mix_seed(ResultType seed) {
+    std::uint64_t state = (static_cast<std::uint64_t>(seed) + 0x9E3779B97f4A7C15);
+    state               = (state ^ (state >> 30)) * 0xBF58476D1CE4E5B9;
+    state               = (state ^ (state >> 27)) * 0x94D049BB133111EB;
+    return static_cast<ResultType>(state ^ (state >> 31));
+    // some of the 16/32-bit PRNGs have bad correlation on the successive seeds, this can  usually be alleviated
+    // by adding a single iteration of a "good" PRNG to pre-mix the seed, here we have an iteration of SplitMix64
+}
+
+template <class T, require_uint<T> = true>
+constexpr T default_seed = std::numeric_limits<T>::max() / 2 + 1;
+// an "overall decent" default seed - doesn't have too many zeroes,
+// unlikely to accidentally match with a user-defined seed
 
 
 // =========================
@@ -8186,7 +10922,7 @@ constexpr T _default_seed = std::numeric_limits<T>::max() / 2 + 1;
 // (C++20 and above, see https://en.cppreference.com/w/cpp/numeric/random/uniform_random_bit_generator)
 
 // Note:
-// Here PRNGs take 'SeedSeq' as a forwaring reference 'SeedSeq&&', while standard PRNGS take 'SeedSeq&',
+// Here PRNGs take 'SeedSeq' as a forwarding reference 'SeedSeq&&', while standard PRNGS take 'SeedSeq&',
 // this is how it should've been done in the standard too, but for some reason they only standardized
 // l-value references, perfect forwarding probably just wasn't in use at the time.
 
@@ -8203,10 +10939,10 @@ namespace generators {
 // Quality:     2/5
 // State:       4 bytes
 //
-// Romu family provides extemely fast non-linear PRNGs, "RomuMono16" is the fastest 16-bit option available
+// Romu family provides extremely fast non-linear PRNGs, "RomuMono16" is the fastest 16-bit option available
 // that still provides some resemblance of quality. There has been some concerns over the math used
 // in its original paper (see https://news.ycombinator.com/item?id=22447848), however I'd yet to find
-// a faster 16-bit PRNG, so if speed is needed at all cost this one provides it.
+// a faster 16-bit PRNG, so if speed is needed at all costs, this one provides it.
 //
 class RomuMono16 {
 public:
@@ -8216,9 +10952,9 @@ private:
     std::uint32_t s{}; // notice 32-bit value as a state rather than two 16-bit ints
 
 public:
-    constexpr explicit RomuMono16(result_type seed = _default_seed<result_type>) noexcept { this->seed(seed); }
+    constexpr explicit RomuMono16(result_type seed = default_seed<result_type>) noexcept { this->seed(seed); }
 
-    template <class SeedSeq, _is_seed_seq_enable_if<SeedSeq> = true>
+    template <class SeedSeq, require_is_seed_seq<SeedSeq> = true>
     explicit RomuMono16(SeedSeq&& seq) {
         this->seed(seq);
     }
@@ -8228,19 +10964,23 @@ public:
 
     constexpr void seed(result_type seed) noexcept {
         this->s = (seed & 0x1fffffffu) + 1156979152u; // accepts 29 seed-bits
+
+        for (std::size_t i = 0; i < 10; ++i) this->operator()();
+        // naively seeded RomuMono produces correlating patterns on the first iterations
+        // for successive seeds, we can do a few iterations to escape that
     }
 
-    template <class SeedSeq, _is_seed_seq_enable_if<SeedSeq> = true>
+    template <class SeedSeq, require_is_seed_seq<SeedSeq> = true>
     void seed(SeedSeq&& seq) {
-        this->s = _seed_seq_to_uint32(seq);
+        seed_seq_generate(std::forward<SeedSeq>(seq), this->s);
 
-        if (this->s == 0) this->seed(_default_seed<result_type>);
+        if (this->s == 0) this->seed(default_seed<result_type>);
     }
 
     constexpr result_type operator()() noexcept {
         const result_type result = this->s >> 16;
         this->s *= 3611795771u;
-        this->s = _rotl_value(this->s, 12);
+        this->s = rotl(this->s, 12);
         return result;
     }
 };
@@ -8265,15 +11005,15 @@ public:
 //
 class SplitMix32 {
 public:
-    using result_type = std::uint64_t;
+    using result_type = std::uint32_t;
 
 private:
     result_type s{};
 
 public:
-    constexpr explicit SplitMix32(result_type seed = _default_seed<result_type>) noexcept { this->seed(seed); }
+    constexpr explicit SplitMix32(result_type seed = default_seed<result_type>) noexcept { this->seed(seed); }
 
-    template <class SeedSeq, _is_seed_seq_enable_if<SeedSeq> = true>
+    template <class SeedSeq, require_is_seed_seq<SeedSeq> = true>
     explicit SplitMix32(SeedSeq&& seq) {
         this->seed(seq);
     }
@@ -8281,11 +11021,15 @@ public:
     [[nodiscard]] static constexpr result_type min() noexcept { return 0; }
     [[nodiscard]] static constexpr result_type max() noexcept { return std::numeric_limits<result_type>::max(); }
 
-    constexpr void seed(result_type seed) noexcept { this->s = seed; }
+    constexpr void seed(result_type seed) noexcept {
+        this->s = mix_seed(seed);
+        // naively seeded SplitMix32 has a horrible correlation between successive seeds, we can mostly alleviate
+        // the issue by pre-mixing the seed with a single iteration of a "better" 64-bit algorithm
+    }
 
-    template <class SeedSeq, _is_seed_seq_enable_if<SeedSeq> = true>
+    template <class SeedSeq, require_is_seed_seq<SeedSeq> = true>
     void seed(SeedSeq&& seq) {
-        this->s = _seed_seq_to_uint32(seq);
+        seed_seq_generate(std::forward<SeedSeq>(seq), this->s);
     }
 
     constexpr result_type operator()() noexcept {
@@ -8315,9 +11059,9 @@ private:
     std::array<result_type, 4> s{};
 
 public:
-    constexpr explicit Xoshiro128PP(result_type seed = _default_seed<result_type>) noexcept { this->seed(seed); }
+    constexpr explicit Xoshiro128PP(result_type seed = default_seed<result_type>) noexcept { this->seed(seed); }
 
-    template <class SeedSeq, _is_seed_seq_enable_if<SeedSeq> = true>
+    template <class SeedSeq, require_is_seed_seq<SeedSeq> = true>
     explicit Xoshiro128PP(SeedSeq&& seq) {
         this->seed(seq);
     }
@@ -8334,23 +11078,23 @@ public:
         this->s[3] = splitmix();
     }
 
-    template <class SeedSeq, _is_seed_seq_enable_if<SeedSeq> = true>
+    template <class SeedSeq, require_is_seed_seq<SeedSeq> = true>
     void seed(SeedSeq&& seq) {
-        seq.generate(this->s.begin(), this->s.end());
+        seed_seq_generate(std::forward<SeedSeq>(seq), this->s);
 
         // ensure we don't hit an invalid all-zero state
-        if (_is_zero_state(this->s)) this->seed(_default_seed<result_type>);
+        if (is_zero_state(this->s)) this->seed(default_seed<result_type>);
     }
 
     constexpr result_type operator()() noexcept {
-        const result_type result = _rotl_value(this->s[0] + this->s[3], 7) + this->s[0];
+        const result_type result = rotl(this->s[0] + this->s[3], 7) + this->s[0];
         const result_type t      = s[1] << 9;
         this->s[2] ^= this->s[0];
         this->s[3] ^= this->s[1];
         this->s[1] ^= this->s[2];
         this->s[0] ^= this->s[3];
         this->s[2] ^= t;
-        this->s[3] = _rotl_value(this->s[3], 11);
+        this->s[3] = rotl(this->s[3], 11);
         return result;
     }
 };
@@ -8363,7 +11107,7 @@ public:
 // Quality:     2/5
 // State:       12 bytes
 //
-// Romu family provides extemely fast non-linear PRNGs, "RomuTrio" is the fastest 32-bit option available
+// Romu family provides extremely fast non-linear PRNGs, "RomuTrio" is the fastest 32-bit option available
 // that still provides some resemblance of quality. There has been some concerns over the math used
 // in its original paper (see https://news.ycombinator.com/item?id=22447848), however I'd yet to find
 // a faster 32-bit PRNG, so if speed is needed at all cost this one provides it.
@@ -8376,9 +11120,9 @@ private:
     std::array<result_type, 3> s{};
 
 public:
-    constexpr explicit RomuTrio32(result_type seed = _default_seed<result_type>) noexcept { this->seed(seed); }
+    constexpr explicit RomuTrio32(result_type seed = default_seed<result_type>) noexcept { this->seed(seed); }
 
-    template <class SeedSeq, _is_seed_seq_enable_if<SeedSeq> = true>
+    template <class SeedSeq, require_is_seed_seq<SeedSeq> = true>
     explicit RomuTrio32(SeedSeq&& seq) {
         this->seed(seq);
     }
@@ -8393,21 +11137,21 @@ public:
         this->s[2] = splitmix();
     }
 
-    template <class SeedSeq, _is_seed_seq_enable_if<SeedSeq> = true>
+    template <class SeedSeq, require_is_seed_seq<SeedSeq> = true>
     void seed(SeedSeq&& seq) {
-        seq.generate(this->s.begin(), this->s.end());
+        seed_seq_generate(std::forward<SeedSeq>(seq), this->s);
 
         // ensure we don't hit an invalid all-zero state
-        if (_is_zero_state(this->s)) this->seed(_default_seed<result_type>);
+        if (is_zero_state(this->s)) this->seed(default_seed<result_type>);
     }
 
     constexpr result_type operator()() noexcept {
         const result_type xp = this->s[0], yp = this->s[1], zp = this->s[2];
         this->s[0] = 3323815723u * zp;
         this->s[1] = yp - xp;
-        this->s[1] = _rotl_value(this->s[1], 6);
+        this->s[1] = rotl(this->s[1], 6);
         this->s[2] = zp - yp;
-        this->s[2] = _rotl_value(this->s[2], 22);
+        this->s[2] = rotl(this->s[2], 22);
         return xp;
     }
 };
@@ -8435,9 +11179,9 @@ private:
     result_type s{};
 
 public:
-    constexpr explicit SplitMix64(result_type seed = _default_seed<result_type>) noexcept { this->seed(seed); }
+    constexpr explicit SplitMix64(result_type seed = default_seed<result_type>) noexcept { this->seed(seed); }
 
-    template <class SeedSeq, _is_seed_seq_enable_if<SeedSeq> = true>
+    template <class SeedSeq, require_is_seed_seq<SeedSeq> = true>
     explicit SplitMix64(SeedSeq&& seq) {
         this->seed(seq);
     }
@@ -8447,9 +11191,9 @@ public:
 
     constexpr void seed(result_type seed) noexcept { this->s = seed; }
 
-    template <class SeedSeq, _is_seed_seq_enable_if<SeedSeq> = true>
+    template <class SeedSeq, require_is_seed_seq<SeedSeq> = true>
     void seed(SeedSeq&& seq) {
-        this->s = _seed_seq_to_uint64(seq);
+        seed_seq_generate(std::forward<SeedSeq>(seq), this->s);
     }
 
     constexpr result_type operator()() noexcept {
@@ -8479,9 +11223,9 @@ private:
     std::array<result_type, 4> s{};
 
 public:
-    constexpr explicit Xoshiro256PP(result_type seed = _default_seed<result_type>) noexcept { this->seed(seed); }
+    constexpr explicit Xoshiro256PP(result_type seed = default_seed<result_type>) noexcept { this->seed(seed); }
 
-    template <class SeedSeq, _is_seed_seq_enable_if<SeedSeq> = true>
+    template <class SeedSeq, require_is_seed_seq<SeedSeq> = true>
     explicit Xoshiro256PP(SeedSeq&& seq) {
         this->seed(seq);
     }
@@ -8498,26 +11242,23 @@ public:
         this->s[3] = splitmix();
     }
 
-    template <class SeedSeq, _is_seed_seq_enable_if<SeedSeq> = true>
+    template <class SeedSeq, require_is_seed_seq<SeedSeq> = true>
     void seed(SeedSeq&& seq) {
-        this->s[0] = _seed_seq_to_uint64(seq); // since seed_seq produces 32-bit ints,
-        this->s[1] = _seed_seq_to_uint64(seq); // we have to generate multiple and then
-        this->s[2] = _seed_seq_to_uint64(seq); // join them into std::uint64_t's to
-        this->s[3] = _seed_seq_to_uint64(seq); // properly initialize the entire state
+        seed_seq_generate(std::forward<SeedSeq>(seq), this->s);
 
         // ensure we don't hit an invalid all-zero state
-        if (_is_zero_state(this->s)) this->seed(_default_seed<result_type>);
+        if (is_zero_state(this->s)) this->seed(default_seed<result_type>);
     }
 
     constexpr result_type operator()() noexcept {
-        const result_type result = _rotl_value(this->s[0] + this->s[3], 23) + this->s[0];
+        const result_type result = rotl(this->s[0] + this->s[3], 23) + this->s[0];
         const result_type t      = this->s[1] << 17;
         this->s[2] ^= this->s[0];
         this->s[3] ^= this->s[1];
         this->s[1] ^= this->s[2];
         this->s[0] ^= this->s[3];
         this->s[2] ^= t;
-        this->s[3] = _rotl_value(this->s[3], 45);
+        this->s[3] = rotl(this->s[3], 45);
         return result;
     }
 };
@@ -8530,7 +11271,7 @@ public:
 // Quality:     2/5
 // State:       16 bytes
 //
-// Romu family provides extemely fast non-linear PRNGs, "DuoJr" is the fastest 64-bit option available
+// Romu family provides extremely fast non-linear PRNGs, "DuoJr" is the fastest 64-bit option available
 // that still provides some resemblance of quality. There has been some concerns over the math used
 // in its original paper (see https://news.ycombinator.com/item?id=22447848), however I'd yet to find
 // a faster 64-bit PRNG, so if speed is needed at all cost this one provides it.
@@ -8543,9 +11284,9 @@ private:
     std::array<result_type, 2> s{};
 
 public:
-    constexpr explicit RomuDuoJr64(result_type seed = _default_seed<result_type>) noexcept { this->seed(seed); }
+    constexpr explicit RomuDuoJr64(result_type seed = default_seed<result_type>) noexcept { this->seed(seed); }
 
-    template <class SeedSeq, _is_seed_seq_enable_if<SeedSeq> = true>
+    template <class SeedSeq, require_is_seed_seq<SeedSeq> = true>
     explicit RomuDuoJr64(SeedSeq&& seq) {
         this->seed(seq);
     }
@@ -8559,20 +11300,19 @@ public:
         this->s[1] = splitmix(); // using SplitMix64 to initialize its state
     }
 
-    template <class SeedSeq, _is_seed_seq_enable_if<SeedSeq> = true>
+    template <class SeedSeq, require_is_seed_seq<SeedSeq> = true>
     void seed(SeedSeq&& seq) {
-        this->s[0] = _seed_seq_to_uint64(seq); // seed_seq returns 32-bit ints, we have to generate
-        this->s[1] = _seed_seq_to_uint64(seq); // multiple to initialize full state of 64-bit values
+        seed_seq_generate(std::forward<SeedSeq>(seq), this->s);
 
         // ensure we don't hit an invalid all-zero state
-        if (_is_zero_state(this->s)) this->seed(_default_seed<result_type>);
+        if (is_zero_state(this->s)) this->seed(default_seed<result_type>);
     }
 
     constexpr result_type operator()() noexcept {
         const result_type res = this->s[0];
         this->s[0]            = 15241094284759029579u * this->s[1];
         this->s[1]            = this->s[1] - res;
-        this->s[1]            = _rotl_value(this->s[1], 27);
+        this->s[1]            = rotl(this->s[1], 27);
         return res;
     }
 };
@@ -8580,21 +11320,21 @@ public:
 // --- CSPRNGs ---
 // ---------------
 
-// Implementation of ChaCha20 CPRNG conforming to RFC 7539 standard
+// Implementation of ChaCha20 CSPRNG conforming to RFC 7539 standard
 // see https://datatracker.ietf.org/doc/html/rfc7539
 //     https://www.rfc-editor.org/rfc/rfc7539#section-2.4
 //     https://en.wikipedia.org/wiki/Salsa20
 
-// Quarted-round operation for ChaCha20 stream cipher
-constexpr void _quarter_round(std::uint32_t& a, std::uint32_t& b, std::uint32_t& c, std::uint32_t& d) {
-    a += b, d ^= a, d = _rotl_value(d, 16);
-    c += d, b ^= c, b = _rotl_value(b, 12);
-    a += b, d ^= a, d = _rotl_value(d, 8);
-    c += d, b ^= c, b = _rotl_value(b, 7);
+// Quarter-round operation for ChaCha20 stream cipher
+constexpr void quarter_round(std::uint32_t& a, std::uint32_t& b, std::uint32_t& c, std::uint32_t& d) {
+    a += b, d ^= a, d = rotl(d, 16);
+    c += d, b ^= c, b = rotl(b, 12);
+    a += b, d ^= a, d = rotl(d, 8);
+    c += d, b ^= c, b = rotl(b, 7);
 }
 
 template <std::size_t rounds>
-[[nodiscard]] constexpr std::array<std::uint32_t, 16> _chacha_rounds(const std::array<std::uint32_t, 16>& input) {
+[[nodiscard]] constexpr std::array<std::uint32_t, 16> chacha_rounds(const std::array<std::uint32_t, 16>& input) {
     auto state = input;
 
     static_assert(rounds % 2 == 0, "ChaCha rounds happen in pairs, total number should be divisible by 2.");
@@ -8607,16 +11347,16 @@ template <std::size_t rounds>
 
     for (std::size_t i = 0; i < alternating_round_pairs; ++i) {
         // Column rounds
-        _quarter_round(state[0], state[4], state[8], state[12]);
-        _quarter_round(state[1], state[5], state[9], state[13]);
-        _quarter_round(state[2], state[6], state[10], state[14]);
-        _quarter_round(state[3], state[7], state[11], state[15]);
+        quarter_round(state[0], state[4], state[8], state[12]);
+        quarter_round(state[1], state[5], state[9], state[13]);
+        quarter_round(state[2], state[6], state[10], state[14]);
+        quarter_round(state[3], state[7], state[11], state[15]);
 
         // Diagonal rounds
-        _quarter_round(state[0], state[5], state[10], state[15]);
-        _quarter_round(state[1], state[6], state[11], state[12]);
-        _quarter_round(state[2], state[7], state[8], state[13]);
-        _quarter_round(state[3], state[4], state[9], state[14]);
+        quarter_round(state[0], state[5], state[10], state[15]);
+        quarter_round(state[1], state[6], state[11], state[12]);
+        quarter_round(state[2], state[7], state[8], state[13]);
+        quarter_round(state[3], state[4], state[9], state[14]);
     }
 
     for (std::size_t i = 0; i < state.size(); ++i) state[i] += input[i];
@@ -8659,14 +11399,14 @@ private:
         };
 
         // Fill new block
-        this->block = _chacha_rounds<rounds>(input);
+        this->block = chacha_rounds<rounds>(input);
         ++this->counter;
     }
 
 public:
-    constexpr explicit ChaCha(result_type seed = _default_seed<result_type>) noexcept { this->seed(seed); }
+    constexpr explicit ChaCha(result_type seed = default_seed<result_type>) noexcept { this->seed(seed); }
 
-    template <class SeedSeq, _is_seed_seq_enable_if<SeedSeq> = true>
+    template <class SeedSeq, require_is_seed_seq<SeedSeq> = true>
     explicit ChaCha(SeedSeq&& seq) {
         this->seed(seq);
     }
@@ -8685,7 +11425,7 @@ public:
         this->generate_new_block();
     }
 
-    template <class SeedSeq, _is_seed_seq_enable_if<SeedSeq> = true>
+    template <class SeedSeq, require_is_seed_seq<SeedSeq> = true>
     void seed(SeedSeq&& seq) {
         // Seed sequence allows user to introduce more entropy into the state
 
@@ -8714,26 +11454,20 @@ using ChaCha8  = ChaCha<8>;
 using ChaCha12 = ChaCha<12>;
 using ChaCha20 = ChaCha<20>;
 
-
 } // namespace generators
 
-// ===========================
-// --- Default global PRNG ---
-// ===========================
-
-using default_generator_type = generators::Xoshiro256PP;
-using default_result_type    = default_generator_type::result_type;
-
-inline default_generator_type default_generator;
+// ===============
+// --- Entropy ---
+// ===============
 
 inline std::seed_seq entropy_seq() {
-    // Ensure thread safery of our entropy source, it should generally work fine even without
+    // Ensure thread safety of our entropy source, it should generally work fine even without
     // it, but with this we can be sure things never race
     static std::mutex     entropy_mutex;
     const std::lock_guard entropy_guard(entropy_mutex);
 
     // Hardware entropy (if implemented),
-    // some platfroms (mainly MinGW) implements random device as a regular PRNG that
+    // some platforms (mainly MinGW) implements random device as a regular PRNG that
     // doesn't change from run to run, this is horrible, but we can somewhat improve
     // things by mixing other sources of entropy. Since hardware entropy is a rather
     // limited resource we only call it once.
@@ -8755,29 +11489,33 @@ inline std::seed_seq entropy_seq() {
     // CPU counter (if available, hashed compilation time otherwise)
     const auto cpu_counter = static_cast<std::uint64_t>(utl_random_cpu_counter);
 
+    // Thread ID (guarantees different seeding for thread-local PRNGs)
+    const std::size_t thread_id = std::hash<std::thread::id>{}(std::this_thread::get_id());
+
     // Note:
-    // There are other sources of entropy, such as function adresses,
+    // There are other sources of entropy, such as function addresses,
     // but those can be rather "constant" on some platforms
 
-    return {seed_rd, _crush_to_uint32(seed_time), _crush_to_uint32(heap_address_hash),
-            _crush_to_uint32(stack_address_hash), _crush_to_uint32(cpu_counter)};
+    return {
+        seed_rd,                             //
+        crush_to_uint32(seed_time),          //
+        crush_to_uint32(heap_address_hash),  //
+        crush_to_uint32(stack_address_hash), //
+        crush_to_uint32(cpu_counter),        //
+        crush_to_uint32(thread_id)           //
+    };
 }
 
 inline std::uint32_t entropy() {
     auto seq = entropy_seq();
-    return _seed_seq_to_uint32(seq);
+
+    std::uint32_t res;
+    seed_seq_generate(std::move(seq), res);
+    return res;
     // returns 'std::uint32_t' to mimic the return type of 'std::random_device', if we return uint64_t
     // brace-initializers will complain about narrowing conversion on some generators. If someone want
     // more entropy than that they can always use the whole sequence as a generic solution.
     // Also having one 'random::entropy()' is much nicer than 'random::entropy_32()' & 'random::entropy_64()'.
-}
-
-inline void seed(default_result_type random_seed) noexcept { default_generator.seed(random_seed); }
-
-inline void seed_with_entropy() {
-    auto seq = entropy_seq();
-    default_generator.seed(seq);
-    // for some god-forsaken reason seeding sequence constructors std:: generators take only l-value sequences
 }
 
 // =====================
@@ -8787,14 +11525,14 @@ inline void seed_with_entropy() {
 // --- Uniform int distribution ---
 // --------------------------------
 
-template <class T, class Gen, _require<std::is_integral_v<T> && std::is_unsigned_v<T>> = true>
-constexpr T _uniform_uint_lemier(Gen& gen, T range) noexcept(noexcept(gen())) {
-    using W = _wider_t<T>;
+template <class T, class Gen, require_uint<T> = true>
+constexpr T uniform_uint_lemire(Gen& gen, T range) noexcept(noexcept(gen())) {
+    using W = wider_t<T>;
 
     W product = W(gen()) * W(range);
     T low     = T(product);
     if (low < range) {
-        while (low < -range % range) {
+        while (low < uint_minus(range) % range) {
             product = W(gen()) * W(range);
             low     = T(product);
         }
@@ -8802,26 +11540,16 @@ constexpr T _uniform_uint_lemier(Gen& gen, T range) noexcept(noexcept(gen())) {
     return product >> std::numeric_limits<T>::digits;
 }
 
-template <class T, class Gen, _require<std::is_integral_v<T> && std::is_unsigned_v<T>> = true>
-constexpr T _uniform_uint_modx1(Gen& gen, T range) noexcept(noexcept(gen())) {
-    T x{}, r{};
-    do {
-        x = gen();
-        r = x % range;
-    } while (x - r > T(-range));
-    return r;
-} // slightly slower than lemier, but doesn't require a wider type
-
-// Reimplementation of libc++ `std::uniform_int_distribution<>` except
+// Reimplementation of libstdc++ 'std::uniform_int_distribution<>' except
 // - constexpr
 // - const-qualified (relative to distribution parameters)
 // - noexcept as long as 'Gen::operator()' is noexcept, which is true for all generators in this module
-// - supports `std::uint8_t`, `std::int8_t`, `char`
+// - supports 'std::uint8_t', 'std::int8_t', 'char'
 // - produces the same sequence on each platform
-// Performance is exactly the same a libc++ version of `std::uniform_int_distribution<>`,
-// in fact, it is likely to return the exact same sequence for all types except 64-bit integers
-template <class T, class Gen, _require<std::is_integral_v<T>> = true>
-constexpr T _generate_uniform_int(Gen& gen, T min, T max) noexcept {
+// Performance is exactly the same a libstdc++ version of 'std::uniform_int_distribution<>',
+// in fact, it is likely to return the exact same sequence for most types
+template <class T, class Gen, require_integral<T> = true>
+constexpr T generate_uniform_int(Gen& gen, T min, T max) noexcept(noexcept(gen())) {
     using result_type    = T;
     using unsigned_type  = std::make_unsigned_t<result_type>;
     using generated_type = typename Gen::result_type;
@@ -8840,17 +11568,16 @@ constexpr T _generate_uniform_int(Gen& gen, T min, T max) noexcept {
 
     // PRNG has enough state for the range
     if (prng_range > range) {
-        const common_type ext_range = range + 1; // range can be zero
+        const common_type ext_range = range + 1; // never overflows due to branch condition
 
-        // PRNG uses all 'common_type' bits uniformly
-        // => use Lemier's algorithm if possible, fallback onto modx1 otherwise,
-        //    libc++ uses conditionally compiled lemier's with 128-bit ints intead of doing a fallback,
-        //    this is slightly faster, but leads to platforms-dependant sequences
+        // PRNG is bit-uniform
+        // => use Lemire's algorithm, GCC/clang provide 128-bit arithmetics natively, other
+        //    compilers use emulation, Lemire with emulated 128-bit ints performs about the
+        //    same as Java's "modx1", which is the best algorithm without wide arithmetics
         if constexpr (prng_range == type_range) {
-            if constexpr (_has_wider<common_type>) res = _uniform_uint_lemier(gen, ext_range);
-            else res = _uniform_uint_modx1(gen, ext_range);
+            res = uniform_uint_lemire<common_type>(gen, ext_range);
         }
-        // PRNG doesn't use all bits uniformly (usually because 'prng_min' is '1')
+        // PRNG is non-uniform (usually because 'prng_min' is '1')
         // => fallback onto a 2-division algorithm
         else {
             const common_type scaling = prng_range / ext_range;
@@ -8860,19 +11587,19 @@ constexpr T _generate_uniform_int(Gen& gen, T min, T max) noexcept {
             res /= scaling;
         }
     }
-    // PRNG needs several invocations to aquire enough state for the range
+    // PRNG needs several invocations to acquire enough state for the range
     else if (prng_range < range) {
         common_type temp{};
         do {
             constexpr common_type ext_prng_range = (prng_range < type_range) ? prng_range + 1 : type_range;
-            temp = ext_prng_range * _generate_uniform_int<common_type>(gen, 0, range / ext_prng_range);
+            temp = ext_prng_range * generate_uniform_int<common_type>(gen, 0, range / ext_prng_range);
             res  = temp + (common_type(gen()) - prng_min);
         } while (res >= range || res < temp);
     } else {
         res = common_type(gen()) - prng_min;
     }
 
-    return min + res;
+    return static_cast<T>(min + res);
 
     // Note 1:
     // 'static_cast<>()' preserves bit pattern of signed/unsigned integers of the same size as long as
@@ -8884,20 +11611,16 @@ constexpr T _generate_uniform_int(Gen& gen, T min, T max) noexcept {
     // This would be a bit nicer semantically with C++20 `std::bit_cast<>`, but not ultimately any different.
 
     // Note 2:
-    // 'ext_prng_range' has a ternary purely to silence a false compiler warning from about division by zero due to
+    // 'ext_prng_range' has a ternary purely to silence a false compiler warning about division by zero due to
     // 'prng_range + 1' overflowing into '0' when 'prng_range' is equal to 'type_range'. Falling into this runtime
     // branch requires 'prng_range < range <= type_range' making such situation impossible, here we simply clamp the
     // value to 'type_range' so it doesn't overflow and trip the compiler when analyzing constexpr for potential UB.
+
+    // Note 3:
+    // 'static_cast<T>()' in return is functionally useless, but prevents some false positive warnings on MSVC
 }
 
-// 'static_cast<>()' preserves bit pattern of signed/unsigned integers of the same size as long as
-// those integers are two-complement (see https://en.wikipedia.org/wiki/Two's_complement), this is
-// true for most platforms and is in fact guaranteed for standard fixed-width types like 'uint32_t'
-// on any platform (see https://en.cppreference.com/w/cpp/types/integer)
-//
-// This means signed integer distribution can simply use unsigned algorithm and reinterpret the result internally.
-// This would be a bit nicer semantically with C++20 `std::bit_cast<>`, but not ultimately any different.
-template <class T = int, _require<std::is_integral_v<T>> = true>
+template <class T = int, require_integral<T> = true>
 struct UniformIntDistribution {
     using result_type = T;
 
@@ -8912,16 +11635,16 @@ struct UniformIntDistribution {
 
     template <class Gen>
     constexpr T operator()(Gen& gen) const noexcept(noexcept(gen())) {
-        return _generate_uniform_int<result_type>(gen, this->pars.min, this->pars.max);
+        return generate_uniform_int<result_type>(gen, this->pars.min, this->pars.max);
     }
 
     template <class Gen>
     constexpr T operator()(Gen& gen, const param_type& p) const noexcept(noexcept(gen())) {
         assert(p.min < p.max);
-        return _generate_uniform_int<result_type>(gen, p.min, p.max);
+        return generate_uniform_int<result_type>(gen, p.min, p.max);
     } // for std-compatibility
 
-    constexpr result_type               reset() const noexcept {} // nothing to reset, provided for std-compatibility
+    constexpr void                      reset() const noexcept {} // nothing to reset, provided for std-compatibility
     [[nodiscard]] constexpr param_type  params() const noexcept { return this->pars; }
     constexpr void                      params(const param_type& p) noexcept { *this = UniformIntDistribution(p); }
     [[nodiscard]] constexpr result_type a() const noexcept { return this->pars.min; }
@@ -8929,14 +11652,14 @@ struct UniformIntDistribution {
     [[nodiscard]] constexpr result_type min() const noexcept { return this->pars.min; }
     [[nodiscard]] constexpr result_type max() const noexcept { return this->pars.max; }
 
+    constexpr bool operator==(const UniformIntDistribution& other) noexcept {
+        return this->a() == other.a() && this->b() == other.b();
+    }
+    constexpr bool operator!=(const UniformIntDistribution& other) noexcept { return !(*this == other); }
+
 private:
     param_type pars{};
 };
-
-template <class T>
-constexpr bool operator==(const UniformIntDistribution<T>& lhs, const UniformIntDistribution<T>& rhs) noexcept {
-    return lhs.a() == rhs.a() && lhs.b() == rhs.b();
-}
 
 // --- Uniform real distribution ---
 // ---------------------------------
@@ -8948,7 +11671,7 @@ static_assert(std::numeric_limits<double>::digits == 53, "Platform not supported
 static_assert(std::numeric_limits<float>::digits == 24, "Platform not supported, 'double' is expected to be 64-bit.");
 
 template <class T>
-constexpr int _bit_width(T value) noexcept {
+constexpr int bit_width(T value) noexcept {
     int width = 0;
     while (value >>= 1) ++width;
     return width;
@@ -8956,7 +11679,7 @@ constexpr int _bit_width(T value) noexcept {
 
 // Constexpr reimplementation of 'std::generate_canonical<>()'
 template <class T, class Gen>
-constexpr T _generate_canonical_generic(Gen& gen) noexcept(noexcept(gen())) {
+constexpr T generate_canonical_generic(Gen& gen) noexcept(noexcept(gen())) {
     using float_type     = T;
     using generated_type = typename Gen::result_type;
 
@@ -8969,7 +11692,7 @@ constexpr T _generate_canonical_generic(Gen& gen) noexcept(noexcept(gen())) {
     constexpr generated_type prng_range = prng_max - prng_min;
     constexpr generated_type type_range = std::numeric_limits<generated_type>::max();
 
-    constexpr int prng_bits = (prng_range < type_range) ? _bit_width(prng_range + 1) : 1 + _bit_width(prng_range);
+    constexpr int prng_bits = (prng_range < type_range) ? bit_width(prng_range + 1) : 1 + bit_width(prng_range);
     // how many full bits of randomness PRNG produces on each invocation, prng_bits == floor(log2(prng_range + 1)),
     // ternary handles the case that would overflow when (prng_range == type_range)
 
@@ -8979,14 +11702,14 @@ constexpr T _generate_canonical_generic(Gen& gen) noexcept(noexcept(gen())) {
         return count;
     }();
     // GCC and MSVC use runtime conversion to floating point and std::ceil() & std::log() to obtain
-    // this value, in MSVC for example we have something like this:
+    // this value, in MSVC (before LWG 2524 implementation) for example we had something like this:
     //    > invocations_needed = std::ceil( float_type(float_bits) / std::log2( float_type(prng_range) + 1 ) )
     // which is not constexpr due to math functions, we can do a similar thing much easier by just counting bits
     // generated per each invocation. This returns the same thing for any sane PRNG, except since it only counts
     // "full bits" esoteric ranges such as [1, 3] which technically have 1.5 bits of randomness will be counted
     // as 1 bit of randomness, thus overestimating the invocations a little. In practice this makes 0 difference
     // since its only matters for exceedingly small 'prng_range' and such PRNGs simply don't exist in nature, and
-    // even if they are theoretically used they will simply use a few more invocation to produce a proper result
+    // even if they are theoretically used they will simply use a few more invocations to produce a proper result
 
     constexpr float_type prng_float_max   = static_cast<float_type>(prng_max);
     constexpr float_type prng_float_min   = static_cast<float_type>(prng_min);
@@ -8998,12 +11721,18 @@ constexpr T _generate_canonical_generic(Gen& gen) noexcept(noexcept(gen())) {
     for (int i = 0; i < invocations_needed; ++i) {
         res += (static_cast<float_type>(gen()) - static_cast<float_type>(prng_min)) * factor;
         factor *= prng_float_range;
-    } // same algorithm is used by 'std::generate_canonical<>' in all major compilers as of 2025
+    }
+    res /= factor;
+    // same algorithm is used by 'std::generate_canonical<>' in GCC/clang as of 2025, MSVC used to do the same
+    // before the P0952R2 overhaul (see https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2023/p0952r2.html)
 
-    return res / factor;
+    if (res >= float_type(1)) res = float_type(1) - std::numeric_limits<float_type>::epsilon() / float_type(2);
+    // GCC patch that fixes occasional generation of '1's, has non-zero effect on performance
+
+    return res;
 }
 
-// Wrapper that adds special case optimizations for `_generate_canonical_generic<>()'
+// Wrapper that adds special case optimizations for `generate_canonical_generic<>()'
 template <class T, class Gen>
 constexpr T generate_canonical(Gen& gen) noexcept(noexcept(gen())) {
     using float_type     = T;
@@ -9029,15 +11758,16 @@ constexpr T generate_canonical(Gen& gen) noexcept(noexcept(gen())) {
 
     // Note 1: Note hexadecimal float literals, 'p' separates hex-base from the exponent
     // Note 2: Floats have 'mantissa_size + 1' significant bits due to having a sign bit
+    // Note 3: All of the methods below produce [0, 1) range
 
     // Bit-uniform PRNGs can be simply bitmasked & shifted to obtain mantissa
     // 64-bit float, 64-bit uniform PRNG
-    // => multiplication algorithm, see [https://prng.di.unimi.it/]
+    // => multiplication algorithm, see https://prng.di.unimi.it/
     if constexpr (prng_is_bit_uniform && sizeof(float_type) == 8 && sizeof(generated_type) == 8) {
         return (gen() >> exponent_bits_64) * mantissa_hex_64;
     }
     // 64-bit float, 32-bit uniform PRNG
-    // => "low-high" algorithm, see [https://www.doornik.com/research/randomdouble.pdf]
+    // => "low-high" algorithm, see https://www.doornik.com/research/randomdouble.pdf
     else if constexpr (prng_is_bit_uniform && sizeof(T) == 8 && sizeof(generated_type) == 4) {
         return (gen() * pow2_minus_64) + (gen() * pow2_minus_32);
     }
@@ -9053,11 +11783,11 @@ constexpr T generate_canonical(Gen& gen) noexcept(noexcept(gen())) {
     }
     // Generic case, no particular optimizations can be made
     else {
-        return _generate_canonical_generic<T>(gen);
+        return generate_canonical_generic<T>(gen);
     }
 }
 
-template <class T = double, _require<std::is_floating_point_v<T>> = true>
+template <class T = double, require_float<T> = true>
 struct UniformRealDistribution {
     using result_type = T;
 
@@ -9081,93 +11811,380 @@ struct UniformRealDistribution {
         return p.min + generate_canonical<result_type>(gen) * (p.max - p.min);
     } // for std-compatibility
 
-    constexpr result_type reset() const noexcept {} // there is nothing to reset, provided for std-API compatibility
+    constexpr void        reset() const noexcept {} // nothing to reset, provided for std-API compatibility
     constexpr param_type  params() const noexcept { return this->pars; }
     constexpr void        params(const param_type& p) noexcept { *this = UniformRealDistribution(p); }
     constexpr result_type a() const noexcept { return this->pars.min; }
     constexpr result_type b() const noexcept { return this->pars.max; }
     constexpr result_type min() const noexcept { return this->pars.min; }
     constexpr result_type max() const noexcept { return this->pars.max; }
+
+    constexpr bool operator==(const UniformRealDistribution& other) noexcept {
+        return this->a() == other.a() && this->b() == other.b();
+    }
+    constexpr bool operator!=(const UniformRealDistribution& other) noexcept { return !(*this == other); }
 };
 
+// --- Normal distribution ---
+// ---------------------------
+
+template <class T = double, require_float<T> = true>
+struct NormalDistribution {
+    using result_type = T;
+
+    struct param_type {
+        result_type mean   = 0;
+        result_type stddev = 1;
+    } pars{};
+
+private:
+    // Marsaglia Polar algorithm generates values in pairs so we need to cache the 2nd one
+    result_type saved           = 0;
+    bool        saved_available = false;
+
+    // Implementation of Marsaglia Polar method for N(0, 1) based on libstdc++,
+    // the algorithm is exactly the same, except we use a faster uniform distribution
+    // ('generate_canonical()' that was implemented earlier)
+    //
+    // Note 1:
+    // Even if 'generate_canonical()' produced [0, 1] range instead of [0, 1),
+    // this would not be an issue since Marsaglia Polar is a rejection method and does
+    // not care about the inclusion of upper-boundaries, they get rejected by 'r2 > T(1)' check
+    //
+    // Note 2:
+    // As far as normal distributions go we have 3 options:
+    //    - Box-Muller
+    //    - Marsaglia Polar
+    //    - Ziggurat
+    // Box-Muller performance is similar to Marsaglia Polar, but it has issues working with [0, 1]
+    // 'generate_canonical()'. Ziggurat is usually ~50% faster, but involver several KB of lookup tables
+    // and a MUCH more cumbersome and difficult to generalize implementation. Most (in fact, all I've seen so far)
+    // ziggurat implementations found online are absolutely atrocious. There is a very interesting and well-made
+    // paper by Christopher McFarland (2015, see https://pmc.ncbi.nlm.nih.gov/articles/PMC4812161/ for pdf) that
+    // proposes several significant improvements, but it has even more lookup tables (~12 KB in total) and even
+    // harder implementation. For the sake of robustness we will stick to Polar method for now.
+    //
+    // Note 3:
+    // Not 'constexpr' due to the <cmath> nonsense, can't do anything about it, will be fixed with C++23.
+    //
+    template <class Gen>
+    result_type generate_standard_normal(Gen& gen) noexcept {
+        if (this->saved_available) {
+            this->saved_available = false;
+            return this->saved;
+        }
+
+        result_type x, y, r2;
+
+        do {
+            x  = T(2) * generate_canonical<result_type>(gen) - T(1);
+            y  = T(2) * generate_canonical<result_type>(gen) - T(1);
+            r2 = x * x + y * y;
+        } while (r2 > T(1) || r2 == T(0));
+
+        const result_type mult = std::sqrt(-2 * std::log(r2) / r2);
+
+        this->saved_available = true;
+        this->saved           = x * mult;
+
+        return y * mult;
+    }
+
+public:
+    constexpr NormalDistribution() = default;
+    constexpr NormalDistribution(T mean, T stddev) noexcept : pars({mean, stddev}) { assert(stddev >= T(0)); }
+    constexpr NormalDistribution(const param_type& p) noexcept : pars(p) { assert(p.stddev >= T(0)); }
+
+    template <class Gen>
+    result_type operator()(Gen& gen) noexcept {
+        return this->generate_standard_normal(gen) * this->pars.stddev + this->pars.mean;
+    }
+
+    template <class Gen>
+    result_type operator()(Gen& gen, const param_type& params) noexcept {
+        assert(params.stddev >= T(0));
+        return this->generate_standard_normal(gen) * params.stddev + params.mean;
+    }
+
+    constexpr void reset() noexcept {
+        this->saved           = 0;
+        this->saved_available = false;
+    }
+    [[nodiscard]] constexpr param_type  param() const noexcept { return this->pars; }
+    constexpr void                      param(const param_type& p) noexcept { *this = NormalDistribution(p); }
+    [[nodiscard]] constexpr result_type mean() const noexcept { return this->pars.mean; }
+    [[nodiscard]] constexpr result_type stddev() const noexcept { return this->pars.stddev; }
+    [[nodiscard]] constexpr result_type min() const noexcept { return std::numeric_limits<result_type>::lowest(); }
+    [[nodiscard]] constexpr result_type max() const noexcept { return std::numeric_limits<result_type>::max(); }
+
+    constexpr bool operator==(const NormalDistribution& other) noexcept {
+        return this->mean() == other.mean() && this->stddev() == other.stddev() &&
+               this->saved_available == other.saved_available && this->saved == other.saved;
+    }
+    constexpr bool operator!=(const NormalDistribution& other) noexcept { return !(*this == other); }
+};
+
+// --- Approximate normal distribution ---
+// ---------------------------------------
+
+// Extremely fast, but noticeably imprecise normal distribution, can be very useful for fuzzing & gamedev
+
+template <class T, require_uint<T> = true>
+[[nodiscard]] constexpr int popcount(T x) noexcept {
+    constexpr auto bitmask_1 = static_cast<T>(0x5555555555555555UL);
+    constexpr auto bitmask_2 = static_cast<T>(0x3333333333333333UL);
+    constexpr auto bitmask_3 = static_cast<T>(0x0F0F0F0F0F0F0F0FUL);
+
+    constexpr auto bitmask_16 = static_cast<T>(0x00FF00FF00FF00FFUL);
+    constexpr auto bitmask_32 = static_cast<T>(0x0000FFFF0000FFFFUL);
+    constexpr auto bitmask_64 = static_cast<T>(0x00000000FFFFFFFFUL);
+
+    x = (x & bitmask_1) + ((x >> 1) & bitmask_1);
+    x = (x & bitmask_2) + ((x >> 2) & bitmask_2);
+    x = (x & bitmask_3) + ((x >> 4) & bitmask_3);
+
+    if constexpr (sizeof(T) > 1) x = (x & bitmask_16) + ((x >> 8) & bitmask_16);
+    if constexpr (sizeof(T) > 2) x = (x & bitmask_32) + ((x >> 16) & bitmask_32);
+    if constexpr (sizeof(T) > 4) x = (x & bitmask_64) + ((x >> 32) & bitmask_64);
+
+    return x; // GCC seem to be smart enough to replace this with a built-in
+} // C++20 adds a proper 'std::popcount()'
+
+// Quick approximation of normal distribution based on this excellent reddit thread:
+// https://www.reddit.com/r/algorithms/comments/yyz59u/fast_approximate_gaussian_generator/
+//
+// Lack of <cmath> functions also allows us to 'constexpr' everything
+
 template <class T>
-constexpr bool operator==(const UniformRealDistribution<T>& lhs, const UniformRealDistribution<T>& rhs) noexcept {
-    return lhs.a() == rhs.a() && lhs.b() == rhs.b();
+[[nodiscard]] constexpr T approx_standard_normal_from_u32_pair(std::uint32_t major, std::uint32_t minor) noexcept {
+    constexpr T delta = T(1) / T(4294967296); // (1 / 2^32)
+
+    T x = T(popcount(major)); // random binomially distributed integer 0 to 32
+    x += minor * delta;       // linearly fill the gaps between integers
+    x -= T(16.5);             // re-center around 0 (the mean should be 16+0.5)
+    x *= T(0.3535534);        // scale to ~1 standard deviation
+    return x;
+
+    // 'x' now has a mean of 0, stddev very close to 1, and lies strictly in [-5.833631, 5.833631] range,
+    // there are exactly 33 * 2^32 possible outputs which is slightly more than 37 bits of entropy,
+    // the distribution is approximated via 33 equally spaced intervals each of which is further subdivided
+    // into 2^32 parts. As a result we have a very fast, but noticeably inaccurate approximation, not suitable
+    // for research, but might prove very useful in fuzzing / gamedev where quality is not that important.
 }
 
-// ========================
-// --- Random Functions ---
-// ========================
+template <class T>
+[[nodiscard]] constexpr T approx_standard_normal_from_u64(std::uint64_t rng) noexcept {
+    return approx_standard_normal_from_u32_pair<T>(static_cast<std::uint32_t>(rng >> 32),
+                                                   static_cast<std::uint32_t>(rng));
+}
+
+template <class T, class Gen>
+constexpr T approx_standard_normal(Gen& gen) noexcept {
+    // Ensure PRNG is bit-uniform
+    using generated_type = typename Gen::result_type;
+
+    static_assert(Gen::min() == 0);
+    static_assert(Gen::max() == std::numeric_limits<generated_type>::max());
+
+    // Forward PRNG to a fast approximation
+    if constexpr (sizeof(generated_type) == 8) {
+        return approx_standard_normal_from_u64<T>(gen());
+    } else if constexpr (sizeof(generated_type) == 4) {
+        return approx_standard_normal_from_u32_pair<T>(gen(), gen());
+    } else {
+        static_assert(always_false_v<T>, "ApproxNormalDistribution<> only supports bit-uniform 32/64-bit PRNGs.");
+        // we could use a slower fallback for esoteric PRNGs, but I think it's better to explicitly state when "fast
+        // approximate" is not available, esoteric PRNGs are already handled by a regular NormalDistribution
+    }
+}
+
+template <class T = double, require_float<T> = true>
+struct ApproxNormalDistribution {
+    using result_type = T;
+
+    struct param_type {
+        result_type mean   = 0;
+        result_type stddev = 1;
+    } pars{};
+
+    constexpr ApproxNormalDistribution() = default;
+    constexpr ApproxNormalDistribution(T mean, T stddev) noexcept : pars({mean, stddev}) { assert(stddev >= T(0)); }
+    constexpr ApproxNormalDistribution(const param_type& p) noexcept : pars(p) { assert(p.stddev >= T(0)); }
+
+    template <class Gen>
+    constexpr result_type operator()(Gen& gen) const noexcept {
+        return approx_standard_normal<result_type>(gen) * this->pars.stddev + this->pars.mean;
+    }
+
+    template <class Gen>
+    constexpr result_type operator()(Gen& gen, const param_type& params) const noexcept {
+        assert(params.stddev >= T(0));
+        return approx_standard_normal<result_type>(gen) * params.stddev + params.mean;
+    }
+
+    constexpr void                     reset() const noexcept {} // nothing to reset, provided for std-API compatibility
+    [[nodiscard]] constexpr param_type param() const noexcept { return this->pars; }
+    constexpr void                     param(const param_type& p) noexcept { *this = NormalDistribution(p); }
+    [[nodiscard]] constexpr result_type mean() const noexcept { return this->pars.mean; }
+    [[nodiscard]] constexpr result_type stddev() const noexcept { return this->pars.stddev; }
+    [[nodiscard]] constexpr result_type min() const noexcept { return std::numeric_limits<result_type>::lowest(); }
+    [[nodiscard]] constexpr result_type max() const noexcept { return std::numeric_limits<result_type>::max(); }
+
+    constexpr bool operator==(const ApproxNormalDistribution& other) noexcept {
+        return this->mean() == other.mean() && this->stddev() == other.stddev();
+    }
+    constexpr bool operator!=(const ApproxNormalDistribution& other) noexcept { return !(*this == other); }
+};
+
+// =========================
+// --- Convenient random ---
+// =========================
 
 // Note 1:
-// Despite the intuitive judgement, benchmarks don't seem to indicate that creating
-// new distribution objects on each call introduces any noticeble overhead
-//
-// sizeof(std::uniform_int_distribution<int>)     ==  8
-// sizeof(std::uniform_real_distribution<double>) == 16
-// sizeof(std::normal_distribution<double>)       == 32
-//
-// and same thing for 'UniformIntDistribution', 'UniformRealDistribution'
+// Despite the intuitive judgement, creating new distribution objects on each call doesn't introduce
+// any meaningful overhead. There is however a bit of additional overhead due to 'thread_local' branch
+// caused by the thread local PRNG. It is still much faster than 'rand()' or regular <random> usage, but
+// if user wants to have the bleeding edge performance they should use distributions manually.
 
 // Note 2:
 // No '[[nodiscard]]' since random functions inherently can't be pure due to advancing the generator state.
 // Discarding return values while not very sensible, can still be done for the sake of advancing state.
-// Ideally we would want users to advance the state directly, but I'm not sure how to communicate that in
-// '[[nodiscard]]' warnings.
 
-inline int rand_int(int min, int max) noexcept {
-    const UniformIntDistribution<int> distr{min, max};
-    return distr(default_generator);
+// Note 3:
+// "Convenient" random uses a thread-local PRNG lazily initialized with entropy, this is a very sane default for
+// most cases. If explicit seeding is needed it can be achieved with 'thread_local_prng().seed(...)'.
+
+// --- Global PRNG ---
+// -------------------
+
+using PRNG = generators::Xoshiro256PP;
+
+inline PRNG& thread_local_prng() {
+    // no '[[nodiscard]]' as it can be used for a side effect of initializing PRNG
+    // no 'noexcept' because entropy source can allocate & fail
+    thread_local PRNG prng(entropy_seq());
+    return prng;
 }
 
-inline int rand_uint(unsigned int min, unsigned int max) noexcept {
-    const UniformIntDistribution<unsigned int> distr{min, max};
-    return distr(default_generator);
+// --- Distribution functions ---
+// ------------------------------
+
+// Generic variate, other functions are implemented in terms of this one
+template <class Dist>
+auto variate(Dist&& dist) -> typename std::decay_t<Dist>::result_type {
+    return dist(thread_local_prng());
 }
 
-inline float rand_float() noexcept { return generate_canonical<float>(default_generator); }
-
-inline float rand_float(float min, float max) noexcept {
-    const UniformRealDistribution<float> distr{min, max};
-    return distr(default_generator);
+// Integer U[min, max]
+template <class T, require_integral<T> = true>
+T uniform(T min, T max) {
+    return variate(UniformIntDistribution<T>{min, max});
 }
 
-inline float rand_normal_float() {
-    std::normal_distribution<float> distr;
-    return distr(default_generator);
+// Boolean U[0, 1]
+template <class T, require_integral<T> = true, require_bool<T> = true>
+T uniform() {
+    return variate(UniformIntDistribution<std::uint8_t>{0, 1});
 }
 
-inline double rand_double() noexcept { return generate_canonical<double>(default_generator); }
-
-inline double rand_double(double min, double max) noexcept {
-    const UniformRealDistribution<double> distr{min, max};
-    return distr(default_generator);
+// Float U[min, max)
+template <class T, require_float<T> = true>
+T uniform(T min, T max) {
+    return variate(UniformRealDistribution<T>{min, max});
 }
 
-inline double rand_normal_double() {
-    std::normal_distribution<double> distr;
-    return distr(default_generator);
+// Float U[0, 1)
+template <class T, require_float<T> = true>
+T uniform() {
+    return variate(UniformRealDistribution<T>{0, 1});
 }
 
-inline bool rand_bool() noexcept { return static_cast<bool>(rand_uint(0, 1)); }
+// Float N(mean, stddev)
+template <class T, require_float<T> = true>
+T normal(T mean, T stddev) {
+    return variate(NormalDistribution<T>{mean, stddev});
+    // slower due to discarding state, but that is unavoidable in this API
+}
 
+// Float N(0, 1)
+template <class T, require_float<T> = true>
+T normal() {
+    thread_local NormalDistribution<T> dist{};
+    return variate(dist);
+    // this version can use distribution state properly due to the constant parameters
+}
+
+// Choose random element from a list
 template <class T>
-const T& rand_choice(std::initializer_list<T> objects) noexcept {
-    const int random_index = rand_int(0, static_cast<int>(objects.size()) - 1);
-    return objects.begin()[random_index];
+T choose(std::initializer_list<T> list) {
+    return list.begin()[uniform<std::size_t>(0, list.size() - 1)];
 }
 
-template <class T>
-T rand_linear_combination(const T& A, const T& B) noexcept(noexcept(A + B) && noexcept(A * 1.)) {
-    const auto coef = rand_double();
-    return A * coef + B * (1. - coef);
-} // random linear combination of 2 colors/vectors/etc
+template <class Container>
+auto choose(const Container& list) {
+    return list.at(uniform<std::size_t>(0, list.size() - 1));
+}
+
+// --- Typed shortcuts ---
+// -----------------------
+
+using Uint = unsigned int;
+
+// clang-format off
+inline    int uniform_int   (   int min,    int max) { return uniform<   int>(min, max); }
+inline   Uint uniform_uint  (  Uint min,   Uint max) { return uniform<  Uint>(min, max); }
+inline   bool uniform_bool  (                      ) { return uniform<  bool>(        ); }
+inline  float uniform_float ( float min,  float max) { return uniform< float>(min, max); }
+inline double uniform_double(double min, double max) { return uniform<double>(min, max); }
+inline  float uniform_float (                      ) { return uniform< float>(        ); }
+inline double uniform_double(                      ) { return uniform<double>(        ); }
+
+inline  float normal_float ( float mean,  float stddev) { return  normal< float>(mean, stddev); }
+inline double normal_double(double mean, double stddev) { return  normal<double>(mean, stddev); }
+inline  float normal_float (                          ) { return  normal< float>(            ); }
+inline double normal_double(                          ) { return  normal<double>(            ); }
+// clang-format on
+
+} // namespace utl::random::impl
+
+// ______________________ PUBLIC API ______________________
+
+namespace utl::random {
+
+namespace generators = impl::generators;
+
+using impl::entropy_seq;
+using impl::entropy;
+
+using impl::UniformIntDistribution;
+using impl::UniformRealDistribution;
+using impl::NormalDistribution;
+using impl::ApproxNormalDistribution;
+using impl::generate_canonical;
+
+using impl::PRNG;
+using impl::thread_local_prng;
+
+using impl::choose;
+using impl::variate;
+using impl::uniform;
+using impl::normal;
+
+using impl::Uint;
+using impl::uniform_int;
+using impl::uniform_uint;
+using impl::uniform_bool;
+using impl::uniform_float;
+using impl::uniform_double;
+using impl::normal_float;
+using impl::normal_double;
+
+using impl::choose;
 
 } // namespace utl::random
 
 #endif
 #endif // module utl::random
-
 
 
 
@@ -9183,202 +12200,261 @@ T rand_linear_combination(const T& A, const T& B) noexcept(noexcept(A + B) && no
 //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-#include <mutex>
-#include <stdexcept>
-#include <type_traits>
-#if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_SHELL)
-#ifndef UTLHEADERGUARD_SHELL
-#define UTLHEADERGUARD_SHELL
+#if !defined(UTL_PICK_MODULES) || defined(UTL_MODULE_SHELL)
+
+#ifndef utl_shell_headerguard
+#define utl_shell_headerguard
+
+#define UTL_SHELL_VERSION_MAJOR 1
+#define UTL_SHELL_VERSION_MINOR 0
+#define UTL_SHELL_VERSION_PATCH 4
 
 // _______________________ INCLUDES _______________________
 
-#include <cstddef>       // size_t
-#include <cstdlib>       // atexit(), system(), rand()
-#include <filesystem>    // fs::remove(), fs::path, fs::exists(), fs::temp_directory_path()
-#include <fstream>       // ofstream, ifstream
-#include <sstream>       // ostringstream
-#include <string>        // string
-#include <string_view>   // string_view
-#include <unordered_set> // unordered_set<>
-#include <vector>        // vector<>
+#include <cstdlib>     // system()
+#include <filesystem>  // fs::remove(), fs::path, fs::exists(), fs::temp_directory_path()
+#include <fstream>     // ofstream, ifstream
+#include <stdexcept>   // runtime_error
+#include <string>      // string, size_t
+#include <string_view> // string_view
+#include <thread>      // thread::id, this_thread::get_id()
 
 // ____________________ DEVELOPER DOCS ____________________
 
-// Command line utils that allow simple creation of temporary files and command line
-// calls with stdout and stderr piping (a task surprisingly untrivial in standard C++).
+// RAII handles for temporary file creation, 'std::system()' wrapper to execute shell commands.
 //
-// # ::random_ascii_string() #
-// Creates random ASCII string of given length.
-// Uses chars in ['a', 'z'] range.
+// Running commands while capturing both stdout & stderr is surprisingly difficult to do in standard
+// C++, piping output to temporary files and then reading them seems to be the most portable way since
+// piping works the same way in the vast majority of shells including Windows 'batch'.
 //
-// # ::generate_temp_file() #
-// Generates temporary .txt file with a random unique name, and returns it's filepath.
-// Files generated during current runtime can be deleted with '::clear_temp_files()'.
-// If '::clear_temp_files()' wasn't called manually, it gets called automatically upon exiting 'main()'.
-// Uses relative path internally.
-//
-// # ::clear_temp_files() #
-// Clears temporary files generated during current runtime.
-//
-// # ::erase_temp_file() #
-// Clears a single temporary file with given filepath.
-//
-// # ::run_command() #
-// Runs a command using the default system shell.
-// Returns piped status (error code), stdout and stderr.
-//
-// # ::exe_path() #
-// Parses executable path from argcv as std::string_view.
-//
-// # ::command_line_args() #
-// Parses command line arguments from argcv as std::string_view.
+// API tries to be robust, but at the end of the day we're largely at the whim of the system when it comes
+// to filesystem races and shell execution, not much that we could do without hooking to system APIs directly.
 
 // ____________________ IMPLEMENTATION ____________________
 
-namespace utl::shell {
+namespace utl::shell::impl {
 
-// =================================
-// --- Temporary File Generation ---
-// =================================
+// ==================================
+// --- Random filename generation ---
+// ==================================
 
-[[nodiscard]] inline std::string random_ascii_string(std::size_t length) {
+// To generate random filenames we need to generate random characters
+
+// For our use case entropy source has 3 requirements:
+//    1. It should be different on each run
+//    2. It should be different on each thread
+//    3. It should be thread-safe
+// Good statistical quality isn't particularly important.
+inline std::uint64_t entropy() {
+    const std::uint64_t time_entropy   = std::chrono::high_resolution_clock::now().time_since_epoch().count();
+    const std::uint64_t thread_entropy = std::hash<std::thread::id>{}(std::this_thread::get_id());
+    return time_entropy ^ thread_entropy;
+};
+
+// We want to avoid modifying the state of 'std::rand()', so we use a fast & small thread-local PRNG
+constexpr std::uint64_t splitmix64(std::uint64_t state) noexcept {
+    std::uint64_t result = (state += 0x9E3779B97f4A7C15);
+    result               = (result ^ (result >> 30)) * 0xBF58476D1CE4E5B9;
+    result               = (result ^ (result >> 27)) * 0x94D049BB133111EB;
+    return result ^ (result >> 31);
+}
+
+// Since char distribution quality isn't particularly important, we can avoid
+// including the whole <random> and just use a biased remainder formula
+inline char random_char() {
+    thread_local std::uint64_t state = entropy();
+
+    state = splitmix64(state);
+
     constexpr char min_char = 'a';
     constexpr char max_char = 'z';
 
+    return static_cast<char>(min_char + state % std::uint64_t(max_char - min_char + 1));
+}
+
+// In the end we have a pretty fast general-purpose random string function
+inline std::string random_ascii_string(std::size_t length = 20) {
     std::string result(length, '0');
-    for (std::size_t i = 0; i < length; ++i)
-        result[i] = static_cast<char>(min_char + std::rand() % (max_char - min_char + 1));
-    // we don't really care about the quality of random here, and we already include <cstdlib>,
-    // so rand() is fine, otherwise we'd have to include the entirety of <random> for this function.
-    // There's also a whole buch of issues caused by questionable design <random>, (such as
-    // 'std::uniform_int_distribution' not supporting 'char') for generating random strings properly
-    // (aka faster and thread-safe) there is a much better option in 'utl::random::rand_string()'.
-    // Note that using remainder formula for int distribution is also biased, but here it doesn't matter.
+    for (auto& e : result) e = random_char();
     return result;
 }
 
-inline std::unordered_set<std::string> _temp_files; // currently existing temp files
-inline bool                            _temp_files_cleanup_registered = false;
+// =======================
+// --- Temporary files ---
+// =======================
 
-inline void clear_temp_files() {
-    for (const auto& file : _temp_files) std::filesystem::remove(file);
-    _temp_files.clear();
-}
+// RAII handle to a temporary file, based on the filesystem and
+// naming rather than a proper file handle due to following reasons:
+//
+//    1. Some temp. file uses (such as command piping) require file to be closed and then reopened again,
+//       which means we can't have a persistent file handle without sacrificing a major use case
+//
+//    2. Before C++23 there is no portable way to open file in exclusive mode,
+//       which means we will have possible filesystem race regardless of API
+//
+struct TemporaryHandle {
+private:
+    std::filesystem::path filepath;
+    std::string           string;
+    // makes sense to cache the path string, considering that it is immutable and frequently needed
 
-inline void erase_temp_file(const std::string& file) {
-    // we take 'file' as 'std::string&' instead of 'std::string_view' because it is
-    // used to call '.erase()' on the map of 'std::string', which does not take string_view
-    std::filesystem::remove(file);
-    _temp_files.erase(file);
-}
+    explicit TemporaryHandle(std::filesystem::path&& filepath)
+        : filepath(std::move(filepath)), string(this->filepath.string()) {
 
-inline std::string generate_temp_file() {
-    // No '[[nodiscard]]' since the function could still be used to generate files without
-    // actually accessing them (through the returned path) in the same program.
-
-    constexpr auto        filename_prefix = "utl___";
-    constexpr std::size_t max_attempts    = 500; // shouldn't realistically be encountered, but still
-    constexpr std::size_t name_length     = 30;
-
-    // Register std::atexit() if not already registered
-    if (!_temp_files_cleanup_registered) {
-        const bool success             = (std::atexit(clear_temp_files) == 0);
-        _temp_files_cleanup_registered = success;
+        if (!std::ofstream(this->path())) // creates the file
+            throw std::runtime_error("TemporaryHandle(): Could not create {" + this->str() + "}.");
     }
 
-    // Try creating files until unique name is found
-    for (std::size_t i = 0; i < max_attempts; ++i) {
-        const std::filesystem::path temp_directory = std::filesystem::temp_directory_path();
-        const std::string           temp_filename  = filename_prefix + random_ascii_string(name_length) + ".txt";
-        const std::filesystem::path temp_path      = temp_directory / temp_filename;
+public:
+    TemporaryHandle()                       = delete;
+    TemporaryHandle(const TemporaryHandle&) = delete;
+    TemporaryHandle(TemporaryHandle&&)      = default;
 
-        if (std::filesystem::exists(temp_path)) continue;
+    // --- Construction ---
+    // --------------------
 
-        const std::ofstream os(temp_path);
-
-        if (!os)
-            throw std::runtime_error("shell::generate_temp_file(): Could open created temporary file `" +
-                                     temp_path.string() + "`");
-
-        _temp_files.insert(temp_path.string());
-        return temp_path.string();
+    static TemporaryHandle create(std::filesystem::path path) {
+        if (std::filesystem::exists(path))
+            throw std::runtime_error("TemporaryHandle::create(): File {" + path.string() + "} already exists.");
+        return TemporaryHandle(std::move(path));
     }
 
-    throw std::runtime_error("shell::generate_temp_file(): Could no create a unique temporary file in " +
-                             std::to_string(max_attempts) + " attempts.");
-}
+    static TemporaryHandle create() {
+        const std::filesystem::path directory = std::filesystem::temp_directory_path();
 
-// ===================
-// --- Shell Utils ---
-// ===================
+        const auto random_path = [&] { return directory / std::filesystem::path(random_ascii_string()); };
+
+        // Try generating random file names until unique one is found, effectively always happens
+        // on the first attempt since the probability of a name collision is (1/25)^20 ~= 1e-28
+        constexpr std::size_t max_attempts = 50;
+
+        for (std::size_t i = 0; i < max_attempts; ++i) {
+            std::filesystem::path path = random_path();
+
+            if (std::filesystem::exists(path)) continue;
+
+            return TemporaryHandle(std::move(path));
+        }
+
+        throw std::runtime_error("TemporaryHandle::create(): Could not create a unique filename.");
+    }
+
+    static TemporaryHandle overwrite(std::filesystem::path path) { return TemporaryHandle(std::move(path)); }
+
+    static TemporaryHandle overwrite() {
+        auto random_path = std::filesystem::temp_directory_path() / std::filesystem::path(random_ascii_string());
+        return TemporaryHandle(std::move(random_path));
+    }
+
+    // --- Utils ---
+    // -------------
+
+    std::ifstream ifstream(std::ios::openmode mode = std::ios::in) const {
+        std::ifstream file(this->path(), mode); // 'ifstream' always adds 'std::ios::in'
+        if (!file) throw std::runtime_error("TemporaryHandle::ifstream() Could not open {" + this->str() + "}.");
+        return file;
+    }
+
+    std::ofstream ofstream(std::ios::openmode mode = std::ios::out) const {
+        std::ofstream file(this->path(), mode); // 'ofstream' always adds 'std::ios::out'
+        if (!file) throw std::runtime_error("TemporaryHandle::ofstream() Could not open {" + this->str() + "}.");
+        return file;
+    }
+
+    const std::filesystem::path& path() const noexcept { return this->filepath; }
+    const std::string&           str() const noexcept { return this->string; }
+
+    // --- Creation ---
+    // ----------------
+
+    ~TemporaryHandle() {
+        if (!this->filepath.empty()) std::filesystem::remove(this->filepath);
+    }
+};
+
+// ======================
+// --- Shell commands ---
+// ======================
+
+// This seems the to be the fastest way of reading a text file
+// into 'std::string' without invoking OS-specific methods
+[[nodiscard]] inline std::string read_file_to_string(const std::string& path) {
+    std::ifstream file(path, std::ios::ate); // open file and immediately seek to the end
+    if (!file.good()) throw std::runtime_error("read_file_to_string(): Could not open file {" + path + ".");
+
+    const auto file_size = file.tellg(); // returns cursor pos, which is the end of file
+    file.seekg(std::ios::beg);           // seek to the beginning
+    std::string chars(file_size, 0);     // allocate string of appropriate size
+    file.read(chars.data(), file_size);  // read into the string
+    return chars;
+}
 
 struct CommandResult {
     int         status; // aka error code
-    std::string stdout_output;
-    std::string stderr_output;
+    std::string out;
+    std::string err;
 };
 
-inline CommandResult run_command(const std::string& command) {
-    // Note 1:
-    // we take 'std::string&' instead of 'std::string_view' because there
-    // has to be a guarantee that contained string is null-terminated
-
-    // Note 2:
-    // Creating temporary files doesn't seem to be ideal, but I'd yet to find
-    // a way to pipe BOTH stdout and stderr directly into the program without
-    // relying on platform-specific API like Unix forks and Windows processes
-
-    // Note 3:
-    // Usage of std::system() is often discouraged due to security reasons,
-    // but it doesn't seem there is a portable way to do better (aka going
-    // back to previous note about platform-specific APIs)
-
-    const auto stdout_file = utl::shell::generate_temp_file();
-    const auto stderr_file = utl::shell::generate_temp_file();
-
-    // Redirect stdout and stderr of the command to temporary files
-    std::ostringstream ss;
-    ss << command.c_str() << " >" << stdout_file << " 2>" << stderr_file;
-    const std::string modified_command = ss.str();
-
-    // Call command
-    const auto status = std::system(modified_command.c_str());
-
-    // Read stdout and stderr from temp files and remove them
-    std::ostringstream stdout_stream;
-    std::ostringstream stderr_stream;
-    stdout_stream << std::ifstream(stdout_file).rdbuf();
-    stderr_stream << std::ifstream(stderr_file).rdbuf();
-    utl::shell::erase_temp_file(stdout_file);
-    utl::shell::erase_temp_file(stderr_file);
-
-    // Return
-    CommandResult result = {status, stdout_stream.str(), stderr_stream.str()};
-
-    return result;
-}
-
-// =========================
-// --- Argc/Argv parsing ---
-// =========================
-
-// This is just "C to C++ string conversion" for argc/argv
+// A function to run shell command & capture it's status, stdout and stderr.
 //
-// Perhaps it could be expanded to proper parsing of standard "CLI options" format
-// (like ordered/unordered flags prefixed with '--', shortcuts prefixed with '-' and etc.)
+// Note 1:
+// Creating temporary files doesn't seem to be ideal, but I'd yet to find
+// a way to pipe BOTH stdout and stderr directly into the program without
+// relying on platform-specific API like Unix forks and Windows processes
+//
+// Note 2:
+// Usage of std::system() is often discouraged due to security reasons,
+// but it doesn't seem there is a portable way to do better (aka going
+// back to previous note about platform-specific APIs)
+//
+inline CommandResult run_command(std::string_view command) {
+    const auto stdout_handle = TemporaryHandle::create();
+    const auto stderr_handle = TemporaryHandle::create();
 
-[[nodiscard]] inline std::string_view get_exe_path(char** argv) {
-    // argc == 1 is a reasonable assumption since the only way to achieve such launch
-    // is to run executable through a null-execv, most command-line programs assume
-    // such scenario to be either impossible or an error on user side
-    return std::string_view(argv[0]);
+    constexpr std::string_view stdout_pipe_prefix = " >";
+    constexpr std::string_view stderr_pipe_prefix = " 2>";
+
+    // Run command while piping out/err to temporary files
+    std::string pipe_command;
+    pipe_command.reserve(command.size() + stdout_pipe_prefix.size() + stdout_handle.str().size() +
+                         stderr_handle.str().size() + stderr_pipe_prefix.size() + 4);
+    pipe_command += command;
+    pipe_command += stdout_pipe_prefix;
+    pipe_command += '"';
+    pipe_command += stdout_handle.str();
+    pipe_command += '"';
+    pipe_command += stderr_pipe_prefix;
+    pipe_command += '"';
+    pipe_command += stderr_handle.str();
+    pipe_command += '"';
+
+    const int status = std::system(pipe_command.c_str());
+
+    // Extract out/err from files
+    std::string out = read_file_to_string(stdout_handle.str());
+    std::string err = read_file_to_string(stderr_handle.str());
+
+    // Remove possible LF/CRLF added by file piping at the end
+    if (!out.empty() && out.back() == '\n') out.resize(out.size() - 1); // LF
+    if (!out.empty() && out.back() == '\r') out.resize(out.size() - 1); // CR
+    if (!err.empty() && err.back() == '\n') err.resize(err.size() - 1); // LF
+    if (!err.empty() && err.back() == '\r') err.resize(err.size() - 1); // CR
+
+    return {status, std::move(out), std::move(err)};
 }
 
-[[nodiscard]] inline std::vector<std::string_view> get_command_line_args(int argc, char** argv) {
-    std::vector<std::string_view> arguments(argc - 1);
-    for (std::size_t i = 0; i < arguments.size(); ++i) arguments.emplace_back(argv[i]);
-    return arguments;
-}
+} // namespace utl::shell::impl
+
+// ______________________ PUBLIC API ______________________
+
+namespace utl::shell {
+
+using impl::random_ascii_string;
+
+using impl::TemporaryHandle;
+
+using impl::CommandResult;
+using impl::run_command;
 
 } // namespace utl::shell
 
@@ -9400,82 +12476,130 @@ inline CommandResult run_command(const std::string& command) {
 //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-#if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_SLEEP)
-#ifndef UTLHEADERGUARD_SLEEP
-#define UTLHEADERGUARD_SLEEP
+#if !defined(UTL_PICK_MODULES) || defined(UTL_MODULE_SLEEP)
+
+#ifndef utl_sleep_headerguard
+#define utl_sleep_headerguard
+
+#define UTL_SLEEP_VERSION_MAJOR 1
+#define UTL_SLEEP_VERSION_MINOR 0
+#define UTL_SLEEP_VERSION_PATCH 3
 
 // _______________________ INCLUDES _______________________
 
-#include <chrono>  // chrono::steady_clock, chrono::nanoseconds, chrono::duration_cast<>
+#include <chrono>  // steady_clock, duration<>, milli
 #include <cmath>   // sqrt()
-#include <cstdint> // int64_t
+#include <cstdint> // uint64_t
 #include <thread>  // this_thread::sleep_for()
 
 // ____________________ DEVELOPER DOCS ____________________
 
-// Various implementation of sleep(), used for precise delays.
+// Various implementations of sleep, useful for sub-millisecond precision delays.
 //
-// # ::spinlock() #
-// Best precision, uses CPU.
-//
-// # ::hybrid() #
-// Recommended option, similar precision to spinlock with minimal CPU usage.
-// Loops short system sleep while statistically estimating its error on the fly and once within error
-// margin of the end time, finished with spinlock sleep (essentialy negating usual system sleep error).
-//
-// # ::system() #
-// Worst precision, frees CPU.
+// The interesting part is the hybrid sleep implemented based on the idea of this blogpost:
+//    https://blat-blatnik.github.io/computerBear/making-accurate-sleep-function/
+// the blogpost itself contains a mostly suitable implementation, but we can noticeably
+// improve it in terms of <chrono> compatibility and general robustness. The main idea
+// is quite simple, explanation can be found in the comments.
 
 // ____________________ IMPLEMENTATION ____________________
 
-namespace utl::sleep {
+namespace utl::sleep::impl {
 
-// =============================
-// --- Sleep Implementations ---
-// =============================
+// ======================
+// --- Spinlock sleep ---
+// ======================
 
-using _clock     = std::chrono::steady_clock;
-using _chrono_ns = std::chrono::nanoseconds;
+using clock = std::chrono::steady_clock;
 
-inline void spinlock(double ms) {
-    const long long ns              = static_cast<std::int64_t>(ms * 1e6);
-    const auto      start_timepoint = _clock::now();
+template <class Rep, class Period>
+void spinlock(std::chrono::duration<Rep, Period> duration) {
+    const auto start_timepoint = clock::now();
 
-    volatile int i = 0; // volatile 'i' prevents standard-compliant compilers from optimizing away the loop
-    while (std::chrono::duration_cast<_chrono_ns>(_clock::now() - start_timepoint).count() < ns) { ++i; }
+    volatile std::uint64_t i = 0;
+
+    while (clock::now() - start_timepoint < duration) {
+        const std::uint64_t j = i;
+        i                     = j + 1;
+        // same thing as '++i', but doesn't trigger C++20 warning about 'volatile' being non-atomic,
+        // we don't care about atomicity in this case - the only purpose is to prevent loop optimization
+    }
+
+    // volatile 'i' prevents standard-compliant compilers from optimizing away the loop,
+    // 'std::uint64_t' is large enough to never overflow and even if it hypothetically would,
+    // it still wouldn't be an issue (unlike signed overflow, which would be UB)
 }
 
-inline void hybrid(double ms) {
-    static double       estimate = 5e-3; // initial sleep_for() error estimate
-    static double       mean     = estimate;
-    static double       m2       = 0;
-    static std::int64_t count    = 1;
+// ====================
+// --- System sleep ---
+// ====================
 
-    // We treat sleep_for(1 ms) as a random variate "1 ms + random_value()"
-    while (ms > estimate) {
-        const auto start = _clock::now();
-        std::this_thread::sleep_for(_chrono_ns(static_cast<std::int64_t>(1e6)));
-        const auto end = _clock::now();
+template <class Rep, class Period>
+void system(std::chrono::duration<Rep, Period> duration) {
+    std::this_thread::sleep_for(duration);
+}
 
-        const double observed = std::chrono::duration_cast<_chrono_ns>(end - start).count() / 1e6;
-        ms -= observed;
+// ====================
+// --- Hybrid sleep ---
+// ====================
+
+// The idea is to loop a short system-sleep, measure actual time elapsed,
+// and update our estimate for system-sleep duration error on the fly using
+// Welford's algorithm, once remaining duration gets small enough relative to
+// expected error we swith to a much more precise spinlock-sleep.
+//
+// This allows us to be almost as precise as a pure spinlock, but instead of
+// taking 100% CPU time we only take a few percent.
+
+template <class Rep, class Period>
+void hybrid(std::chrono::duration<Rep, Period> duration) {
+    using ms = std::chrono::duration<double, std::milli>; // float duration is easier to work with in our context
+
+    constexpr ms short_sleep_duration = ms(1);
+
+    constexpr double stddev_above_mean = 1;
+    // how many standard deviations above the error mean should our estimate be,
+    // larger value means a more pessimistic estimate
+
+    thread_local ms            err_estimate = ms(5e-3);     // estimates should be per-thread,
+    thread_local ms            err_mean     = err_estimate; // having these 'static' would introduce
+    thread_local ms            err_m2       = ms(0);        // a race condition in a concurrent scenario
+    thread_local std::uint64_t count        = 1;
+
+    ms remaining_duration = duration;
+
+    while (remaining_duration > err_estimate) {
+        // Measure actual system-sleep time
+        const auto start = clock::now();
+        system(short_sleep_duration);
+        const auto end = clock::now();
+
+        const ms observed = end - start;
+        remaining_duration -= observed;
 
         ++count;
 
-        // Welford's algorithm for mean and unbiased variance estimation
-        const double delta = observed - mean;
-        mean += delta / static_cast<double>(count);
-        m2 += delta * (observed - mean); // intermediate values 'm2' reduce numerical instability
-        const double variance = std::sqrt(m2 / static_cast<double>(count - 1));
+        // Update error estimate with Welford's algorithm
+        const ms delta = observed - err_mean;
+        err_mean += delta / count;
+        err_m2 += delta.count() * (observed - err_mean); // intermediate values 'm2' reduce numerical instability
+        const ms variance = ms(std::sqrt(err_m2.count() / (count - 1)));
 
-        estimate = mean + variance; // set estimate 1 standard deviation above the mean
-        // can be adjusted to make estimate more or less pessimistic
+        err_estimate = err_mean + stddev_above_mean * variance;
     }
 
-    utl::sleep::spinlock(ms);
+    spinlock(remaining_duration);
 }
 
-inline void system(double ms) { std::this_thread::sleep_for(_chrono_ns(static_cast<std::int64_t>(ms * 1e6))); }
+} // namespace utl::sleep::impl
+
+// ______________________ PUBLIC API ______________________
+
+namespace utl::sleep {
+
+using impl::system;
+using impl::spinlock;
+using impl::hybrid;
 
 } // namespace utl::sleep
 
@@ -9497,107 +12621,188 @@ inline void system(double ms) { std::this_thread::sleep_for(_chrono_ns(static_ca
 //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-#if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_STRE)
-#ifndef UTLHEADERGUARD_STRE
-#define UTLHEADERGUARD_STRE
+#if !defined(UTL_PICK_MODULES) || defined(UTL_MODULE_STRE)
+
+#ifndef utl_stre_headerguard
+#define utl_stre_headerguard
+
+#define UTL_STRE_VERSION_MAJOR 2
+#define UTL_STRE_VERSION_MINOR 0
+#define UTL_STRE_VERSION_PATCH 0
 
 // _______________________ INCLUDES _______________________
 
-#include <algorithm>   // transform()
-#include <cctype>      // tolower(), toupper()
-#include <cstddef>     // size_t
-#include <exception>   // exception
-#include <iomanip>     // setfill(), setw()
-#include <ostream>     // ostream
-#include <sstream>     // ostringstream
-#include <stdexcept>   // invalid_argument
+#include <array>       // array<>, size_t
+#include <climits>     // CHAR_BIT
+#include <cstdint>     // uint8_t
 #include <string>      // string
 #include <string_view> // string_view
-#include <tuple>       // tuple<>, get<>()
-#include <type_traits> // false_type, true_type, void_t<>, is_convertible<>, enable_if_t<>
-#include <utility>     // declval<>(), index_sequence<>
 #include <vector>      // vector<>
 
 // ____________________ DEVELOPER DOCS ____________________
 
-// String utility extensions, mainly a template ::to_str() method which works with all STL containers,
-// including maps, sets and tuples with any level of mutual nesting.
+// String utils. Nothing fancy, basic stuff, however there is a lot of really bad implementations
+// posted online, which is why I'd rather put an effort to get them right once and be done with it.
 //
-// Also includes some expansions of <type_traits> header, since we need them anyways to implement a generic ::to_str().
-//
-// # ::is_printable<Type> #
-// Integral constant, returns in "::value" whether Type can be printed through std::cout.
-// Criteria: Existance of operator 'ANY_TYPE operator<<(std::ostream&, Type&)'
-//
-// # ::is_iterable_through<Type> #
-// Integral constant, returns in "::value" whether Type can be iterated through.
-// Criteria: Existance of .begin() and .end() with applicable operator()++
-//
-// # ::is_const_iterable_through<Type> #
-// Integral constant, returns in "::value" whether Type can be const-iterated through.
-// Criteria: Existance of .cbegin() and .cend() with applicable operator()++
-//
-// # ::is_tuple_like<Type> #
-// Integral constant, returns in "::value" whether Type has a tuple-like structure.
-// Tuple-like structure include std::tuple, std::pair, std::array, std::ranges::subrange (since C++20)
-// Criteria: Existance of applicable std::get<0>() and std::tuple_size()
-//
-// # ::is_string<Type> #
-// Integral constant, returns in "::value" whether Type is a char string.
-// Criteria: Type can be decayed to std::string or a char* pointer
-//
-// # ::is_to_str_convertible<Type> #
-// Integral constant, returns in "::value" whether Type can be converted to string through ::to_str().
-// Criteria: Existance of a valid utl::stre::to_str() overload
-//
-// # ::to_str() #
-// Converts any standard container or a custom container with necessary member functions to std::string.
-// Works with tuples and tuple-like classes.
-// Works with nested containers/tuples through recursive template instantiation, which
-// resolves as long as types at the end of recursion have a valid operator<<() for ostreams.
-//
-// Not particularly fast, but it doesn't really have to be since this kind of thing is mostly
-// useful for debugging and other human-readable prints.
-//
-// # ::InlineStream #
-// Inline 'std::ostringstream' construction with implicit conversion to 'std::string'.
-// Rather unperformant, but convenient for using stream formating during string construction.
-// Example: std::string str = (stre::InlineStream() << "Value " << 3.14 << " is smaller than " << 6.28);
-//
-// In retrospective the usefulness of this seems rather dubious. Perhaps I'll deprecate it later.
-//
-// # ::repeat_symbol(), ::repeat_string() #
-// Repeats character/string a given number of times.
-//
-// # ::pad_with_zeroes() #
-// Pads given integer with zeroes untill a certain lenght.
-// Useful when saving data in files like 'data_0001.txt', 'data_0002.txt', '...' so they get properly sorted.
+// Functions that can reuse the storage of an 'r-value' argument take 'std::string' by value,
+// otherwise we taking 'std::string_view' is the most sensible way.
 
 // ____________________ IMPLEMENTATION ____________________
 
-namespace utl::stre {
+namespace utl::stre::impl {
+
+// ================================
+// --- Character classification ---
+// ================================
+
+// This is effectively a sane reimplementation of character classification from <cctype>. Standard <cctype> functions
+// don't operate on 'char' parameters as would be intuitive, instead they accept 'int' parameters which should be
+// representable as 'unsigned char' (invoking UB otherwise), this makes them extremely error-prone in common use cases.
+//
+// Here we reimplement the exact same classification using a few lookup tables, performance shouldn't
+// be meaningfully different and we get additional 'constexpr' and 'noexcept' guarantees.
+//
+// See https://en.cppreference.com/w/cpp/header/cctype.html
+
+// --- Lookup tables ---
+// ---------------------
+
+static_assert(CHAR_BIT == 8); // weird platforms might need a different lookup table size
+
+[[nodiscard]] constexpr std::uint8_t u8(char value) noexcept { return static_cast<std::uint8_t>(value); }
+
+template <class Predicate>
+[[nodiscard]] constexpr std::array<bool, 256> predicate_lookup_table(Predicate&& predicate) noexcept {
+    std::array<bool, 256> res{};
+    for (std::size_t i = 0; i < res.size(); ++i) res[i] = predicate(static_cast<char>(i));
+    return res;
+}
+
+// clang-format off
+constexpr auto lookup_digit            = predicate_lookup_table([](char ch) { return '0' <= ch && ch <= '9'; });
+constexpr auto lookup_lowercase_letter = predicate_lookup_table([](char ch) { return 'a' <= ch && ch <= 'z'; });
+constexpr auto lookup_uppercase_letter = predicate_lookup_table([](char ch) { return 'A' <= ch && ch <= 'Z'; });
+constexpr auto lookup_punctuation      = predicate_lookup_table([](char ch) {
+    return std::string_view{R"(!"#$%&'()*+,-./:;<=>?@[\]^_`{|}~)"}.find_first_of(ch) != std::string_view::npos;
+});
+constexpr auto lookup_hexadecimal      = predicate_lookup_table([](char ch) {
+    return std::string_view{R"(0123456789ABCDEFabcdef)"}.find_first_of(ch) != std::string_view::npos;
+});
+constexpr auto lookup_space            = predicate_lookup_table([](char ch) {
+    return std::string_view{" \f\n\r\t\v"}.find_first_of(ch) != std::string_view::npos;
+});
+constexpr auto lookup_control          = predicate_lookup_table([](char ch) {
+    return (0x00 <= static_cast<int>(ch) && static_cast<int>(ch) <= 0x1F) || static_cast<int>(ch) == 0x7F;
+});
+// clang-format on
+
+// --- Public API ---
+// ------------------
+
+// clang-format off
+[[nodiscard]] constexpr bool is_digit       (char ch) noexcept { return lookup_digit[u8(ch)];                      }
+[[nodiscard]] constexpr bool is_lowercase   (char ch) noexcept { return lookup_lowercase_letter[u8(ch)];           }
+[[nodiscard]] constexpr bool is_uppercase   (char ch) noexcept { return lookup_uppercase_letter[u8(ch)];           }
+[[nodiscard]] constexpr bool is_punctuation (char ch) noexcept { return lookup_punctuation[u8(ch)];                }
+[[nodiscard]] constexpr bool is_hexadecimal (char ch) noexcept { return lookup_hexadecimal[u8(ch)];                }
+[[nodiscard]] constexpr bool is_control     (char ch) noexcept { return lookup_control[u8(ch)];                    }
+[[nodiscard]] constexpr bool is_alphabetic  (char ch) noexcept { return is_lowercase(ch) || is_uppercase(ch);      }
+[[nodiscard]] constexpr bool is_alphanumeric(char ch) noexcept { return is_digit(ch) || is_alphabetic(ch);         }
+[[nodiscard]] constexpr bool is_graphical   (char ch) noexcept { return is_alphanumeric(ch) || is_punctuation(ch); }
+[[nodiscard]] constexpr bool is_printable   (char ch) noexcept { return is_graphical(ch) || (ch == ' ');           }
+[[nodiscard]] constexpr bool is_space       (char ch) noexcept { return lookup_space[u8(ch)];                      }
+[[nodiscard]] constexpr bool is_blank       (char ch) noexcept { return ch == ' ' || ch == '\t';                   }
+// clang-format on
+
+// ========================
+// --- Case conversions ---
+// ========================
+
+// Note: This is a locale-independent ASCII-only conversion, Unicode conversion would
+//       require a full-fledged grapheme parsing with language-specific conversion schemas.
+
+[[nodiscard]] constexpr char to_lower(char ch) noexcept {
+    constexpr char offset = 'z' - 'Z';
+    return ('A' <= ch && ch <= 'Z') ? ch + offset : ch;
+}
+
+[[nodiscard]] constexpr char to_upper(char ch) noexcept {
+    constexpr char offset = 'Z' - 'z';
+    return ('a' <= ch && ch <= 'z') ? ch + offset : ch;
+}
+
+[[nodiscard]] inline std::string to_lower(std::string str) {
+    for (auto& ch : str) ch = to_lower(ch);
+    return str;
+}
+
+[[nodiscard]] inline std::string to_upper(std::string str) {
+    for (auto& ch : str) ch = to_upper(ch);
+    return str;
+}
 
 // ================
 // --- Trimming ---
 // ================
 
-template <class T>
-[[nodiscard]] std::string trim_left(T&& str, char trimmed_char = ' ') {
-    std::string res = std::forward<T>(str);            // when 'str' is an r-value, we can avoid the copy
-    res.erase(0, res.find_first_not_of(trimmed_char)); // seems to be the fastest way of doing it
-    return res;
+// Note: Unlike most mutating operations which require an allocated
+//       result, trimming can be done on views and at compile-time.
+
+// --- std::string_view ---
+// ------------------------
+
+[[nodiscard]] constexpr std::string_view trim_left(std::string_view str, char trimmed_char = ' ') noexcept {
+    if (const std::size_t i = str.find_first_not_of(trimmed_char); i != std::string_view::npos) {
+        str.remove_prefix(i);
+        return str;
+    } else {
+        return std::string_view{}; // 'str' consists entirely of 'trimmed_char'
+    }
 }
 
-template <class T>
-[[nodiscard]] std::string trim_right(T&& str, char trimmed_char = ' ') {
-    std::string res = std::forward<T>(str);
-    res.erase(res.find_last_not_of(trimmed_char) + 1);
-    return res;
+[[nodiscard]] constexpr std::string_view trim_right(std::string_view str, char trimmed_char = ' ') noexcept {
+    if (const std::size_t i = str.find_last_not_of(trimmed_char); i != std::string_view::npos) {
+        str.remove_suffix(str.size() - i - 1);
+        return str;
+    } else {
+        return std::string_view{}; // 'str' consists entirely of 'trimmed_char'
+    }
 }
 
-template <class T>
-[[nodiscard]] std::string trim(T&& str, char trimmed_char = ' ') {
-    return trim_right(trim_left(std::forward<T>(str), trimmed_char), trimmed_char);
+[[nodiscard]] constexpr std::string_view trim(std::string_view str, char trimmed_char = ' ') noexcept {
+    return trim_right(trim_left(str, trimmed_char), trimmed_char);
+}
+
+// --- C-string ---
+// ----------------
+
+[[nodiscard]] constexpr std::string_view trim_left(const char* str, char trimmed_char = ' ') noexcept {
+    return trim_left(std::string_view{str}, trimmed_char);
+}
+
+[[nodiscard]] constexpr std::string_view trim_right(const char* str, char trimmed_char = ' ') noexcept {
+    return trim_right(std::string_view{str}, trimmed_char);
+}
+
+[[nodiscard]] constexpr std::string_view trim(const char* str, char trimmed_char = ' ') noexcept {
+    return trim(std::string_view{str}, trimmed_char);
+}
+
+// --- std::string ---
+// -------------------
+
+[[nodiscard]] inline std::string trim_left(std::string str, char trimmed_char = ' ') {
+    str.erase(0, str.find_first_not_of(trimmed_char));
+    return str;
+}
+
+[[nodiscard]] inline std::string trim_right(std::string str, char trimmed_char = ' ') {
+    str.erase(str.find_last_not_of(trimmed_char) + 1);
+    return str;
+}
+
+[[nodiscard]] inline std::string trim(std::string str, char trimmed_char = ' ') {
+    return trim_right(trim_left(std::move(str), trimmed_char), trimmed_char);
 }
 
 // ===============
@@ -9639,88 +12844,153 @@ template <class T>
     } else return std::string(str);
 }
 
-[[nodiscard]] inline std::string pad_with_leading_zeroes(unsigned int number, std::size_t length = 12) {
-    const std::string number_str = std::to_string(number);
-
-    if (length > number_str.size()) {
-        std::string res;
-        res.reserve(length);
-        res.append(length - number_str.size(), '0');
-        res += number_str;
-        return res;
-    } else return number_str;
-    // we do this instead of using 'std::ostringstream' with 'std::setfill('0')' + 'std::setw()'
-    // so we don't need streams as a dependency. Plus it is faster that way.
-}
-
-// ========================
-// --- Case conversions ---
-// ========================
-
-template <class T>
-[[nodiscard]] std::string to_lower(T&& str) {
-    std::string res = std::forward<T>(str); // when 'str' is an r-value, we can avoid the copy
-    std::transform(res.begin(), res.end(), res.begin(), [](unsigned char c) { return std::tolower(c); });
-    return res;
-    // note that 'std::tolower()', 'std::toupper()' can only apply to unsigned chars, calling it on signed char
-    // is UB. Implementation above was directly taken from https://en.cppreference.com/w/cpp/string/byte/tolower
-}
-
-template <class T>
-[[nodiscard]] std::string to_upper(T&& str) {
-    std::string res = std::forward<T>(str);
-    std::transform(res.begin(), res.end(), res.begin(), [](unsigned char c) { return std::toupper(c); });
-    return res;
-}
-
 // ========================
 // --- Substring checks ---
 // ========================
 
-// Note:
-// C++20 adds 'std::basic_string<T>::starts_with()', 'std::basic_string<T>::ends_with()',
-// 'std::basic_string<T>::contains()', making these functions pointless in a new standard.
+// Note: C++20 standardizes the same functionality through 'std::basic_string<T>::starts_with()',
+//       'std::basic_string<T>::ends_with()' and 'std::basic_string<T>::contains()'.
 
-[[nodiscard]] inline bool starts_with(std::string_view str, std::string_view substr) {
+[[nodiscard]] constexpr bool starts_with(std::string_view str, std::string_view substr) noexcept {
     return str.size() >= substr.size() && str.compare(0, substr.size(), substr) == 0;
 }
 
-[[nodiscard]] inline bool ends_with(std::string_view str, std::string_view substr) {
+[[nodiscard]] constexpr bool ends_with(std::string_view str, std::string_view substr) noexcept {
     return str.size() >= substr.size() && str.compare(str.size() - substr.size(), substr.size(), substr) == 0;
 }
 
-[[nodiscard]] inline bool contains(std::string_view str, std::string_view substr) {
+[[nodiscard]] constexpr bool contains(std::string_view str, std::string_view substr) noexcept {
     return str.find(substr) != std::string_view::npos;
 }
 
-// ==========================
-// --- Token manipulation ---
-// ==========================
+// =============================
+// --- Substring replacement ---
+// =============================
 
-template <class T>
-[[nodiscard]] std::string replace_all_occurences(T&& str, std::string_view from, std::string_view to) {
-    std::string res = std::forward<T>(str);
-
+[[nodiscard]] inline std::string replace_all(std::string str, std::string_view from, std::string_view to) {
     std::size_t i = 0;
-    while ((i = res.find(from, i)) != std::string::npos) { // locate substring to replace
-        res.replace(i, from.size(), to);                   // replace
+    while ((i = str.find(from, i)) != std::string::npos) { // locate substring to replace
+        str.replace(i, from.size(), to);                   // replace
         i += to.size();                                    // step over the replaced region
     }
     // Note: Not stepping over the replaced regions causes self-similar replacements
-    // like "abc" -> "abcabc" to fall into an infinite loop, we don't want that.
+    // like "123" -> "123123" to fall into an infinite loop, we don't want that.
+
+    return str;
+}
+
+[[nodiscard]] inline std::string replace_first(std::string str, std::string_view from, std::string_view to) {
+    if (const std::size_t i = str.find(from); i != std::string::npos) str.replace(i, from.size(), to);
+    return str;
+}
+
+[[nodiscard]] inline std::string replace_last(std::string str, std::string_view from, std::string_view to) {
+    if (const std::size_t i = str.rfind(from); i != std::string::npos) str.replace(i, from.size(), to);
+    return str;
+}
+
+[[nodiscard]] inline std::string replace_prefix(std::string str, std::string_view from, std::string_view to) {
+    if (starts_with(str, from)) str.replace(0, from.size(), to);
+    return str;
+}
+
+[[nodiscard]] inline std::string replace_suffix(std::string str, std::string_view from, std::string_view to) {
+    if (ends_with(str, from)) str.replace(str.size() - from.size(), from.size(), to);
+    return str;
+}
+
+// =================
+// --- Repeating ---
+// =================
+
+[[nodiscard]] inline std::string repeat(char ch, std::size_t repeats) { return std::string(repeats, ch); }
+
+[[nodiscard]] inline std::string repeat(std::string_view str, std::size_t repeats) {
+    std::string res;
+    res.reserve(str.size() * repeats);
+    for (std::size_t i = 0; i < repeats; ++i) res += str;
+    return res;
+}
+
+// ================
+// --- Escaping ---
+// ================
+
+// Escaping is quite useful when we need to print string to the terminal or
+// serialize it to a file without special characters getting in the way.
+
+[[nodiscard]] inline std::string escape(char ch) {
+    if (!is_printable(ch)) {
+        // Control characters with dedicated escape sequences get escaped with those sequences
+        if (ch == '\n') return "\\n";
+        else if (ch == '\t') return "\\t";
+        else if (ch == '\r') return "\\r";
+        else if (ch == '\f') return "\\f";
+        else if (ch == '\a') return "\\a";
+        else if (ch == '\b') return "\\b";
+        else if (ch == '\v') return "\\v";
+        // Other non-printable chars get replaced with their codes
+        else return "\\" + std::to_string(static_cast<int>(ch));
+    }
+
+    return std::string(1, ch);
+}
+
+[[nodiscard]] inline std::string escape(std::string_view str) {
+    const std::size_t result_size_heuristic = static_cast<std::size_t>(str.size() * 1.15);
+    // we don't know how much to reserve exactly, but we can make a decent first guess
+
+    std::string res;
+    res.reserve(result_size_heuristic);
+
+    // Since appending individual characters is ~twice as slow as appending the whole string, we
+    // use a "buffered" way of appending, appending whole segments up to the currently escaped char.
+    // This technique is typical for parsing/serialization libs and was benchmarked in 'utl::json'.
+    std::size_t segment_start = 0;
+    for (std::size_t i = 0; i < str.size(); ++i) {
+        const char ch = str[i];
+
+        if (!is_printable(ch)) {
+            res.append(str.data() + segment_start, i - segment_start);
+            res += '\\';
+            
+            segment_start = i + 1; // '+1' skips over the escaped character
+
+            // Control characters with dedicated escape sequences get escaped with those sequences
+            if (ch == '\n') res += 'n';
+            else if (ch == '\t') res += 't';
+            else if (ch == '\r') res += 'r';
+            else if (ch == '\f') res += 'f';
+            else if (ch == '\a') res += 'a';
+            else if (ch == '\b') res += 'b';
+            else if (ch == '\v') res += 'v';
+            // Other non-printable chars get replaced with their codes
+            else res += std::to_string(static_cast<int>(ch));
+
+            // Note 1: Most common cases (newlines and tabs) are checked first
+            // Note 2: 'std::to_string()' always fits into SSO for our range, no allocation is happening
+        }
+    }
+    res.append(str.data() + segment_start, str.size() - segment_start);
 
     return res;
 }
 
-// Note:
-// Most "split by delimer" implementations found online seem to be horrifically inefficient
+// ====================
+// --- Tokenization ---
+// ====================
+
+// Most "split by delimiter" implementations found online seem to be quite inefficient
 // with unnecessary copying/erasure/intermediate tokens, stringstreams and etc.
 //
 // We can just scan through the string view once, while keeping track of the last segment between
-// two delimiters, no unnecessary work, the only place where we do a copy is during emplacement into
-// the vector where it's unavoidable
-[[nodiscard]] inline std::vector<std::string> split_by_delimiter(std::string_view str, std::string_view delimiter,
-                                                                 bool keep_empty_tokens = false) {
+// two delimiters, no unnecessary work is performed, the only place where we do a copy is during
+// emplacement into the result vector where it is unavoidable.
+//
+// 'tokenize()' => ignores   empty tokens
+// 'split()'    => preserves empty tokens
+
+[[nodiscard]] inline std::vector<std::string> tokenize(std::string_view str, std::string_view delimiter) {
     if (delimiter.empty()) return {std::string(str)};
     // handle empty delimiter explicitly so we can't fall into an infinite loop
 
@@ -9729,76 +12999,604 @@ template <class T>
     std::size_t              segment_start = cursor;
 
     while ((cursor = str.find(delimiter, cursor)) != std::string_view::npos) {
-        if (keep_empty_tokens || segment_start != cursor)
-            tokens.emplace_back(str.substr(segment_start, cursor - segment_start));
+        if (segment_start != cursor) tokens.emplace_back(str.substr(segment_start, cursor - segment_start));
         // don't emplace empty tokens in case of leading/trailing/repeated delimiter
+
         cursor += delimiter.size();
         segment_start = cursor;
     }
 
-    if (keep_empty_tokens || segment_start != str.size()) tokens.emplace_back(str.substr(segment_start));
+    if (segment_start != str.size()) tokens.emplace_back(str.substr(segment_start));
     // 'cursor' is now at 'npos', so we compare to the size instead
 
     return tokens;
 }
 
-// ===================
-// --- Other utils ---
-// ===================
+[[nodiscard]] inline std::vector<std::string> split(std::string_view str, std::string_view delimiter) {
+    if (delimiter.empty()) return {std::string(str)};
+    // handle empty delimiter explicitly so we can't fall into an infinite loop
 
-[[nodiscard]] inline std::string repeat_char(char ch, size_t repeats) { return std::string(repeats, ch); }
+    std::vector<std::string> tokens;
+    std::size_t              cursor        = 0;
+    std::size_t              segment_start = cursor;
 
-[[nodiscard]] inline std::string repeat_string(std::string_view str, size_t repeats) {
-    std::string res;
-    res.reserve(str.size() * repeats);
-    while (repeats--) res += str;
-    return res;
-}
+    while ((cursor = str.find(delimiter, cursor)) != std::string_view::npos) {
+        tokens.emplace_back(str.substr(segment_start, cursor - segment_start));
+        // possibly an empty token in the case of repeated/trailing delimiters
 
-// Mostly useful to print strings with special chars in console and look at their contents.
-[[nodiscard]] inline std::string escape_control_chars(std::string_view str) {
-    std::string res;
-    res.reserve(str.size()); // no necesseraly correct, but it's a godd first guess
-
-    for (const char c : str) {
-        // Control characters with dedicated escape sequences get escaped with those sequences
-        if (c == '\a') res += "\\a";
-        else if (c == '\b') res += "\\b";
-        else if (c == '\f') res += "\\f";
-        else if (c == '\n') res += "\\n";
-        else if (c == '\r') res += "\\r";
-        else if (c == '\t') res += "\\t";
-        else if (c == '\v') res += "\\v";
-        // Other non-printable chars get replaced with their codes
-        else if (!std::isprint(static_cast<unsigned char>(c))) {
-            res += '\\';
-            res += std::to_string(static_cast<int>(c));
-        }
-        // Printable chars are appended as is.
-        else
-            res += c;
+        cursor += delimiter.size();
+        segment_start = cursor;
     }
-    // Note: This could be implemented faster using the 'utl::json' method of handling escapes with buffering and
-    // a lookup table, however I don't see much practical reason to complicate this implementation like that.
 
-    return res;
+    tokens.emplace_back(str.substr(segment_start)); // possibly an empty token
+
+    return tokens;
 }
 
-[[nodiscard]] inline std::size_t index_of_difference(std::string_view str_1, std::string_view str_2) {
-    using namespace std::string_literals;
-    if (str_1.size() != str_2.size())
-        throw std::invalid_argument("String {"s + std::string(str_1) + "} of size "s + std::to_string(str_1.size()) +
-                                    " and {"s + std::string(str_2) + "} of size "s + std::to_string(str_2.size()) +
-                                    " do not have a meaningful index of difference due to incompatible sizes."s);
-    for (std::size_t i = 0; i < str_1.size(); ++i)
-        if (str_1[i] != str_2[i]) return i;
-    return str_1.size();
+// ==============================
+// --- Difference measurement ---
+// ==============================
+
+[[nodiscard]] constexpr std::size_t first_difference(std::string_view lhs, std::string_view rhs) noexcept {
+    // clang-format off
+    if (lhs.size() < rhs.size()) {
+        for (std::size_t i = 0; i < lhs.size(); ++i) if (lhs[i] != rhs[i]) return i;
+        return lhs.size();
+    }
+    if (lhs.size() > rhs.size()) {
+        for (std::size_t i = 0; i < rhs.size(); ++i) if (lhs[i] != rhs[i]) return i;
+        return rhs.size();
+    }
+    if (lhs.size() == rhs.size()) {
+        for (std::size_t i = 0; i < lhs.size(); ++i) if (lhs[i] != rhs[i]) return i;
+        return std::string_view::npos;
+    }
+    // clang-format on
+
+    return std::string_view::npos; // unreachable, necessary to avoid warnings
 }
+
+constexpr std::size_t count_difference(std::string_view lhs, std::string_view rhs) noexcept {
+    std::size_t difference = 0;
+
+    // clang-format off
+    if (lhs.size() < rhs.size()) {
+        for (std::size_t i = 0; i < lhs.size(); ++i) if (lhs[i] != rhs[i]) ++difference;
+        return difference + rhs.size() - lhs.size();
+    }
+    if (lhs.size() > rhs.size()) {
+        for (std::size_t i = 0; i < rhs.size(); ++i) if (lhs[i] != rhs[i]) ++difference;
+        return difference + lhs.size() - rhs.size();
+    }
+    if (lhs.size() == rhs.size()) {
+        for (std::size_t i = 0; i < lhs.size(); ++i) if (lhs[i] != rhs[i]) ++difference;
+        return difference;
+    }
+    // clang-format on
+
+    return difference; // unreachable, necessary to avoid warnings
+}
+
+} // namespace utl::stre::impl
+
+// ______________________ PUBLIC API ______________________
+
+namespace utl::stre {
+
+using impl::is_digit;
+using impl::is_lowercase;
+using impl::is_uppercase;
+using impl::is_punctuation;
+using impl::is_hexadecimal;
+using impl::is_control;
+using impl::is_alphabetic;
+using impl::is_alphanumeric;
+using impl::is_graphical;
+using impl::is_printable;
+using impl::is_space;
+using impl::is_blank;
+
+using impl::to_lower;
+using impl::to_upper;
+
+using impl::trim_left;
+using impl::trim_right;
+using impl::trim;
+
+using impl::pad_left;
+using impl::pad_right;
+using impl::pad;
+
+using impl::starts_with;
+using impl::ends_with;
+using impl::contains;
+
+using impl::replace_all;
+using impl::replace_first;
+using impl::replace_last;
+using impl::replace_prefix;
+using impl::replace_suffix;
+
+using impl::repeat;
+
+using impl::escape;
+
+using impl::tokenize;
+using impl::split;
+
+using impl::first_difference;
+using impl::count_difference;
 
 } // namespace utl::stre
 
 #endif
 #endif // module utl::stre
+
+
+
+
+
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ DmitriBogdanov/UTL ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+//
+// Module:        utl::strong_type
+// Documentation: https://github.com/DmitriBogdanov/UTL/blob/master/docs/module_strong_type.md
+// Source repo:   https://github.com/DmitriBogdanov/UTL
+//
+// This project is licensed under the MIT License
+//
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+#if !defined(UTL_PICK_MODULES) || defined(UTL_MODULE_STRONG_TYPE)
+
+#ifndef utl_strong_type_headerguard
+#define utl_strong_type_headerguard
+
+#define UTL_STRONG_TYPE_VERSION_MAJOR 1
+#define UTL_STRONG_TYPE_VERSION_MINOR 0
+#define UTL_STRONG_TYPE_VERSION_PATCH 3
+
+// _______________________ INCLUDES _______________________
+
+#include <cassert>     // assert()
+#include <type_traits> // enable_if_t<>, is_integral<>, is_floating_point<>, make_unsigned<>, ...
+#include <utility>     // size_t, move(), swap()
+
+// ____________________ DEVELOPER DOCS ____________________
+
+// A simple strong type library.
+//
+// It doesn't provide as many customization points as some other strong type libs do, but it allows
+// for a much simpler implementation with significantly less compile time impact since the classic
+// trait-per-enabled-operator dispatch requires a great deal of nested template instantiations.
+//
+// In most actual use cases we just want a simple strongly typed arithmetic value or some kind of immutable
+// ID / handle, which makes that complexity go to waste, which why the minimalistic design was chosen.
+//
+// It also focuses on making things as 'constexpr'-friendly as possible and takes some inspiration
+// from 'std::experimental::unique_resource' suggested by paper N4189 back in the day. This part of
+// the functionality can be somewhat emulated by exploiting that 'std::unique_ptr<>' works with any
+// 'named requirements: NullablePointer' type and can in fact manage a non-pointer data, but doing
+// things this way would add a heavy include a prevent a lot of potential 'constexpr'.
+
+// ____________________ IMPLEMENTATION ____________________
+
+namespace utl::strong_type::impl {
+
+// ===============
+// --- Utility ---
+// ===============
+
+// Binds specific function to a type, useful for wrapping 'C' API functions for a deleter
+//
+// Note: Explicit SFINAE restrictions on 'operator()' are necessary to make this class work with a 'false'
+//       case of 'std::is_invocable<>', without restrictions the trait deduces variadic to be invocable
+//       and falls into the ill-formed function body which is a compile error
+template <auto function>
+struct Bind {
+    template <class... Args, std::enable_if_t<std::is_invocable_v<decltype(function), Args...>, bool> = true>
+    constexpr auto operator()(Args&&... args) const noexcept(noexcept(function(std::forward<Args>(args)...))) {
+        return function(std::forward<Args>(args)...);
+    }
+};
+
+// =============================
+// --- Strongly typed unique ---
+// =============================
+
+// --- General case ---
+// --------------------
+
+// Strongly typed move-only wrapper around 'T' with a custom deleter.
+//
+// Useful for wrapping handles returned by 'C' APIs into a strongly typed RAII object.
+//
+// Examples: OpenGL buffer / shader / program handles.
+
+template <class T, class Tag, class Deleter = void>
+class Unique {
+    T    value; // potentially default constructible, but not necessarily
+    bool active = false;
+
+    static_assert(std::is_move_constructible_v<T>, "Type must be move-constructible.");
+    static_assert(std::is_move_assignable_v<T>, "Type must be move-assignable.");
+    static_assert(std::is_class_v<Deleter>, "Deleter must be a class.");
+    static_assert(std::is_empty_v<Deleter>, "Deleter must be stateless.");
+    static_assert(std::is_invocable_v<Deleter, T> || std::is_invocable_v<Deleter, T&>,
+                  "Deleter must be invocable for the type.");
+
+    static constexpr bool nothrow_movable =
+        std::is_nothrow_move_constructible_v<T> && std::is_nothrow_move_assignable_v<T>;
+
+public:
+    using value_type   = T;
+    using tag_type     = Tag;
+    using deleter_type = Deleter;
+
+    // Move-only semantics
+    Unique(const Unique&)            = delete;
+    Unique& operator=(const Unique&) = delete;
+
+    constexpr Unique(Unique&& other) noexcept(nothrow_movable) { *this = std::move(other); }
+
+    constexpr Unique& operator=(Unique&& other) noexcept(nothrow_movable) {
+        std::swap(this->value, other.value);
+        std::swap(this->active, other.active);
+
+        return *this;
+    }
+
+    // Conversion
+    constexpr Unique(T&& new_value) noexcept(nothrow_movable) { *this = std::move(new_value); }
+
+    constexpr Unique& operator=(T&& new_value) noexcept(nothrow_movable) {
+        this->~Unique(); // don't forget to cleanup existing value
+
+        this->value  = std::move(new_value);
+        this->active = true;
+
+        return *this;
+    }
+
+    // Accessing the underlying value
+    constexpr const T& get() const noexcept { return this->value; }
+    constexpr T&       get() noexcept { return this->value; }
+
+    ~Unique() {
+        if (this->active) {
+            // In MSVC without '/permissive-' or '/Zc:referenceBinding' (which is a subset of '/permissive-')
+            // 'std::is_invocable_v<Deleter, T&&>' might be evaluated as 'true' even for deleters that should
+            // only accept l-values. This is a warning at C4239 '/W4', but it doesn't affect the behavior and
+            // there is literally nothing we can do to work around MSVC blatantly lying about type trait always
+            // being 'true' since even instantiating the type trait produces this warning.
+#ifdef _MSC_VER
+#pragma warning(suppress : 4239, justification : "Non-conformant behavior of MSVC, false positive at '/W4'.")
+#endif
+            if constexpr (std::is_invocable_v<Deleter, T&&>) deleter_type{}(std::move(this->value));
+            else deleter_type{}(this->value); // some APIs take arguments only as an l-value
+        }
+    }
+};
+
+// --- Trivial deleter case ---
+// ----------------------------
+
+// Strongly typed move-only wrapper around 'T' with a trivial deleter.
+//
+// Useful for cases where we don't want (or need) to provide a
+// custom deleter, but still want strongly typed move-only semantics.
+//
+// Trivial deleter case requires a separate specialization with some code duplication because
+//    1) Before C++20 only trivial destructors can be 'constexpr'
+//    2) There is no way to conditionally compile a destructor
+// which means using a trivial 'DefaultDestructor<T>' won't work without sacrificing 'constexpr'.
+
+template <class T, class Tag>
+class Unique<T, Tag, void> {
+    T value;
+
+    static_assert(std::is_move_constructible_v<T>, "Type must be move-constructible.");
+    static_assert(std::is_move_assignable_v<T>, "Type must be move-assignable.");
+
+    static constexpr bool nothrow_movable = std::is_nothrow_move_assignable_v<T>;
+
+public:
+    using value_type   = T;
+    using tag_type     = Tag;
+    using deleter_type = void;
+
+    // Move-only semantics
+    Unique(const Unique&)            = delete;
+    Unique& operator=(const Unique&) = delete;
+
+    constexpr Unique(Unique&&)            = default;
+    constexpr Unique& operator=(Unique&&) = default;
+
+    // Conversion
+    constexpr Unique(T&& other) noexcept(nothrow_movable) { *this = std::move(other); }
+
+    constexpr Unique& operator=(T&& other) noexcept(nothrow_movable) {
+        this->value = std::move(other);
+
+        return *this;
+    }
+
+    // Accessing the underlying value
+    constexpr const T& get() const noexcept { return this->value; }
+    constexpr T&       get() noexcept { return this->value; }
+};
+
+// =============================
+// --- No UB signed bitshift ---
+// =============================
+
+// Ensure target is two's complement, this includes pretty much every platform ever
+// to the point that C++20 standardizes two's complement encoding as a requirement,
+// this check exists purely to be pedantic and document our assumptions strictly
+
+static_assert((-1 & 3) == 3);
+
+// before C++20 following options could technically be the case:
+//    1. (-1 & 3) == 1 => target is sign & magnitude encoded
+//    2. (-1 & 3) == 2 => target is one's complement
+//    3. (-1 & 3) == 3 => target is two's complement
+// other integer encodings are not possible in the standard
+//
+// Shifting negative numbers is technically considered UB, in practice every compiler implements
+// signed bitshift as '(signed)( (unsigned)x << shift )' however they still act as if calling shift
+// on a negative 'x < 0' is UB and therefore can never happen which can lead to weirdness with what
+// compiler considers to be dead code elimination. This is why we do the casting explicitly and
+// use custom 'lshift()' and 'rshift()' to avoid possible UB.
+// see https://stackoverflow.com/a/29710927/28607141
+//
+// Note: Other bitwise operators ('&', '|', '^', '~') do not suffer from the same issue, their invocation
+//       for signed types is implementation-defined rather than UB, which in practice means that they do
+//       a reasonable consistent thing since we already enforced two's complement representation.
+
+template <class T>
+using require_integral = std::enable_if_t<std::is_integral_v<T>, bool>;
+
+constexpr std::size_t byte_size = 8;
+
+// Left shift,
+// unlike regular '<<' works properly with negative values, see notes above
+// undefined behavior if 'shift >= bit_sizeof<T>'
+template <class T, require_integral<T> = true>
+[[nodiscard]] constexpr T lshift(T value, std::size_t shift) noexcept {
+    assert(shift < sizeof(T) * byte_size);
+    return static_cast<T>(static_cast<std::make_unsigned_t<T>>(value) << shift);
+}
+
+// Right shift,
+// unlike regular '>>' works properly with negative values, see notes above
+// undefined behavior if 'shift >= bit_sizeof<T>'
+template <class T, require_integral<T> = true>
+[[nodiscard]] constexpr T rshift(T value, std::size_t shift) noexcept {
+    assert(shift < sizeof(T) * byte_size);
+    return static_cast<T>(static_cast<std::make_unsigned_t<T>>(value) >> shift);
+}
+
+// =============================
+// --- Unsigned unary minus ----
+// =============================
+
+template <class T, std::enable_if_t<std::is_integral_v<T>, bool> = true>
+[[nodiscard]] constexpr T minus(T value) noexcept {
+    if constexpr (std::is_signed_v<T>) return -value;
+    else return ~value + T(1);
+    // We need unsigned unary minus for a general case, but MSVC with '/W2' warning level produces a warning when using
+    // unary minus with an unsigned value, this warning gets elevated to a compilation error by '/sdl' flag, see
+    // https://learn.microsoft.com/en-us/cpp/error-messages/compiler-warnings/compiler-warning-level-2-c4146
+    //
+    // This is a case of MSVC not being standard-compliant, as unsigned '-x' is a perfectly defined operation which
+    // evaluates to the same thing as '~x + 1u'. To work around such warning we define this function.
+}
+
+// ==================================
+// --- Strongly typed arithmetic  ---
+// ==================================
+
+template <class>
+constexpr bool always_false_v = false;
+
+template <class T, class Tag, class = void>
+class Arithmetic {
+    static_assert(always_false_v<T>, "'T' must be an arithmetic type (integral or floating-point).");
+};
+
+// --- Integer specialization ---
+// ------------------------------
+
+// Strongly typed wrapper around an integer.
+//
+// Supports all of its usual operators with a unit-like behavior (aka 'unit + unit => unit', 'unit * scalar => unit').
+// Useful for wrapping conceptually different dimensions & offsets.
+//
+// Examples: Screen width, screen height, element count, size in bytes.
+
+template <class T, class Tag>
+class Arithmetic<T, Tag, std::enable_if_t<std::is_integral_v<T>>> {
+    T value = T{};
+
+public:
+    // clang-format off
+    
+    using value_type = T;
+    using   tag_type = Tag;
+    
+    // Copyable semantics
+    constexpr Arithmetic           (const Arithmetic& ) = default;
+    constexpr Arithmetic           (      Arithmetic&&) = default;
+    constexpr Arithmetic& operator=(const Arithmetic& ) = default;
+    constexpr Arithmetic& operator=(      Arithmetic&&) = default;
+    
+    // Conversion
+    constexpr Arithmetic           (T new_value) noexcept : value(new_value) {}
+    constexpr Arithmetic& operator=(T new_value) noexcept { this->value = new_value; return *this; }
+
+    // Accessing the underlying value
+    constexpr const T& get() const noexcept { return this->value; }
+    constexpr       T& get()       noexcept { return this->value; }
+    
+    // Increment
+    constexpr Arithmetic& operator++(   ) noexcept {                          ++this->value; return *this; }
+    constexpr Arithmetic& operator--(   ) noexcept {                          --this->value; return *this; }
+    constexpr Arithmetic  operator++(int) noexcept { const auto temp = *this; ++this->value; return  temp; }
+    constexpr Arithmetic  operator--(int) noexcept { const auto temp = *this; --this->value; return  temp; }
+    
+    // Unary operators
+    [[nodiscard]] constexpr Arithmetic operator+() const noexcept { return      +this->value ; }
+    [[nodiscard]] constexpr Arithmetic operator-() const noexcept { return minus(this->value); }
+    [[nodiscard]] constexpr Arithmetic operator~() const noexcept { return      ~this->value ; }
+    
+    // Additive & bitwise operators
+    [[nodiscard]] constexpr Arithmetic operator+(Arithmetic other) const noexcept { return this->value + other.value; }
+    [[nodiscard]] constexpr Arithmetic operator-(Arithmetic other) const noexcept { return this->value - other.value; }
+    [[nodiscard]] constexpr Arithmetic operator&(Arithmetic other) const noexcept { return this->value & other.value; }
+    [[nodiscard]] constexpr Arithmetic operator|(Arithmetic other) const noexcept { return this->value | other.value; }
+    [[nodiscard]] constexpr Arithmetic operator^(Arithmetic other) const noexcept { return this->value ^ other.value; }
+    
+    // Multiplicative operators
+    [[nodiscard]] constexpr Arithmetic operator*(T other) const noexcept { return this->value * other; }
+    [[nodiscard]] constexpr Arithmetic operator/(T other) const noexcept { return this->value / other; }
+    [[nodiscard]] constexpr Arithmetic operator%(T other) const noexcept { return this->value % other; }
+    
+    // Arithmetic & bitwise augmented assignment
+    [[nodiscard]] constexpr Arithmetic& operator+=(Arithmetic other) noexcept { this->value += other.value; return *this; }
+    [[nodiscard]] constexpr Arithmetic& operator-=(Arithmetic other) noexcept { this->value -= other.value; return *this; }
+    [[nodiscard]] constexpr Arithmetic& operator^=(Arithmetic other) noexcept { this->value ^= other.value; return *this; }
+    [[nodiscard]] constexpr Arithmetic& operator|=(Arithmetic other) noexcept { this->value |= other.value; return *this; }
+    [[nodiscard]] constexpr Arithmetic& operator&=(Arithmetic other) noexcept { this->value &= other.value; return *this; }
+    
+    // Multiplicative augmented assignment
+    [[nodiscard]] constexpr Arithmetic& operator*=(T other) noexcept { this->value *= other; return *this; }
+    [[nodiscard]] constexpr Arithmetic& operator/=(T other) noexcept { this->value /= other; return *this; }
+    [[nodiscard]] constexpr Arithmetic& operator%=(T other) noexcept { this->value %= other; return *this; }
+    
+    // Comparison
+    [[nodiscard]] constexpr bool operator< (Arithmetic other) const noexcept { return this->value <  other.value; }
+    [[nodiscard]] constexpr bool operator<=(Arithmetic other) const noexcept { return this->value <= other.value; }
+    [[nodiscard]] constexpr bool operator> (Arithmetic other) const noexcept { return this->value >  other.value; }
+    [[nodiscard]] constexpr bool operator>=(Arithmetic other) const noexcept { return this->value >= other.value; }
+    [[nodiscard]] constexpr bool operator==(Arithmetic other) const noexcept { return this->value == other.value; }
+    [[nodiscard]] constexpr bool operator!=(Arithmetic other) const noexcept { return this->value != other.value; }
+    
+    // Shift operators
+    [[nodiscard]] constexpr Arithmetic operator<<(std::size_t shift) const noexcept { return lshift(this->value, shift); }
+    [[nodiscard]] constexpr Arithmetic operator>>(std::size_t shift) const noexcept { return rshift(this->value, shift); }
+    
+    // Shift augmented assignment
+    [[nodiscard]] constexpr Arithmetic operator<<=(std::size_t shift) noexcept { *this = *this << shift; return *this; }
+    [[nodiscard]] constexpr Arithmetic operator>>=(std::size_t shift) noexcept { *this = *this >> shift; return *this; }
+    
+    // Explicit cast 
+    template <class To>
+    [[nodiscard]] constexpr explicit operator To() const noexcept { return static_cast<To>(this->value); }
+
+    // clang-format on
+};
+
+// --- Float specialization ---
+// ----------------------------
+
+// Strongly typed wrapper around a float.
+//
+// Supports all of its usual operators with a unit-like behavior (aka 'unit + unit => unit', 'unit * scalar => unit').
+// Useful for wrapping conceptually different dimensions & offsets.
+//
+// Examples: Physical width, physical height, velocity.
+
+template <class T, class Tag>
+class Arithmetic<T, Tag, std::enable_if_t<std::is_floating_point_v<T>>> {
+    T value = T{};
+
+public:
+    // clang-format off
+    
+    using value_type = T;
+    using   tag_type = Tag;
+    
+    // Copyable semantics
+    constexpr Arithmetic           (const Arithmetic& ) = default;
+    constexpr Arithmetic           (      Arithmetic&&) = default;
+    constexpr Arithmetic& operator=(const Arithmetic& ) = default;
+    constexpr Arithmetic& operator=(      Arithmetic&&) = default;
+    
+    // Conversion
+    constexpr Arithmetic           (T other) noexcept : value(other) {}
+    constexpr Arithmetic& operator=(T other) noexcept { this->value = other; return *this; }
+
+    // Accessing the underlying value
+    constexpr const T& get() const noexcept { return this->value; }
+    constexpr       T& get()       noexcept { return this->value; }
+    
+    // Unary operators
+    [[nodiscard]] constexpr Arithmetic operator+() const noexcept { return +this->value; }
+    [[nodiscard]] constexpr Arithmetic operator-() const noexcept { return -this->value; }
+    
+    // Additive operators
+    [[nodiscard]] constexpr Arithmetic operator+(Arithmetic other) const noexcept { return this->value + other.value; }
+    [[nodiscard]] constexpr Arithmetic operator-(Arithmetic other) const noexcept { return this->value - other.value; }
+    
+    // Multiplicative operators
+    [[nodiscard]] constexpr Arithmetic operator*(T other) const noexcept { return this->value * other; }
+    [[nodiscard]] constexpr Arithmetic operator/(T other) const noexcept { return this->value / other; }
+    
+    // Arithmetic augmented assignment
+    [[nodiscard]] constexpr Arithmetic& operator+=(Arithmetic other) noexcept { this->value += other.value; return *this; }
+    [[nodiscard]] constexpr Arithmetic& operator-=(Arithmetic other) noexcept { this->value -= other.value; return *this; }
+    
+    // Multiplicative augmented assignment
+    [[nodiscard]] constexpr Arithmetic& operator*=(T other) noexcept { this->value *= other; return *this; }
+    [[nodiscard]] constexpr Arithmetic& operator/=(T other) noexcept { this->value /= other; return *this; }
+    
+    // Comparison
+    [[nodiscard]] constexpr bool operator< (Arithmetic other) const noexcept { return this->value <  other.value; }
+    [[nodiscard]] constexpr bool operator<=(Arithmetic other) const noexcept { return this->value <= other.value; }
+    [[nodiscard]] constexpr bool operator> (Arithmetic other) const noexcept { return this->value >  other.value; }
+    [[nodiscard]] constexpr bool operator>=(Arithmetic other) const noexcept { return this->value >= other.value; }
+    [[nodiscard]] constexpr bool operator==(Arithmetic other) const noexcept { return this->value == other.value; }
+    [[nodiscard]] constexpr bool operator!=(Arithmetic other) const noexcept { return this->value != other.value; }
+    
+    // Explicit cast 
+    template <class To>
+    [[nodiscard]] constexpr explicit operator To() const noexcept { return static_cast<To>(this->value); }
+
+    // clang-format on
+};
+
+// --- Generic operations ---
+// --------------------------
+
+// Inverted multiplication order
+template <class T, class Tag>
+[[nodiscard]] constexpr Arithmetic<T, Tag> operator*(T lhs, Arithmetic<T, Tag> rhs) noexcept {
+    return rhs * lhs;
+}
+
+// Makes type usable with 'std::swap' (see https://en.cppreference.com/w/cpp/named_req/Swappable.html)
+template <class T, class Tag>
+constexpr void swap(Arithmetic<T, Tag> lhs, Arithmetic<T, Tag> rhs) noexcept {
+    const auto tmp = lhs;
+
+    lhs = rhs;
+    rhs = tmp;
+}
+
+} // namespace utl::strong_type::impl
+
+// ______________________ PUBLIC API ______________________
+
+namespace utl::strong_type {
+
+using impl::Bind;
+using impl::Unique;
+using impl::Arithmetic;
+
+} // namespace utl::strong_type
+
+#endif
+#endif // module utl::strong_type
 
 
 
@@ -9815,15 +13613,20 @@ template <class T>
 //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-#if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_STRUCT_REFLECT)
-#ifndef UTLHEADERGUARD_STRUCT_REFLECT
-#define UTLHEADERGUARD_STRUCT_REFLECT
+#if !defined(UTL_PICK_MODULES) || defined(UTL_MODULE_STRUCT_REFLECT)
+
+#ifndef utl_struct_reflect_headerguard
+#define utl_struct_reflect_headerguard
+
+#define UTL_STRUCT_REFLECT_VERSION_MAJOR 1
+#define UTL_STRUCT_REFLECT_VERSION_MINOR 0
+#define UTL_STRUCT_REFLECT_VERSION_PATCH 2
 
 // _______________________ INCLUDES _______________________
 
-#include <array>       // array<>
+#include <array>       // IWYU pragma: keep (used in a macro) | array<>
 #include <cstddef>     // size_t
-#include <string_view> // string_view
+#include <string_view> // IWYU pragma: keep (used in a macro) | string_view
 #include <tuple>       // tuple<>, tuple_size<>, apply<>(), get<>()
 #include <type_traits> // add_lvalue_reference_t<>, add_const_t<>, remove_reference_t<>, decay_t<>
 #include <utility>     // forward<>(), pair<>
@@ -9832,7 +13635,7 @@ template <class T>
 
 // Reflection mechanism is based entirely around the map macro and a single struct with partial specialization for the
 // reflected enum. Map macro itself is quire non-trivial, but completely standard, a good explanation of how it works
-// can be found here: [https://github.com/swansontec/map-macro].
+// can be found here: https://github.com/swansontec/map-macro.
 //
 // Once we have a map macro all reflection is a matter of simply mapping __VA_ARGS__ into various
 // arrays and tuples, which allows us to work with structures in a generic tuple-like way.
@@ -9842,11 +13645,11 @@ template <class T>
 //
 // An alternative frequently used way to do struct reflection is through generated code with structured binding &
 // hundreds of overloads. This has a benefit of producing nicer error messages on 'for_each()' however the
-// resulting implementation is downright abnorrent.
+// resulting implementation is exceedingly verbose and doesn't provide field name info.
 
 // ____________________ IMPLEMENTATION ____________________
 
-namespace utl::struct_reflect {
+namespace utl::struct_reflect::impl {
 
 // =================
 // --- Map macro ---
@@ -9889,25 +13692,22 @@ namespace utl::struct_reflect {
 
 // Note: 'srfl' is short for 'struct_reflect'
 
-// =========================
-// --- Struct reflection ---
-// =========================
-
-// --- Implementation ---
-// ----------------------
+// ============================
+// --- Reflection mechanism ---
+// ============================
 
 template <class T1, class T2>
-constexpr std::pair<T1, T2&&> _make_entry(T1&& a, T2&& b) noexcept {
+constexpr std::pair<T1, T2&&> make_entry(T1&& a, T2&& b) noexcept {
     return std::pair<T1, T2&&>(std::forward<T1>(a), std::forward<T2>(b));
     // helper function used to create < name, reference-to-field > entries
 }
 
 template <class>
-inline constexpr bool _always_false_v = false;
+constexpr bool always_false_v = false;
 
-template <class E>
-struct _meta {
-    static_assert(_always_false_v<E>,
+template <class S>
+struct Meta {
+    static_assert(always_false_v<S>,
                   "Provided struct does not have a defined reflection. Use 'UTL_STRUCT_REFLECT' macro to define one.");
     // makes instantiation of this template a compile-time error
 };
@@ -9915,7 +13715,7 @@ struct _meta {
 // Helper macros for codegen
 #define utl_srfl_make_name(arg_) std::string_view(#arg_)
 #define utl_srfl_fwd_value(arg_) std::forward<S>(val).arg_
-#define utl_srfl_fwd_entry(arg_) _make_entry(std::string_view(#arg_), std::forward<S>(val).arg_)
+#define utl_srfl_fwd_entry(arg_) make_entry(std::string_view(#arg_), std::forward<S>(val).arg_)
 
 #define utl_srfl_call_unary_func(arg_) func(std::forward<S>(val).arg_);
 #define utl_srfl_call_binary_func(arg_) func(std::forward<S1>(val_1).arg_, std::forward<S2>(val_2).arg_);
@@ -9924,10 +13724,10 @@ struct _meta {
 
 #define UTL_STRUCT_REFLECT(struct_name_, ...)                                                                          \
     template <>                                                                                                        \
-    struct utl::struct_reflect::_meta<struct_name_> {                                                                  \
+    struct utl::struct_reflect::impl::Meta<struct_name_> {                                                             \
         constexpr static std::string_view type_name = #struct_name_;                                                   \
                                                                                                                        \
-        constexpr static auto names = std::array{utl_erfl_map_list(utl_erfl_make_name, __VA_ARGS__)};                  \
+        constexpr static auto names = std::array{utl_srfl_map_list(utl_srfl_make_name, __VA_ARGS__)};                  \
                                                                                                                        \
         template <class S>                                                                                             \
         constexpr static auto field_view(S&& val) noexcept {                                                           \
@@ -9962,25 +13762,26 @@ struct _meta {
 
 // Note: 'true' in front of a generated predicate chain handles the redundant '&&' at the beginning
 
-// --- Public API ---
-// ------------------
+// ======================
+// --- Reflection API ---
+// ======================
 
 template <class S>
-constexpr auto type_name = _meta<S>::type_name;
+constexpr auto type_name = Meta<S>::type_name;
 
 template <class S>
-constexpr auto names = _meta<S>::names;
+constexpr auto names = Meta<S>::names;
 
 template <class S>
 constexpr auto field_view(S&& value) noexcept {
     using struct_type = typename std::decay_t<S>;
-    return _meta<struct_type>::field_view(std::forward<S>(value));
+    return Meta<struct_type>::field_view(std::forward<S>(value));
 }
 
 template <class S>
 constexpr auto entry_view(S&& value) noexcept {
     using struct_type = typename std::decay_t<S>;
-    return _meta<struct_type>::entry_view(std::forward<S>(value));
+    return Meta<struct_type>::entry_view(std::forward<S>(value));
 }
 
 template <class S>
@@ -9988,14 +13789,13 @@ constexpr auto size = std::tuple_size_v<decltype(names<S>)>;
 
 template <std::size_t I, class S>
 constexpr auto get(S&& value) noexcept {
-    using struct_type = typename std::decay_t<S>;
-    return std::get<I>(_meta<struct_type>::field_view(std::forward<S>(value)));
+    return std::get<I>(field_view(std::forward<S>(value)));
 }
 
 template <class S, class Func>
 constexpr void for_each(S&& value, Func&& func) {
     using struct_type = typename std::decay_t<S>;
-    _meta<struct_type>::for_each(std::forward<S>(value), std::forward<Func>(func));
+    Meta<struct_type>::for_each(std::forward<S>(value), std::forward<Func>(func));
 }
 
 template <class S1, class S2, class Func>
@@ -10004,7 +13804,7 @@ constexpr void for_each(S1&& value_1, S2&& value_2, Func&& func) {
     using struct_type_2 = typename std::decay_t<S2>;
     static_assert(std::is_same_v<struct_type_1, struct_type_2>,
                   "Called 'struct_reflect::for_each(s1, s2, func)' with incompatible argument types.");
-    _meta<struct_type_1>::for_each(std::forward<S1>(value_1), std::forward<S2>(value_2), std::forward<Func>(func));
+    Meta<struct_type_1>::for_each(std::forward<S1>(value_1), std::forward<S2>(value_2), std::forward<Func>(func));
 }
 
 // Predicate checks cannot be efficiently implemented in terms of 'for_each()'
@@ -10012,7 +13812,7 @@ constexpr void for_each(S1&& value_1, S2&& value_2, Func&& func) {
 template <class S, class Func>
 constexpr bool true_for_all(const S& value, Func&& func) {
     using struct_type = typename std::decay_t<S>;
-    return _meta<struct_type>::true_for_all(value, std::forward<Func>(func));
+    return Meta<struct_type>::true_for_all(value, std::forward<Func>(func));
 }
 
 template <class S1, class S2, class Func>
@@ -10021,7 +13821,7 @@ constexpr bool true_for_all(const S1& value_1, const S2& value_2, Func&& func) {
     using struct_type_2 = typename std::decay_t<S2>;
     static_assert(std::is_same_v<struct_type_1, struct_type_2>,
                   "Called 'struct_reflect::for_each(s1, s2, func)' with incompatible argument types.");
-    return _meta<struct_type_1>::true_for_all(value_1, value_2, std::forward<Func>(func));
+    return Meta<struct_type_1>::true_for_all(value_1, value_2, std::forward<Func>(func));
 }
 
 // --- Misc utils ---
@@ -10038,9 +13838,9 @@ constexpr void tuple_for_each(T&& tuple, Func&& func) {
 // For a pair of tuple 'std::apply' trick doesn't cut it, gotta do the standard thing
 // with recursion over the index sequence. This looks a little horrible, but no too much
 template <class T1, class T2, class Func, std::size_t... Idx>
-constexpr void _tuple_for_each_impl(T1&& tuple_1, T2&& tuple_2, Func&& func, std::index_sequence<Idx...>) {
+constexpr void tuple_for_each_impl(T1&& tuple_1, T2&& tuple_2, Func&& func, std::index_sequence<Idx...>) {
     (func(std::get<Idx>(std::forward<T1>(tuple_1)), std::get<Idx>(std::forward<T2>(tuple_2))), ...);
-    // fold expression '( f(args), ... )' invokes 'f(args)' for all indeces in the index sequence
+    // fold expression '( f(args), ... )' invokes 'f(args)' for all indices in the index sequence
 }
 
 template <class T1, class T2, class Func>
@@ -10049,9 +13849,31 @@ constexpr void tuple_for_each(T1&& tuple_1, T2&& tuple_2, Func&& func) {
     constexpr std::size_t tuple_size_2 = std::tuple_size_v<std::decay_t<T2>>;
     static_assert(tuple_size_1 == tuple_size_2,
                   "Called 'struct_reflect::tuple_for_each(t1, t2, func)' with incompatible tuple sizes.");
-    _tuple_for_each_impl(std::forward<T1>(tuple_1), std::forward<T2>(tuple_2), std::forward<Func>(func),
-                         std::make_index_sequence<tuple_size_1>{});
+    tuple_for_each_impl(std::forward<T1>(tuple_1), std::forward<T2>(tuple_2), std::forward<Func>(func),
+                        std::make_index_sequence<tuple_size_1>{});
 }
+
+} // namespace utl::struct_reflect::impl
+
+// ______________________ PUBLIC API ______________________
+
+namespace utl::struct_reflect {
+
+// macro -> UTL_STRUCT_REFLECT
+
+using impl::type_name;
+using impl::size;
+
+using impl::names;
+using impl::field_view;
+using impl::entry_view;
+
+using impl::get;
+
+using impl::for_each;
+using impl::true_for_all;
+
+using impl::tuple_for_each;
 
 } // namespace utl::struct_reflect
 
@@ -10073,199 +13895,819 @@ constexpr void tuple_for_each(T1&& tuple_1, T2&& tuple_2, Func&& func) {
 //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-#if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_TABLE)
-#ifndef UTLHEADERGUARD_TABLE
-#define UTLHEADERGUARD_TABLE
+#if !defined(UTL_PICK_MODULES) || defined(UTL_MODULE_TABLE)
+
+#ifndef utl_table_headerguard
+#define utl_table_headerguard
+
+#define UTL_TABLE_VERSION_MAJOR 1
+#define UTL_TABLE_VERSION_MINOR 0
+#define UTL_TABLE_VERSION_PATCH 2
 
 // _______________________ INCLUDES _______________________
 
-#include <cstddef>          // size_t
-#include <initializer_list> // initializer_list<>
-#include <iomanip>          // resetiosflags(), setw()
-#include <ios>              // streamsize, ios_base::fmtflags, ios
-#include <iostream>         // cout
-#include <ostream>          // ostream
-#include <sstream>          // ostringstream
-#include <string>           // string
-#include <type_traits>      // is_arithmetic_v<>, is_same_v<>
-#include <vector>           // vector<>
+#include <array>    // array<>, size_t
+#include <cassert>  // assert()
+#include <charconv> // to_chars()
+#include <string>   // string
+#include <vector>   // vector<>
 
 // ____________________ DEVELOPER DOCS ____________________
 
-// Functions used to build and render simple ASCII table in console.
+// Supported table formats:
+//    - ASCII
+//    - Markdown
+//    - LaTeX
+//    - Mathematica
+//    - CSV
 //
-// Tries to be simple and minimize boilerplate, exposes a LaTeX-like API.
-// In fact this is for a reason - these tables can be formatted for a quick LaTeX export
-// by enabling a 'set_latex_mode(true)'.
+// Those formats impose following assertions:
+//    1. Table rows / columns should not have a fixed datatype
+//    2. The notion of "header" is not present in a general case (it only matters for Markdown)
+//    3. The notion of "hline" is not present in a general case (it only matters for LaTex & Mathematica)
+//    4. Floating point number formatting depends on the table format
 //
-// As of now the implementation is short but quite frankly ugly, it feels like with some thought
-// it could be generalized much better to support multiple styles and perform faster, however there
-// is ~0 need for this to be fast since it's mean for human-readable tables and not massive data export.
-// Adding more styles while nice also doesn't seem like an important thing as of now so the old implementation
-// is left to be as is.
+//    - Assertion  (1) means "variadic" designs with fixed-type columns are generally not suitable.
+//    - Assertions (2) and (3) mean that it is difficult to generalize all formatting details.
+//    - Assertion  (4) means that it is difficult to "delay" format specification, we'll either have
+//    to re-parse number back from string or have some kind of dynamic typing that remembers numbers
+//    (since assertion (1) prevents us form using a statically typed design).
+//
+// This motivates the end design where each format has it's own class, this means we can format things "eagerly"
+// (thus avoiding issue (4)), different classes have independent (through similar) APIs and implementations
+// (thus avoiding generalization problems (2) and (3)). There is certainly some code repetition, but it ends
+// up being better than the alternative.
+//
+// Most of the common logic between formats is handled by the cell matrix class, which abstracts away all
+// the indexation / appending / width computation and etc. behind a rather efficient API. Since eagerly
+// constructing a table is effectively the same as building a matrix of strings, we avoid issue (1) without
+// the need for dynamic typing.
+//
+// Note: We can reduce allocations even more by packing all strings into a single char vector, and
+//       storing 'std::string_view's into it, cell matrix should be able to do so rather easily.
+//       Whether such optimization is worth the trouble is debatable.
 
 // ____________________ IMPLEMENTATION ____________________
 
-namespace utl::table {
+namespace utl::table::impl {
 
-// =====================
-// --- Column Format ---
-// =====================
+// ======================
+// --- SFINAE helpers ---
+// ======================
 
-using uint       = std::streamsize;
-using _ios_flags = std::ios_base::fmtflags;
+template <bool Cond>
+using require = std::enable_if_t<Cond, bool>; // makes SFINAE a bit less cumbersome
 
-struct ColumnFormat {
-    _ios_flags flags;
-    uint       precision;
-};
-
-struct _Column {
-    uint         width;
-    ColumnFormat col_format;
-};
-
-// --- Predefined Formats ---
-// --------------------------
-
-constexpr ColumnFormat NONE = {std::ios::showpoint, 6};
-
-constexpr ColumnFormat FIXED(uint decimals = 3) { return {std::ios::fixed, decimals}; }
-constexpr ColumnFormat DEFAULT(uint decimals = 6) { return {std::ios::showpoint, decimals}; }
-constexpr ColumnFormat SCIENTIFIC(uint decimals = 3) { return {std::ios::scientific, decimals}; }
-
-constexpr ColumnFormat BOOL = {std::ios::boolalpha, 3};
-
-// --- Internal Table State ---
-// ----------------------------
-
-inline std::vector<_Column> _columns;
-inline std::size_t          _current_column = 0;
-inline std::ostream*        _output_stream  = &std::cout;
-inline bool                 _latex_mode     = false;
-
-// ===================
-// --- Table Setup ---
-// ===================
-
-inline void create(std::initializer_list<uint>&& widths) {
-    _columns.resize(widths.size());
-    for (std::size_t i = 0; i < _columns.size(); ++i) {
-        _columns[i].width      = widths.begin()[i];
-        _columns[i].col_format = DEFAULT();
-    }
-}
-
-inline void set_formats(std::initializer_list<ColumnFormat>&& formats) {
-    for (std::size_t i = 0; i < _columns.size(); ++i) _columns[i].col_format = formats.begin()[i];
-}
-
-inline void set_ostream(std::ostream& new_ostream) { _output_stream = &new_ostream; }
-
-inline void set_latex_mode(bool toggle) { _latex_mode = toggle; }
-
-// =======================
-// --- Table Rendering ---
-// =======================
-
-// We want to only apply additional typesetting to "actual mathematical numbers", not bools & chars
 template <class T>
-constexpr bool _is_arithmetic_number_v =
-    std::is_arithmetic_v<T> && !std::is_same_v<T, bool> && !std::is_same_v<T, char>;
+using require_int = require<std::is_integral_v<T> && !std::is_same_v<T, bool>>;
 
-[[nodiscard]] inline std::string _trim_left(const std::string& str, char trimmed_char) {
-    std::string res = str;
+template <class T>
+using require_bool = require<std::is_same_v<T, bool>>;
+
+template <class T>
+using require_float = require<std::is_floating_point_v<T>>;
+
+template <class T>
+using require_strconv = require<std::is_convertible_v<T, std::string>>;
+
+// ====================
+// --- String utils ---
+// ====================
+
+// Well-tested implementations taken from 'utl::stre'
+
+[[nodiscard]] inline std::string trim_left(std::string_view str, char trimmed_char) {
+    std::string res(str);
     res.erase(0, res.find_first_not_of(trimmed_char));
     return res;
 }
 
-// Function that adds some LaTeX decorators to appropriate types
 template <class T>
-void _append_decorated_value(std::ostream& os, const T& value) {
-    using V = std::decay_t<T>;
+[[nodiscard]] std::string replace_all_occurrences(T&& str, std::string_view from, std::string_view to) {
+    std::string res = std::forward<T>(str);
 
-    if (!_latex_mode) {
-        os << value;
-        return;
+    std::size_t i = 0;
+    while ((i = res.find(from, i)) != std::string::npos) { // locate substring to replace
+        res.replace(i, from.size(), to);                   // replace
+        i += to.size();                                    // step over the replaced region
     }
 
-    if constexpr (_is_arithmetic_number_v<V>) {
-        // In order to respect format flags of the table, we have to copy fmt into a stringstream
-        // and use IT to stringify a number, simple 'std::to_string()' won't do it here
-        std::ostringstream ss;
-        ss.copyfmt(os);
-        ss.width(0); // cancel out 'std::setw()' that was copied with all the other flags
-        ss << value;
-        std::string number_string = ss.str();
+    return res;
+}
 
-        // Convert scientific form number to a LaTeX-friendly form,
-        // for example, "1.3e-15" becomes "1.3 \cdot 10^{-15}"
-        const std::size_t e_index = number_string.find('e');
-        if (e_index != std::string::npos) {
-            const std::string mantissa = number_string.substr(0, e_index - 1);
-            const char        sign     = number_string.at(e_index + 1);
-            const std::string exponent = number_string.substr(e_index + 2);
+[[nodiscard]] inline std::string escape_control_chars(std::string_view str) {
+    std::string res;
+    res.reserve(str.size()); // not necessarily correct, but it's a good first guess
 
-            number_string.clear();
-            number_string += mantissa;
-            number_string += " \\cdot 10^{";
-            if (sign == '-') number_string += sign;
-            number_string += _trim_left(exponent, '0');
-            number_string += '}';
+    for (const char c : str) {
+        // Control characters with dedicated escape sequences get escaped with those sequences
+        if (c == '\a') res += "\\a";
+        else if (c == '\b') res += "\\b";
+        else if (c == '\f') res += "\\f";
+        else if (c == '\n') res += "\\n";
+        else if (c == '\r') res += "\\r";
+        else if (c == '\t') res += "\\t";
+        else if (c == '\v') res += "\\v";
+        // Other non-printable chars get replaced with their codes
+        else if (!std::isprint(static_cast<unsigned char>(c))) {
+            res += '\\';
+            res += std::to_string(static_cast<int>(c));
         }
-
-        // Typeset numbers as formulas 
-        os << "$" + number_string + "$";
-        // we append it as a single string so ostream 'setw()' doesn't mess up alignment
-    } else os << value;
-}
-
-inline void cell(){};
-
-template <class T, class... Types>
-void cell(T value, const Types... other_values) {
-    const auto left_delimer  = _latex_mode ? "" : "|";
-    const auto delimer       = _latex_mode ? " & " : "|";
-    const auto right_delimer = _latex_mode ? " \\\\\n" : "|\n";
-
-    const std::string left_cline      = (_current_column == 0) ? left_delimer : "";
-    const std::string right_cline     = (_current_column == _columns.size() - 1) ? right_delimer : delimer;
-    const _ios_flags  format          = _columns[_current_column].col_format.flags;
-    const uint        float_precision = _columns[_current_column].col_format.precision;
-
-    // Save old stream state
-    std::ios old_state(nullptr);
-    old_state.copyfmt(*_output_stream);
-
-    // Set table formatting
-    (*_output_stream) << std::resetiosflags((*_output_stream).flags());
-    (*_output_stream).flags(format);
-    (*_output_stream).precision(float_precision);
-
-    // Print
-    (*_output_stream) << left_cline << std::setw(_columns[_current_column].width);
-    _append_decorated_value(*_output_stream, value);
-    (*_output_stream) << right_cline;
-
-    // Return old stream state
-    (*_output_stream).copyfmt(old_state);
-
-    // Advance column counter
-    _current_column = (_current_column == _columns.size() - 1) ? 0 : _current_column + 1;
-
-    cell(other_values...);
-}
-
-inline void hline() {
-    if (_latex_mode) {
-        (*_output_stream) << "\\hline\n";
-    } else {
-        (*_output_stream) << "|";
-        for (const auto& col : _columns)
-            (*_output_stream) << std::string(static_cast<std::size_t>(col.width), '-') << "|";
-        (*_output_stream) << "\n";
+        // Printable chars are appended as is.
+        else
+            res += c;
     }
+    // Note: This could be implemented faster using the 'utl::json' method of handling escapes with buffering and
+    // a lookup table, however I don't see much practical reason to complicate this implementation like that.
+
+    return res;
 }
+
+// ============================
+// --- Number serialization ---
+// ============================
+
+// --- Typed wrapper ---
+// ---------------------
+
+// Thin wrapper around the floating point value used by tables to apply format-specific stringification
+template <class T, require_float<T> = true>
+struct Number {
+    T                 value;
+    std::chars_format format;
+    int               precision;
+
+    constexpr explicit Number(T value, std::chars_format format = std::chars_format::general,
+                              int precision = 3) noexcept
+        : value(value), format(format), precision(precision) {}
+};
+
+// --- Serialization ---
+// ---------------------
+
+// Note 1: 80-bit 'long double' fits in 29 chars, 64-bit 'double' fits in 24
+// Note 2: 'std::uint64_t' fits in 21 chars, GCC '__uint128_t' fits in 40
+// Note 3: 'to_chars()' can only fail due to a small buffer, no need to check errors release
+
+template <class T, require_float<T> = true>
+inline std::string to_chars_number(Number<T> number) {
+    std::array<char, 30> buffer;
+
+    const std::to_chars_result res =
+        std::to_chars(buffer.data(), buffer.data() + buffer.size(), number.value, number.format, number.precision);
+    assert(res.ec == std::errc{});
+
+    return std::string(buffer.data(), res.ptr);
+}
+
+template <class T, require_float<T> = true>
+inline std::string to_chars_float(T value) {
+    std::array<char, 30> buffer;
+
+    const std::to_chars_result res = std::to_chars(buffer.data(), buffer.data() + buffer.size(), value);
+    assert(res.ec == std::errc{});
+
+    return std::string(buffer.data(), res.ptr);
+}
+
+template <class T, require_int<T> = true>
+inline std::string to_chars_int(T value) {
+    std::array<char, 40> buffer;
+
+    const std::to_chars_result res = std::to_chars(buffer.data(), buffer.data() + buffer.size(), value);
+    assert(res.ec == std::errc{});
+
+    return std::string(buffer.data(), res.ptr);
+}
+
+// --- LaTeX reformatting ---
+// --------------------------
+
+// LaTeX formatting wraps number into formula segment and rewrites scientific notation, below are a few examples:
+//
+//    - "1"      -> "$1$"
+//    - "1e+2"   -> "$10^{2}$"
+//    - "1.3e-3" -> "$1.3 \cdot 10^{-3}$"
+//
+// This should be done with string manipulation, since we cannot know whether the number serializes to regular or
+// scientific form without intrusively integrating with the float formatting algorithm (which by itself is much more
+// complex that this entire header). This is somewhat inefficient, but there is no practical reason to ever generate
+// LaTeX tables large enough for it to become a bottleneck.
+
+// Check that 'str' satisfies pattern '1[.][0...0]' (regex '1?.*0')
+inline bool satisfies_pattern_of_one(std::string_view str) {
+    std::size_t i = 0;
+
+    while (i < 1 && str[i] == '1') ++i;
+    while (i < 2 && str[i] == '.') ++i;
+    while (i < str.size() && str[i] == '0') ++i;
+
+    return i == str.size();
+}
+
+// Reformat numbers in scientific & hex notation
+inline std::string latex_reformat(std::string_view str) {
+    const std::size_t exp_idx       = str.find('e');
+    const bool        is_scientific = (exp_idx != std::string::npos);
+    const bool        is_hex        = (str.find('p') != std::string::npos);
+    const bool        is_regular    = !is_scientific && !is_hex;
+
+    if (is_regular) return std::string(str);               // regular form doesn't require reformatting
+    if (is_hex) return "\\text{" + std::string(str) + "}"; // hex form has no better solution the to quote it "verbatim"
+
+    const std::string_view mantissa = str.substr(0, exp_idx);
+    const char             sign     = str.at(exp_idx + 1);
+    const std::string_view exponent = str.substr(exp_idx + 2);
+
+    std::string res;
+    res.reserve(sizeof(" \\cdot 10^{}") + mantissa.size() + exponent.size());
+
+    if (!satisfies_pattern_of_one(mantissa)) { // powers of 10 don't need the fractional part
+        res += mantissa;
+        res += " \\cdot ";
+    }
+    res += "10^{";
+    if (sign == '-') res += sign;
+    const std::string trimmed_exponent = trim_left(exponent, '0');
+    res += trimmed_exponent.empty() ? "0" : trimmed_exponent; // prevents stuff like '10^{}'
+    res += '}';
+
+    return res;
+}
+
+// Wrap number in '$'
+inline std::string latex_wrap(std::string str) { return '$' + std::move(str) + '$'; }
+
+// --- Mathematica reformatting ---
+// --------------------------------
+
+// Mathematica uses "*^" instead of "e" to denote scientific notation
+
+inline std::string mathematica_reformat(std::string str) { return replace_all_occurrences(std::move(str), "e", "*^"); }
+
+// ====================
+// --- Common utils ---
+// ====================
+
+// Avoids including '<algorithm>' for a single tiny function
+[[nodiscard]] inline std::size_t max(std::size_t lhs, std::size_t rhs) noexcept { return lhs < rhs ? rhs : lhs; }
+
+// Used in delimiter placement
+[[nodiscard]] constexpr bool not_last(std::size_t i, std::size_t size) noexcept { return i < size - 1; }
+
+// Used to align cell widths
+inline void aligned_append(std::string& dst, const std::string& src, std::size_t width) {
+    dst += src;
+    dst.append(width - src.size(), ' ');
+}
+
+// Every format does its own thing, but they all need rows/cols/widths/etc.
+// to do the alignment, makes sense to group all this stuff into a struct
+struct Extents {
+    std::size_t              rows;
+    std::size_t              cols;
+    std::vector<std::size_t> widths;        // useful for alignment
+    std::size_t              total_width;   // useful for preallocation
+    std::size_t              last_cell_row; // useful for delimiter placement
+};
+
+// ====================
+// --- Table matrix ---
+// ====================
+
+// Any table can be represented as a matrix of strings,
+// with some of the rows corresponding to hlines and not containing any content:
+//
+//    [false]  [ "text_00", "text_01", "text_02" ]
+//    [ true]  [ ""       , ""       , ""        ]
+//    [false]  [ "text_00", "text_01", "text_02" ]
+//    [false]  [ "text_00", "text_01", "text_02" ]
+//
+// This is a pretty efficient way of packing the data (relative to the alternatives)
+// that allows us to write table operations in a generic, yet concise manner.
+
+class Matrix {
+    std::size_t rows = 0;
+    std::size_t cols = 0;
+
+    std::vector<bool>        hlines; // [ rows ]        dense vector
+    std::vector<std::string> cells;  // [ rows x cols ] dense matrix
+
+public:
+    // Matrix has a fixed number of cols and a growing number of rows,
+    // constructed either using a number of cols or the first row data
+    explicit Matrix(std::size_t cols) noexcept : cols(cols) { assert(this->cols > 0); }
+    explicit Matrix(std::vector<std::string> title) : rows(1), cols(title.size()) {
+        assert(this->cols > 0);
+
+        this->hlines.push_back(false);
+        this->cells = std::move(title);
+    }
+
+    // Creating regular rows (happens on cell-by-cell basis)
+    void add_cell(std::string cell) {
+        this->cells.push_back(std::move(cell));
+
+        // New row creation
+        if (this->cells.size() > this->rows * this->cols) {
+            ++this->rows;
+            this->hlines.push_back(false);
+        }
+    }
+
+    // Creating hlines
+    void add_hline() {
+        this->normalize();
+        // fills current row with empty cells if it's not finished, note that this approach
+        // of hlines filling their matrix row with empty cells is what allows other functions to
+        // have generic logic without constantly checking for hlines
+
+        ++this->rows;
+        this->hlines.push_back(true);
+        this->cells.resize(this->cells.size() + this->cols);
+    }
+
+    // Normalizing matrix to a rectangular form
+    // (fills possibly "unfinished" data with empty cells to make the matrix rectangular)
+    // (returns self-reference to allow operation chaining)
+    Matrix& normalize() {
+        this->cells.resize(this->rows * this->cols);
+        return *this;
+    }
+
+    // Element access
+    [[nodiscard]] bool get_hline(std::size_t i) const { return this->hlines.at(i); }
+
+    [[nodiscard]] const std::string& get_cell(std::size_t i, std::size_t j) const {
+        assert(this->cells.size() == this->rows * this->cols); // matrix-like access assumes rectangular form
+
+        return this->cells.at(i * this->cols + j);
+    }
+
+    // Extent counting
+    [[nodiscard]] Extents get_extents() const {
+        // Individual column widths
+        std::vector<std::size_t> widths(this->cols, 0);
+
+        for (std::size_t i = 0; i < this->rows; ++i)
+            for (std::size_t j = 0; j < this->cols; ++j) widths[j] = max(widths[j], this->get_cell(i, j).size());
+
+        // Total row width
+        std::size_t total_width = 0;
+        for (const auto& width : widths) total_width += width;
+
+        // Last cell row
+        std::size_t last_cell_row = this->rows - 1;
+        while (last_cell_row > 0 && this->get_hline(last_cell_row)) --last_cell_row;
+
+        return {this->rows, this->cols, std::move(widths), total_width, last_cell_row};
+    }
+
+    [[nodiscard]] bool ended_on_hline() const { return !this->hlines.empty() && this->hlines.back(); }
+    // some formats need to check for consequent hlines
+};
+
+// =====================
+// --- Format: ASCII ---
+// =====================
+
+// Title row -> NO
+// Hlines    -> YES
+// Numbers   -> REGULAR
+
+// ASCII tables are usually printed to terminal or a file,
+
+class ASCII {
+    Matrix matrix;
+
+public:
+    explicit ASCII(std::size_t cols) : matrix(cols) {}
+
+    template <class T, require_float<T> = true>
+    void cell(Number<T> value) {
+        this->matrix.add_cell(to_chars_number(value));
+    }
+
+    template <class T, require_float<T> = true>
+    void cell(T value) {
+        this->matrix.add_cell(to_chars_float(value));
+    }
+
+    template <class T, require_int<T> = true>
+    void cell(T value) {
+        this->matrix.add_cell(to_chars_int(value));
+    }
+
+    template <class T, require_bool<T> = true>
+    void cell(T value) {
+        this->matrix.add_cell(value ? "true" : "false");
+    }
+
+    template <class T, require_strconv<T> = true>
+    void cell(T value) {
+        this->matrix.add_cell(escape_control_chars(value));
+    }
+
+    template <class... T, require<sizeof...(T) != 1> = true>
+    void cell(T&&... args) {
+        (this->cell(std::forward<T>(args)), ...);
+    }
+
+    void hline() { this->matrix.add_hline(); }
+
+    std::string format() {
+        const auto extents = this->matrix.normalize().get_extents();
+
+        // Preallocate string considering ASCII row format: "| " ... " | " ... " |\n"
+        std::string res;
+        res.reserve(extents.rows * (extents.total_width + 3 * extents.cols));
+
+        // Formatting functions
+        const auto format_row = [&](std::size_t i) {
+            res += "| ";
+            for (std::size_t j = 0; j < extents.cols; ++j) {
+                aligned_append(res, this->matrix.get_cell(i, j), extents.widths[j]);
+                if (not_last(j, extents.cols)) res += " | ";
+            }
+            res += " |\n";
+        };
+
+        const auto format_hline = [&] {
+            res += '|';
+            for (std::size_t j = 0; j < extents.cols; ++j) {
+                res.append(extents.widths[j] + 2, '-');
+                if (not_last(j, extents.cols)) res += '|';
+            }
+            res += "|\n";
+        };
+
+        // Format table with hlines
+        for (std::size_t i = 0; i < extents.rows; ++i)
+            if (this->matrix.get_hline(i)) format_hline();
+            else format_row(i);
+
+        return res;
+    }
+};
+
+// ========================
+// --- Format: Markdown ---
+// ========================
+
+// Title row -> YES
+// Hlines    -> NO
+// Numbers   -> REGULAR
+
+// Markdown is implementation-defined so we format tables in a commonly supported way and don't impose
+// any specific restrictions on strings allowed in a cell (for example, some markdown flavors might
+// want to export HTML cells, while other would consider such syntax to be invalid).
+
+class Markdown {
+    Matrix matrix;
+
+public:
+    // Every markdown table has precisely one title row, making it a constructor argument (rather than a
+    // '.title()' method) ensures this fact at the API level and saves us from a bunch of pointless checks
+    explicit Markdown(std::vector<std::string> title) : matrix(std::move(title)) {}
+
+    template <class T, require_float<T> = true>
+    void cell(Number<T> value) {
+        this->matrix.add_cell(to_chars_number(value));
+    }
+
+    template <class T, require_float<T> = true>
+    void cell(T value) {
+        this->matrix.add_cell(to_chars_float(value));
+    }
+
+    template <class T, require_int<T> = true>
+    void cell(T value) {
+        this->matrix.add_cell(to_chars_int(value));
+    }
+
+    template <class T, require_bool<T> = true>
+    void cell(T value) {
+        this->matrix.add_cell(value ? "`true`" : "`false`");
+    }
+
+    template <class T, require_strconv<T> = true>
+    void cell(T value) {
+        this->matrix.add_cell(value);
+    }
+
+    template <class... T, require<sizeof...(T) != 1> = true>
+    void cell(T&&... args) {
+        (this->cell(std::forward<T>(args)), ...);
+    }
+
+    std::string format() {
+        const auto extents = this->matrix.normalize().get_extents();
+
+        // Preallocate string considering markdown row format: "| " ... " | " ... " |\n"
+        std::string res;
+        res.reserve(extents.rows * (extents.total_width + 3 * extents.cols));
+
+        // Formatting functions
+        const auto format_row = [&](std::size_t i) {
+            res += "| ";
+            for (std::size_t j = 0; j < extents.cols; ++j) {
+                aligned_append(res, this->matrix.get_cell(i, j), extents.widths[j]);
+                if (not_last(j, extents.cols)) res += " | ";
+            }
+            res += " |\n";
+        };
+
+        const auto format_hline = [&] {
+            res += "| ";
+            for (std::size_t j = 0; j < extents.cols; ++j) {
+                res.append(extents.widths[j], '-');
+                if (not_last(j, extents.cols)) res += " | ";
+            }
+            res += " |\n";
+        };
+
+        // Format table with title & body
+        format_row(0);
+        format_hline();
+        for (std::size_t i = 1; i < extents.rows; ++i) format_row(i);
+
+        return res;
+    }
+};
+
+// =====================
+// --- Format: LaTeX ---
+// =====================
+
+// Title row -> NO
+// Hlines    -> YES
+// Numbers   -> LaTeX-specific
+
+// LaTeX is a little cumbersome to generate since we need to rewrite numbers in scientific form as formulas.
+// Strings intentionally don't escape any special chars to allow users to write LaTeX expressions in string cells.
+
+class LaTeX {
+    Matrix matrix;
+
+public:
+    explicit LaTeX(std::size_t cols) : matrix(cols) {}
+
+    template <class T, require_float<T> = true>
+    void cell(Number<T> value) {
+        this->matrix.add_cell(latex_wrap(latex_reformat(to_chars_number(value))));
+    }
+
+    template <class T, require_float<T> = true>
+    void cell(T value) {
+        this->matrix.add_cell(latex_wrap(latex_reformat(to_chars_float(value))));
+    }
+
+    template <class T, require_int<T> = true>
+    void cell(T value) {
+        this->matrix.add_cell(latex_wrap(to_chars_int(value)));
+    }
+
+    template <class T, require_bool<T> = true>
+    void cell(T value) {
+        this->matrix.add_cell(value ? "true" : "false");
+    }
+
+    template <class T, require_strconv<T> = true>
+    void cell(T value) {
+        this->matrix.add_cell(value);
+    }
+
+    template <class... T, require<sizeof...(T) != 1> = true>
+    void cell(T&&... args) {
+        (this->cell(std::forward<T>(args)), ...);
+    }
+
+    void hline() { this->matrix.add_hline(); }
+
+    std::string format() {
+        const auto extents = this->matrix.normalize().get_extents();
+
+        // Preallocate string considering LaTeX environment and row format
+        std::string res;
+        res.reserve(17 + extents.cols * 2 + 2 + extents.rows * (extents.total_width + 3 * extents.cols) + 14);
+
+        // Formatting functions
+        const auto format_row = [&](std::size_t i) {
+            res += "    ";
+            for (std::size_t j = 0; j < extents.cols; ++j) {
+                aligned_append(res, this->matrix.get_cell(i, j), extents.widths[j]);
+                if (not_last(j, extents.cols)) res += " & ";
+            }
+            if (not_last(i, extents.rows)) res += " \\\\";
+            res += '\n';
+        };
+
+        const auto format_hline = [&] { res += "\\hline\n"; };
+
+        // Format table with hlines as LaTeX environment '\begin{tabular}{...} ... \end{tabular}'
+        res += "\\begin{tabular}{|";
+        for (std::size_t j = 0; j < extents.cols; ++j) res += "c|";
+        res += "}\n";
+
+        for (std::size_t i = 0; i < extents.rows; ++i)
+            if (this->matrix.get_hline(i)) format_hline();
+            else format_row(i);
+
+        res += "\\end{tabular}\n";
+
+        return res;
+    }
+};
+
+// ===========================
+// --- Format: Mathematica ---
+// ===========================
+
+// Title row -> NO
+// Hlines    -> YES
+// Numbers   -> Mathematica-specific
+
+// Mathematica 'Grid[]' is not a format with a standardized specification, nonetheless it is often quite useful
+// to print numerical params when visualizing numeric results. Wolfram strings seem to support newlines and most
+// control characters out of the box, quotes can be escaped with '\"'.
+
+class Mathematica {
+    Matrix matrix;
+
+public:
+    explicit Mathematica(std::size_t cols) : matrix(cols) {}
+
+    template <class T, require_float<T> = true>
+    void cell(Number<T> value) {
+        this->matrix.add_cell(mathematica_reformat(to_chars_number(value)));
+    }
+
+    template <class T, require_float<T> = true>
+    void cell(T value) {
+        this->matrix.add_cell(mathematica_reformat(to_chars_float(value)));
+    }
+
+    template <class T, require_int<T> = true>
+    void cell(T value) {
+        this->matrix.add_cell(to_chars_int(value));
+    }
+
+    template <class T, require_bool<T> = true>
+    void cell(T value) {
+        this->matrix.add_cell(value ? "True" : "False");
+        // Mathematica capitalizes booleans
+    }
+
+    template <class T, require_strconv<T> = true>
+    void cell(T value) {
+        this->matrix.add_cell('"' + replace_all_occurrences(std::string(value), "\"", "\\\"") + '"');
+        // without quotes Mathematica would interpret strings as identifiers
+    }
+
+    template <class... T, require<sizeof...(T) != 1> = true>
+    void cell(T&&... args) {
+        (this->cell(std::forward<T>(args)), ...);
+    }
+
+    void hline() {
+        if (this->matrix.ended_on_hline()) return;
+        // Mathematica cannot have multiple hlines in a row, we can ignore multiple consequent cases
+        this->matrix.add_hline();
+    }
+
+    std::string format() {
+        const auto extents = this->matrix.normalize().get_extents();
+
+        // Preallocate string considering Mathematica syntax and row format
+        std::string res;
+        res.reserve(7 + extents.rows * (6 + extents.total_width + 2 * extents.cols + 4) + 22 + extents.cols * 8 + 4);
+
+        // Formatting functions
+        const auto format_row = [&](std::size_t i) {
+            res += "    { ";
+            for (std::size_t j = 0; j < extents.cols; ++j) {
+                aligned_append(res, this->matrix.get_cell(i, j), extents.widths[j]);
+                if (not_last(j, extents.cols)) res += ", ";
+            }
+            res += " }";
+            if (i != extents.last_cell_row) res += ',';
+            res += '\n';
+        };
+
+        const auto format_hline = [&](std::size_t i) {
+            res += this->matrix.get_hline(i) ? "True" : "False";
+            if (not_last(i, extents.rows)) res += ", ";
+        };
+
+        // Format table as Mathematica 'Grid[]' with hlines as 'Dividers ->' option,
+        // for example: 'Grid[{...}, Dividers -> {All, {True, True, False, False, True}}]'
+        //
+        // Note that hline placement is somewhat non-trivial, 'Dividers' corresponds to exactly 'cell_rows + 1'
+        // upper/lower edges and lines between rows, but the resulting algorithm ends up quite simple
+        res += "Grid[{\n";
+
+        for (std::size_t i = 0; i < extents.rows; ++i)
+            if (!this->matrix.get_hline(i)) format_row(i);
+
+        res += "}, Dividers -> {All, {";
+        for (std::size_t i = 0; i < extents.rows; ++i) {
+            format_hline(i);
+            if (this->matrix.get_hline(i)) ++i;
+        }
+        res += "}}]\n";
+
+        return res;
+    }
+};
+
+// ===================
+// --- Format: CSV ---
+// ===================
+
+// Title row -> NO
+// Hlines    -> NO
+// Numbers   -> REGULAR
+
+// CSV is a format with no standard specification. As per RFC-4180 (see https://www.rfc-editor.org/info/rfc4180):
+//    "While there are various specifications and implementations for the CSV format (for ex. ...), there is
+//    no formal specification in existence, which allows for a wide variety of interpretations of CSV files.
+//    This section documents the format that seems to be followed by most implementations."
+// This implementation complies with requirements posed by RFC.
+
+class CSV {
+    Matrix matrix;
+
+public:
+    explicit CSV(std::size_t cols) : matrix(cols) {}
+
+    template <class T, require_float<T> = true>
+    void cell(Number<T> value) {
+        this->matrix.add_cell(to_chars_number(value));
+    }
+
+    template <class T, require_float<T> = true>
+    void cell(T value) {
+        this->matrix.add_cell(to_chars_float(value));
+    }
+
+    template <class T, require_int<T> = true>
+    void cell(T value) {
+        this->matrix.add_cell(to_chars_int(value));
+    }
+
+    template <class T, require_bool<T> = true>
+    void cell(T value) {
+        this->matrix.add_cell(value ? "true" : "false");
+    }
+
+    template <class T, require_strconv<T> = true>
+    void cell(T value) {
+        this->matrix.add_cell('"' + std::string(value) + '"');
+        // RFC-4180 [2.5] CSV should wrap strings that potentially contain commas, newline and quotes in '"'
+    }
+
+    template <class... T, require<sizeof...(T) != 1> = true>
+    void cell(T&&... args) {
+        (this->cell(std::forward<T>(args)), ...);
+    }
+
+    std::string format() {
+        const auto extents = this->matrix.normalize().get_extents();
+
+        // Preallocate string considering CSV row format: ... ", " ... ",\n"
+        std::string res;
+        res.reserve(extents.rows * (extents.total_width + 2 * extents.cols));
+
+        // Formatting functions
+        const auto format_row = [&](std::size_t i) {
+            for (std::size_t j = 0; j < extents.cols; ++j) {
+                res += this->matrix.get_cell(i, j);
+                if (not_last(j, extents.cols)) res += ",";
+                // RFC-4180 [2.4] No alignment since CSV doesn't ignore spaces and considers them a part of the field
+            }
+            res += '\n';
+        };
+
+        // Format table as a comma-separated list
+        for (std::size_t i = 0; i < extents.rows; ++i) format_row(i);
+
+        return res;
+    }
+};
+
+} // namespace utl::table::impl
+
+// ______________________ PUBLIC API ______________________
+
+namespace utl::table {
+
+using impl::Number;
+
+using impl::ASCII;
+using impl::Markdown;
+using impl::LaTeX;
+using impl::Mathematica;
+using impl::CSV;
 
 } // namespace utl::table
 
@@ -10279,257 +14721,315 @@ inline void hline() {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ DmitriBogdanov/UTL ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //
-// Module:        utl::timer
-// Documentation: https://github.com/DmitriBogdanov/UTL/blob/master/docs/module_timer.md
+// Module:        utl::time
+// Documentation: https://github.com/DmitriBogdanov/UTL/blob/master/docs/module_time.md
 // Source repo:   https://github.com/DmitriBogdanov/UTL
 //
 // This project is licensed under the MIT License
 //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-#if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_TIMER)
-#ifndef UTLHEADERGUARD_TIMER
-#define UTLHEADERGUARD_TIMER
+
+#if !defined(UTL_PICK_MODULES) || defined(UTL_MODULE_TIME)
+
+#ifndef utl_time_headerguard
+#define utl_time_headerguard
+
+#define UTL_TIME_VERSION_MAJOR 1
+#define UTL_TIME_VERSION_MINOR 0
+#define UTL_TIME_VERSION_PATCH 3
 
 // _______________________ INCLUDES _______________________
 
-#include <array>   // array<>
-#include <chrono>  // chrono::steady_clock, chrono::nanoseconds, chrono::duration_cast<>
-#include <ctime>   // time, time_t, tm, strftime()
-#include <string>  // string, to_string()
-#include <utility> // forward<>()
+#include <array>       // array<>
+#include <chrono>      // steady_clock, system_clock, duration_cast<>(), duration<>, time_point<>
+#include <cstddef>     // size_t
+#include <ctime>       // strftime, mktime
+#include <stdexcept>   // runtime_error
+#include <string>      // string, to_string()
+#include <type_traits> // common_type_t<>
 
 // ____________________ DEVELOPER DOCS ____________________
 
-// Global-state timer with built-in formatting. Functions for local date and time.
+// Thin wrapper around <chrono> and <ctime> to make common things easier, initially
+// started as 'utl::timer' which was a convenient global-state timer that dealt in doubles.
+// After some time and a good read through <chrono> documentation it was deprecated in favor
+// of a this 'utl::time' module, the rewrite got rid of any global state and added better type
+// safety by properly using <chrono> type system.
 //
-// Uses SFINAE to resolve platform-specific calls to local time (localtime_s() on Windows,
-// localtime_r() on Linux), the same can be done with macros. The fact that there seems to
-// be no portable way of getting local time before C++20 (which adds "Calendar" part of <chrono>)
-// is rather bizzare, but not unmanageable.
-//
-// # ::start() #
-// Starts the timer.
-// Note: If start() wasn't called system will use uninitialized value as a start.
-//
-// # ::elapsed_ms(), ::elapsed_sec(), ::elapsed_min(), ::elapsed_hours() #
-// Elapsed time as double.
-//
-// # ::elapsed_string_ms(), ::elapsed_string_sec(), ::elapsed_string_min(), ::elapsed_string_hours() #
-// Elapsed time as std::string.
-//
-// # ::elapsed_string:fullform() #
-// Elapsed time in format "%H hours %M min %S sec %MS ms".
-//
-// # ::datetime_string() #
-// Current local date and time in format "%y-%m-%d %H:%M:%S".
-//
-// # ::datetime_string_id() #
-// Current local date and time in format "%y-%m-%d-%H-%M-%S".
-// Less readable that usual format, but can be used in filenames which prohibit ":" usage.
+// The reason we can do things so conveniently is because chrono 'duration' and 'time_moment'
+// are capable of wrapping around any arithmetic-like type, including floating-point types which
+// are properly supported. This is a bit cumbersome to do "natively" which is why it is rarely
+// seen in the wild, but with a few simple wrappers things become quite concise.
 
 // ____________________ IMPLEMENTATION ____________________
 
-namespace utl::timer {
+namespace utl::time::impl {
 
-// =================
-// --- Internals ---
-// =================
+// ======================
+// --- <chrono> utils ---
+// ======================
 
-using _clock     = std::chrono::steady_clock;
-using _chrono_ns = std::chrono::nanoseconds;
+struct SplitDuration {
+    std::chrono::hours        hours;
+    std::chrono::minutes      min;
+    std::chrono::seconds      sec;
+    std::chrono::milliseconds ms;
+    std::chrono::microseconds us;
+    std::chrono::nanoseconds  ns;
 
-constexpr double _ns_in_ms = 1e6;
+    constexpr static std::size_t size = 6; // number of time units, avoids magic constants everywhere
 
-constexpr long long _ms_in_sec  = 1000;
-constexpr long long _ms_in_min  = 60 * _ms_in_sec;
-constexpr long long _ms_in_hour = 60 * _ms_in_min;
+    using common_rep = std::common_type_t<decltype(hours)::rep, decltype(min)::rep, decltype(sec)::rep,
+                                          decltype(ms)::rep, decltype(us)::rep, decltype(ns)::rep>;
+    // standard doesn't specify common representation type, usually it's 'std::int64_t'
 
-inline _clock::time_point _start_timepoint;
-
-[[nodiscard]] inline double _elapsed_time_as_ms() {
-    const auto elapsed = std::chrono::duration_cast<_chrono_ns>(_clock::now() - _start_timepoint).count();
-    return static_cast<double>(elapsed) / _ns_in_ms;
-}
-
-inline void start() { _start_timepoint = _clock::now(); }
-
-// ==============================
-// --- Elapsed Time Functions ---
-// ==============================
-
-// --- Elapsed Time as 'double' ---
-// --------------------------------
-
-[[nodiscard]] inline double elapsed_ms() { return _elapsed_time_as_ms(); }
-[[nodiscard]] inline double elapsed_sec() { return _elapsed_time_as_ms() / static_cast<double>(_ms_in_sec); }
-[[nodiscard]] inline double elapsed_min() { return _elapsed_time_as_ms() / static_cast<double>(_ms_in_min); }
-[[nodiscard]] inline double elapsed_hours() { return _elapsed_time_as_ms() / static_cast<double>(_ms_in_hour); }
-
-// --- Elapsed Time as 'std::string' ---
-// -------------------------------------
-
-[[nodiscard]] inline std::string elapsed_string_ms() { return std::to_string(elapsed_ms()) + " ms"; }
-[[nodiscard]] inline std::string elapsed_string_sec() { return std::to_string(elapsed_sec()) + " sec"; }
-[[nodiscard]] inline std::string elapsed_string_min() { return std::to_string(elapsed_min()) + " min"; }
-[[nodiscard]] inline std::string elapsed_string_hours() { return std::to_string(elapsed_hours()) + " hours"; }
-
-[[nodiscard]] inline std::string elapsed_string_fullform() {
-    long long unaccounted_ms = static_cast<long long>(_elapsed_time_as_ms());
-
-    long long ms    = 0;
-    long long min   = 0;
-    long long sec   = 0;
-    long long hours = 0;
-
-    if (unaccounted_ms > _ms_in_hour) {
-        hours += unaccounted_ms / _ms_in_hour;
-        unaccounted_ms -= hours * _ms_in_hour;
+    std::array<common_rep, SplitDuration::size> count() {
+        return {this->hours.count(), this->min.count(), this->sec.count(),
+                this->ms.count(),    this->us.count(),  this->ns.count()};
     }
-
-    if (unaccounted_ms > _ms_in_min) {
-        min += unaccounted_ms / _ms_in_min;
-        unaccounted_ms -= min * _ms_in_min;
-    }
-
-    if (unaccounted_ms > _ms_in_sec) {
-        sec += unaccounted_ms / _ms_in_sec;
-        unaccounted_ms -= sec * _ms_in_sec;
-    }
-
-    ms = unaccounted_ms;
-
-    return std::to_string(hours) + " hours " + std::to_string(min) + " min " + std::to_string(sec) + " sec " +
-           std::to_string(ms) + " ms ";
-}
-
-// ============================
-// --- Local Time Functions ---
-// ============================
-
-// - SFINAE to select localtime_s() or localtime_r() -
-template <class TimeMoment, class TimeType>
-auto _available_localtime_impl(TimeMoment time_moment, TimeType timer)
-    -> decltype(localtime_s(std::forward<TimeMoment>(time_moment), std::forward<TimeType>(timer))) {
-    return localtime_s(std::forward<TimeMoment>(time_moment), std::forward<TimeType>(timer));
-}
-
-template <class TimeMoment, class TimeType>
-auto _available_localtime_impl(TimeMoment time_moment, TimeType timer)
-    -> decltype(localtime_r(std::forward<TimeType>(timer), std::forward<TimeMoment>(time_moment))) {
-    return localtime_r(std::forward<TimeType>(timer), std::forward<TimeMoment>(time_moment));
-}
-
-// - Implementation -
-[[nodiscard]] inline std::string _datetime_string_with_format(const char* format) {
-    std::time_t timer = std::time(nullptr);
-    std::tm     time_moment{};
-
-    // Call localtime_s() or localtime_r() depending on which one is present
-    _available_localtime_impl(&time_moment, &timer);
-
-    // // Macro version, can be used instead of SFINAE resolution
-    // // Get localtime safely (if possible)
-    // #if defined(__unix__)
-    // localtime_r(&timer, &time_moment);
-    // #elif defined(_MSC_VER)
-    // localtime_s(&time_moment, &timer);
-    // #else
-    // // static std::mutex mtx; // mutex can be used to make thread-safe version but add another dependency
-    // // std::lock_guard<std::mutex> lock(mtx);
-    // time_moment = *std::localtime(&timer);
-    // #endif
-
-    // Convert time to C-string
-    std::array<char, 100> mbstr;
-    std::strftime(mbstr.data(), mbstr.size(), format, &time_moment);
-
-    return std::string(mbstr.data());
-}
-
-[[nodiscard]] inline std::string datetime_string() { return _datetime_string_with_format("%Y-%m-%d %H:%M:%S"); }
-
-[[nodiscard]] inline std::string datetime_string_id() { return _datetime_string_with_format("%Y-%m-%d-%H-%M-%S"); }
-
-} // namespace utl::timer
-
-#endif
-#endif // module utl::timer
-
-
-
-
-
-
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ DmitriBogdanov/UTL ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-//
-// Module:        utl::voidstream
-// Documentation: https://github.com/DmitriBogdanov/UTL/blob/master/docs/module_voidstream.md
-// Source repo:   https://github.com/DmitriBogdanov/UTL
-//
-// This project is licensed under the MIT License
-//
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-#if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_VOIDSTREAM)
-#ifndef UTLHEADERGUARD_VOIDSTREAM
-#define UTLHEADERGUARD_VOIDSTREAM
-
-// _______________________ INCLUDES _______________________
-
-#include <ostream>   // ostream
-#include <streambuf> // streambuf
-
-// ____________________ DEVELOPER DOCS ____________________
-
-// TODO:
-// Expand this module into a proper "streams" module. Being as small as it currently is
-// it has rather little reason for existence. Combined with what is probably a rather
-// unperformant way of discaring '::vout' inputs, it's quite justified for a rewrite.
-// Streams that could be implemented:
-//    - Multisink Stream (forwards inputs to multiple std::ostream's)
-//    - Appending Stream (not sure if it's even implementable or useful)
-//
-// "voidstream" that functions like std::ostream with no output.
-// Can be passed to interfaces that use streams to silence their output.
-//
-// # ::vstreambuf #
-// Stream buffer that overflows with no output, usage example:
-//   > std::ofstream output_stream(&vstreambuf);
-//   > output_stream << VALUE; // produces nothing
-//
-// # ::vout #
-// Output stream that produces no output, usage example:
-//   > vout << VALUE; // produces nothing
-
-// ____________________ IMPLEMENTATION ____________________
-
-namespace utl::voidstream {
-
-// ===================
-// --- Void Stream ---
-// ===================
-
-class VoidStreamBuf : public std::streambuf {
-public:
-    inline int overflow(int c) { return c; }
 };
 
-class VoidStream : public std::ostream {
-public:
-    inline VoidStream() : std::ostream(&buffer) {}
+template <class Rep, class Period>
+[[nodiscard]] constexpr SplitDuration unit_split(std::chrono::duration<Rep, Period> val) {
+    // for some reason 'duration_cast<>()' is not 'noexcept'
+    const auto hours = std::chrono::duration_cast<std::chrono::hours>(val);
+    const auto min   = std::chrono::duration_cast<std::chrono::minutes>(val - hours);
+    const auto sec   = std::chrono::duration_cast<std::chrono::seconds>(val - hours - min);
+    const auto ms    = std::chrono::duration_cast<std::chrono::milliseconds>(val - hours - min - sec);
+    const auto us    = std::chrono::duration_cast<std::chrono::microseconds>(val - hours - min - sec - ms);
+    const auto ns    = std::chrono::duration_cast<std::chrono::nanoseconds>(val - hours - min - sec - ms - us);
+    return {hours, min, sec, ms, us, ns};
+}
+
+template <class Rep, class Period>
+[[nodiscard]] std::string to_string(std::chrono::duration<Rep, Period> value, std::size_t relevant_units = 3) {
+
+    // Takes 'unit_count' of the highest relevant units and converts them to string,
+    // for example with 'unit_count' equal to '3', we will have:
+    //
+    // timescale <= hours   =>   show { hours, min, sec }   =>   string "___ hours ___ min ___ sec"
+    // timescale <= min     =>   show {   min, sec,  ms }   =>   string "___ min ___ sec ___ ms"
+    // timescale <= sec     =>   show {   sec,  ms,  us }   =>   string "___ sec ___ ms ___ us"
+    // timescale <= ms      =>   show {    ms,  us,  ns }   =>   string "___ ms ___ us ___ ns"
+    // timescale <= us      =>   show {    us,  ns      }   =>   string "___ us ___ ns"
+    // timescale <= ns      =>   show {    ns           }   =>   string "___ ns"
+
+    if (relevant_units == 0) return ""; // early escape for a pathological case
+
+    const std::array<SplitDuration::common_rep, SplitDuration::size> counts = unit_split(value).count();
+    const std::array<const char*, SplitDuration::size>               names  = {"hours", "min", "sec", "ms", "us", "ns"};
+
+    for (std::size_t unit = 0; unit < counts.size(); ++unit) {
+        if (counts[unit]) {
+            std::string res;
+
+            const std::size_t last = (unit + relevant_units < counts.size()) ? (unit + relevant_units) : counts.size();
+            // don't want to include the whole <algorithm> just for 'std::max()'
+
+            for (std::size_t k = unit; k < last; ++k) {
+                res += std::to_string(counts[k]);
+                res += ' ';
+                res += names[k];
+                res += ' ';
+            }
+
+            res.resize(res.size() - 1); // remove trailing space at the end
+
+            return res;
+        }
+    }
+
+    return "0 ns"; // fallback, unlikely to ever be triggered
+}
+
+// ===========================
+// --- Floating-point time ---
+// ===========================
+
+template <class T>
+using float_duration = std::chrono::duration<double, typename T::period>;
+
+using ns    = float_duration<std::chrono::nanoseconds>;
+using us    = float_duration<std::chrono::microseconds>;
+using ms    = float_duration<std::chrono::milliseconds>;
+using sec   = float_duration<std::chrono::seconds>;
+using min   = float_duration<std::chrono::minutes>;
+using hours = float_duration<std::chrono::hours>;
+
+// Note:
+// A cool thing about floating-point-represented time is that we don't need 'std::chrono::duration_cast<>()'
+// for conversions, float time satisfies 'treat_as_floating_point_v<>' which means implicit conversions between
+// duration can happen for any period, in a nutshell instead of this:
+//    > std::chrono::duration_cast<time::ms>(std::chrono::nanoseconds(15));
+// we can just do this:
+//    > time::ms(std::chrono::nanoseconds(15));
+// and it's allowed to happen implicitly.
+
+// =================
+// --- Stopwatch ---
+// =================
+
+template <class Clock = std::chrono::steady_clock>
+struct Stopwatch {
+    using clock      = Clock;
+    using time_point = typename clock::time_point;
+    using duration   = typename clock::duration;
+
+    Stopwatch() { this->start(); }
+
+    void start() { this->_start = clock::now(); }
+
+    [[nodiscard]] duration elapsed() const { return clock::now() - this->_start; }
+
+    [[nodiscard]] ns    elapsed_ns() const { return this->elapsed(); }
+    [[nodiscard]] us    elapsed_us() const { return this->elapsed(); }
+    [[nodiscard]] ms    elapsed_ms() const { return this->elapsed(); }
+    [[nodiscard]] sec   elapsed_sec() const { return this->elapsed(); }
+    [[nodiscard]] min   elapsed_min() const { return this->elapsed(); }
+    [[nodiscard]] hours elapsed_hours() const { return this->elapsed(); }
+    // <chrono> handles conversion to a floating-point representation when casting duration to the return type
+
+    [[nodiscard]] std::string elapsed_string(std::size_t relevant_units = 3) const {
+        return to_string(this->elapsed(), relevant_units);
+    }
 
 private:
-    VoidStreamBuf buffer;
+    time_point _start;
 };
 
-inline VoidStreamBuf vstreambuf;
-inline VoidStream    vout;
+// =============
+// --- Timer ---
+// =============
 
-} // namespace utl::voidstream
+template <class Clock = std::chrono::steady_clock>
+struct Timer {
+    using clock      = Clock;
+    using time_point = typename clock::time_point;
+    using duration   = typename clock::duration;
+
+    Timer() = default;
+
+    template <class Rep, class Period>
+    explicit Timer(std::chrono::duration<Rep, Period> length) {
+        this->start(length);
+    }
+
+    template <class Rep, class Period>
+    void start(std::chrono::duration<Rep, Period> length) {
+        this->_start  = clock::now();
+        this->_length = std::chrono::duration_cast<duration>(length);
+    }
+
+    void stop() noexcept { *this = Timer{}; }
+
+    [[nodiscard]] duration elapsed() const { return clock::now() - this->_start; }
+
+    [[nodiscard]] ns    elapsed_ns() const { return this->elapsed(); }
+    [[nodiscard]] us    elapsed_us() const { return this->elapsed(); }
+    [[nodiscard]] ms    elapsed_ms() const { return this->elapsed(); }
+    [[nodiscard]] sec   elapsed_sec() const { return this->elapsed(); }
+    [[nodiscard]] min   elapsed_min() const { return this->elapsed(); }
+    [[nodiscard]] hours elapsed_hours() const { return this->elapsed(); }
+    // <chrono> handles conversion to a floating-point representation when casting duration to the return type
+
+    [[nodiscard]] std::string elapsed_string(std::size_t relevant_units = 3) const {
+        return to_string(this->elapsed(), relevant_units);
+    }
+
+    [[nodiscard]] bool     finished() const { return this->elapsed() >= this->_length; }
+    [[nodiscard]] bool     running() const noexcept { return this->_length != duration{}; }
+    [[nodiscard]] duration length() const noexcept { return this->_length; }
+
+private:
+    time_point _start{};
+    duration   _length{};
+};
+
+// ======================
+// --- Local datetime ---
+// ======================
+
+inline std::tm to_localtime(const std::time_t& time) {
+    // There are 3 ways of getting localtime in C-stdlib:
+    //    1. 'std::localtime()' - isn't thread-safe and will be marked as "deprecated" by MSVC
+    //    2. 'localtime_r()'    - isn't a part of C++, it's a part of C11, in reality provided by POSIX
+    //    3. 'localtime_s()'    - isn't a part of C++, it's a part of C23, in reality provided by Windows
+    //                            with reversed order of arguments
+    // Seemingly there is no portable way of getting thread-safe localtime without being screamed at by at least one
+    // compiler, however there is a little known trick that uses a side effect of 'std::mktime()' which normalizes its
+    // inputs should they "overflow" the allowed range. Unlike 'localtime', 'std::mktime()' is thread-safe and portable,
+    // see https://stackoverflow.com/questions/54246983/c-how-to-fix-add-a-time-offset-the-calculation-is-wrong/54248414
+
+    // Create reference time moment at year 2025
+    std::tm reference_tm{};
+    reference_tm.tm_isdst = -1;  // negative => let the implementation deal with daylight savings
+    reference_tm.tm_year  = 125; // counting starts from 1900
+
+    // Get the 'std::time_t' corresponding to the reference time moment
+    const std::time_t reference_time = std::mktime(&reference_tm);
+    if (reference_time == -1)
+        throw std::runtime_error("time::to_localtime(): time moment can't be represented as 'std::time_t'.");
+
+    // Adjusting reference moment by 'time - reference_time' makes it equal to the current time moment,
+    // it is now invalid due to seconds overflowing the allowed range
+    reference_tm.tm_sec += static_cast<int>(time - reference_time);
+    // 'std::time_t' is an arithmetic type, although not defined, this is almost always an
+    // integral value holding the number of seconds since Epoch (see cppreference). This is
+    // why we can substract them and add into the seconds.
+
+    // Normalize time moment, it is now valid and corresponds to a current local time
+    if (std::mktime(&reference_tm) == -1)
+        throw std::runtime_error("time::to_localtime(): time moment can't be represented as 'std::time_t'.");
+
+    return reference_tm;
+}
+
+[[nodiscard]] inline std::string datetime_string(const char* format = "%Y-%m-%d %H:%M:%S") {
+    const auto now    = std::chrono::system_clock::now();
+    const auto c_time = std::chrono::system_clock::to_time_t(now);
+    const auto c_tm   = to_localtime(c_time);
+
+    std::array<char, 256> buffer;
+    if (std::strftime(buffer.data(), buffer.size(), format, &c_tm) == 0)
+        throw std::runtime_error("time::datetime_string(): 'format' does not fit into the buffer.");
+    return std::string(buffer.data());
+
+    // Note 1: C++20 provides <chrono> with a native way of getting date, before that we have to use <ctime>
+    // Note 2: 'std::chrono::system_clock' is unique - its output can be converted into a C-style 'std::time_t'
+    // Note 3: This function is thread-safe, we use a quirky implementation of 'localtime()', see notes above
+}
+
+} // namespace utl::time::impl
+
+// ______________________ PUBLIC API ______________________
+
+namespace utl::time {
+
+using impl::SplitDuration;
+
+using impl::unit_split;
+using impl::to_string;
+
+using impl::float_duration;
+
+using impl::ns;
+using impl::us;
+using impl::ms;
+using impl::sec;
+using impl::min;
+using impl::hours;
+
+using impl::Stopwatch;
+using impl::Timer;
+
+using impl::to_localtime;
+using impl::datetime_string;
+
+} // namespace utl::time
 
 #endif
-#endif // module utl::voidstream
+#endif // module utl::time
 
 
 

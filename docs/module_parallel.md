@@ -1,327 +1,325 @@
+[<img src ="images/badge_language_cpp_17.svg">](https://en.cppreference.com/w/cpp/17.html)
+[<img src ="images/badge_license_mit.svg">](LICENSE.md)
+[<img src ="images/badge_semver.svg">](guide_versioning.md)
+[<img src ="images/badge_docs.svg">](https://dmitribogdanov.github.io/UTL/)
+[<img src ="images/badge_header_only.svg">](https://en.wikipedia.org/wiki/Header-only)
+[<img src ="images/badge_no_dependencies.svg">](https://github.com/DmitriBogdanov/UTL/tree/master/include/UTL)
+
+[<img src ="images/badge_workflow_windows.svg">](https://github.com/DmitriBogdanov/UTL/actions/workflows/windows.yml)
+[<img src ="images/badge_workflow_ubuntu.svg">](https://github.com/DmitriBogdanov/UTL/actions/workflows/ubuntu.yml)
+[<img src ="images/badge_workflow_macos.svg">](https://github.com/DmitriBogdanov/UTL/actions/workflows/macos.yml)
+[<img src ="images/badge_workflow_freebsd.svg">](https://github.com/DmitriBogdanov/UTL/actions/workflows/freebsd.yml)
+
 # utl::parallel
 
 [<- to README.md](..)
 
 [<- to implementation.hpp](../include/UTL/parallel.hpp)
 
-**parallel** module is a lightweight threading library providing an API very similar to [Intel TBB](https://github.com/uxlfoundation/oneTBB).
+**utl::parallel** module is a lightweight threading library providing API somewhat similar to [Intel TBB](https://github.com/uxlfoundation/oneTBB).
 
-It implements classic building blocks of concurrent algorithms such as tasks, parallel for, reductions and etc. and provides a sane thread pool implementation for custom concurrency needs.
+It implements classic building blocks of concurrent algorithms such as tasks, parallel for, reductions and etc. and provides a sane thread pool implementation with work-stealing and recursive parallelism support, in summary:
 
-> [!Important]
-> Due to rather extensive API, seeing [usage examples](#examples) first might be helpful.
+- Tasks, parallel loops and reductions
+- Work-stealing thread pool with a fully thread-safe API
+- Support for recursive parallelism
+- Focus on simple & uniform API
+- Small (~`600` lines of code)
+- Portable (no platform-specific code of any kind)
 
 > [!Tip]
-> Use GitHub's built-in [table of contents](https://github.blog/changelog/2021-04-13-table-of-contents-support-in-markdown-files/) to navigate this page.
+> [Benchmarks](#benchmarks) and [usage examples](#examples) can be found at the bottom.
 
 ## Definitions
 
 ```cpp
-// Thread pool
-class ThreadPool {
-    // Construction
-    ThreadPool() = default;
-    explicit ThreadPool(std::size_t thread_count);
-    ~ThreadPool();
+// Scheduler
+template <class Backend = ThreadPool>
+struct Scheduler {
+    // Backend
+    Backend backend; // underlying thread pool
     
-    // Threads
-    std::size_t get_thread_count() const;
-    void        set_thread_count(std::size_t thread_count);
+    template <class T = void>
+    using future_type = typename Backend::future_type<T>;
     
-    // Task queue
-    template <class Func, class... Args>
-    void add_task(Func&& func, Args&&... args);
+    template <class... Args>
+    explicit Scheduler(Args&&... args);
     
-    template <class Func, class... Args>
-    std::future<FuncReturnType> add_task_with_future(Func&& func, Args&&... args);
+    // Task API
+    template <class F, class... Args>           void  detached_task(F&& f, Args&&... args);
+    template <class F, class... Args> future_type<R> awaitable_task(F&& f, Args&&... args);
     
-    void wait_for_tasks();
-    void clear_task_queue();
+    // Parallel-for API
+    template <class It, class F>          void  detached_loop(Range<It> range, F&& f);
+    template <class It, class F>          void  blocking_loop(Range<It> range, F&& f);
+    template <class It, class F> future_type<> awaitable_loop(Range<It> range, F&& f);
     
-    // Pausing
-    void     pause();
-    void   unpause();
-    bool is_paused() const;
+    template <class Idx, class F>          void  detached_loop(IndexRange<Idx> range, F&& f);
+    template <class Idx, class F>          void  blocking_loop(IndexRange<Idx> range, F&& f);
+    template <class Idx, class F> future_type<> awaitable_loop(IndexRange<Idx> range, F&& f);
+    
+    template <class Container, class F>          void  detached_loop(Container&& container, F&& f);
+    template <class Container, class F>          void  blocking_loop(Container&& container, F&& f);
+    template <class Container, class F> future_type<> awaitable_loop(Container&& container, F&& f);
+    
+    // Parallel-reduce API
+    template <class It, class Op>             R   blocking_reduce(Range<It> range, Op&& op);
+    template <class It, class Op> future_type<R> awaitable_reduce(Range<It> range, Op&& op);
+    
+    template <class Container, class Op>             R   blocking_reduce(Container&& container, Op&& op);
+    template <class Container, class Op> future_type<R> awaitable_reduce(Container&& container, Op&& op);
 };
 
-// Static thread pool operations
-ThreadPool& static_thread_pool();
+// Thread pool
+struct ThreadPool {
+    // Initialization
+    explicit ThreadPool(std::size_t count = hardware_concurrency());
+     
+    // Threading
+    void        set_thread_count(std::size_t count = hardware_concurrency());
+    std::size_t get_thread_count();
+    
+    // Task queuing
+    template <class F, class... Args>           void  detached_task(F&& f, Args&&... args);
+    template <class F, class... Args> future_type<R> awaitable_task(F&& f, Args&&... args);
+    
+    void wait();
+    
+    // Future
+    template <class T = void> future_type { /* Same API as std::future<T> */ };
+};
 
-std::size_t get_thread_count();
-void        set_thread_count(std::size_t thread_count);
+template <class T = void>
+using Future = ThreadPool::future_type<T>;
 
 // Ranges
-template <class Iter>
+template <class It>
 struct Range {
     Range() = delete;
-    Range(Iter begin, Iter end);
-    Range(Iter begin, Iter end, std::size_t grain_size);
+    Range(It begin, It end);
+    Range(It begin, It end, std::size_t grain_size);
     
-    template <class Container> Range(const Container& container);
     template <class Container> Range(      Container& container);
-}
+    template <class Container> Range(const Container& container);
+};
 
-template <class Idx>
+template <class Idx = std::ptrdiff_t>
 struct IndexRange {
     IndexRange() = delete;
     IndexRange(Idx first, Idx last);
     IndexRange(Idx first, Idx last, std::size_t grain_size);
 }
 
-// Task API
-template <class Func, class... Args> void task(Func&& func, Args&&... args);
+// Binary operations
+template <class T = void> struct  sum { constexpr T operator()(const T& lhs, const T& rhs) const; }
+template <class T = void> struct prod { constexpr T operator()(const T& lhs, const T& rhs) const; }
+template <class T = void> struct  min { constexpr T operator()(const T& lhs, const T& rhs) const; }
+template <class T = void> struct  max { constexpr T operator()(const T& lhs, const T& rhs) const; }
 
-template <class Func, class... Args>
-std::future<FuncReturnType>   task_with_future(Func&& func, Args&&... args);
+// Global scheduler
+/* 'Scheduler'  API, but placed directly into the namespace */
+/* 'ThreadPool' API, but placed directly into the namespace */
+/* This will use global lazily-initialized thread pool      */
 
-void wait_for_tasks();
+// Thread introspection
+namespace this_thread {
+    std::optional<      void*> get_pool () noexcept;
+    std::optional<std::size_t> get_index() noexcept;
+}
 
-// Parallel-for API
-template <class Iter,      class Func> void for_loop(     Range<Iter> range,     Func&& func);
-template <class Container, class Func> void for_loop(const Container& container, Func&& func);
-template <class Container, class Func> void for_loop(      Container& container, Func&& func);
-template <class Idx,       class Func> void for_loop( IndexRange<Idx> range,     Func&& func);
-
-// Reduction API
-template <std::size_t unroll = 1, class Iter,      class BinaryOp>
-auto reduce(     Range<Iter> range,     BinaryOp&& op) -> typename Iter::value_type;
-
-template <std::size_t unroll = 1, class Container, class BinaryOp>
-auto reduce(const Container& container, BinaryOp&& op) -> typename Container::value_type;
-
-template <std::size_t unroll = 1, class Container, class BinaryOp>
-auto reduce(      Container& container, BinaryOp&& op) -> typename Container::value_type;
-
-// Pre-defined binary operations
-template <class T> struct  sum { constexpr T operator()(const T& lhs, const T& rhs) const; }
-template <class T> struct prod { constexpr T operator()(const T& lhs, const T& rhs) const; }
-template <class T> struct  min { constexpr T operator()(const T& lhs, const T& rhs) const; }
-template <class T> struct  max { constexpr T operator()(const T& lhs, const T& rhs) const; }
+std::size_t hardware_concurrency() noexcept;
 ```
 
 > [!Important]
-> In most application there is no need to ever work with `ThreadPool` directly, all of the work will be automatically done by `parallel::get_thread_count()`, `parallel::set_thread_count()`, `parallel::task()`, `parallel::for_loop()`, `parallel::reduce()` and etc.
+> There is no tight coupling between the `Scheduler<>` and the `ThreadPool`, other implementations may be used assuming they provide the 2 methods for submitting tasks.
 
 ## Methods
 
+### Scheduler
+
+#### Task API
+
+> ```cpp
+> template <class F, class... Args> void detached_task(F&& f, Args&&... args);
+> ```
+
+Launches asynchronous task to execute callable `f` with arguments `args...`.
+
+**Note:** [Callables](https://en.cppreference.com/w/cpp/named_req/Callable) constitute any objects with a defined `operator()`, for example: function pointers, functors, lambdas, [`std::function`](https://en.cppreference.com/w/cpp/utility/functional/function), [`std::packaged_task`](https://en.cppreference.com/w/cpp/thread/packaged_task), [`std::bind()`](https://en.cppreference.com/w/cpp/utility/functional/bind.html) result and etc.
+
+> ```cpp
+> template <class F, class... Args> future_type<R> awaitable_task(F&& f, Args&&... args);
+> ```
+
+Launches asynchronous task to execute callable `f` with arguments `args...` and returns its future.
+
+#### Parallel-for API
+
+> ```cpp
+> template <class It, class F>          void  detached_loop(Range<It> range, F&& f);
+> template <class It, class F>          void  blocking_loop(Range<It> range, F&& f);
+> template <class It, class F> future_type<> awaitable_loop(Range<It> range, F&& f);
+> ```
+
+Detached / blocking / awaitable parallel-for loop over an **iterator range**.
+
+Loop body `f` can be defined in two ways:
+
+**1.** Single-argument `f(it)`, defining the body of a single loop iteration.
+
+**2.** Two-argument `f(low, high)`, defining how to execute a part of the loop spanning from `low` to `high`.
+
+**Note 1:** For most use cases **(1)** is a more intuitive option, closely resembling how we write a regular serial loop.
+
+**Note 2:** `It` is assumed to be a [random access iterator](https://en.cppreference.com/w/cpp/named_req/RandomAccessIterator).
+
+> ```cpp
+> template <class Idx, class F>          void  detached_loop(IndexRange<Idx> range, F&& f);
+> template <class Idx, class F>          void  blocking_loop(IndexRange<Idx> range, F&& f);
+> template <class Idx, class F> future_type<> awaitable_loop(IndexRange<Idx> range, F&& f);
+> ```
+
+Detached / blocking / awaitable parallel-for loop over an **index range**.
+
+Like in the iterator case, loop body `f` can be defined both for a single iteration and as a block.
+
+> ```cpp
+> template <class Container, class F>          void  detached_loop(Container&& container, F&& f);
+> template <class Container, class F>          void  blocking_loop(Container&& container, F&& f);
+> template <class Container, class F> future_type<> awaitable_loop(Container&& container, F&& f);
+> ```
+
+Detached / blocking / awaitable parallel-for loop over an **iterator range** spanning `container.begin()` to `container.end()`.
+
+Like in the usual case, loop body `f` can be defined both for a single iteration and as a block.
+
+#### Parallel-reduce API
+
+> ```cpp
+> template <class It, class Op>             R   blocking_reduce(Range<It> range, Op&& op);
+> template <class It, class Op> future_type<R> awaitable_reduce(Range<It> range, Op&& op);
+> ```
+
+Detached / blocking / awaitable parallel reduction over a binary operator `op` over an **iterator range**.
+
+Binary operator `op` is defined by the signature `T(const T&, const T&)` where `T` corresponds to the iterator `::value_type`.
+
+**Note:** Most commonly used to compute vector sum / product / min / max in parallel, see [pre-defined binary operations](#binary-operations).
+
+> ```cpp
+> template <class Container, class Op>             R   blocking_reduce(Container&& container, Op&& op);
+> template <class Container, class Op> future_type<R> awaitable_reduce(Container&& container, Op&& op);
+> ```
+
+Detached / blocking / awaitable parallel reduction over a binary operator `op` over an **iterator range** spanning `container.begin()` to `container.end()`.
+
 ### Thread pool
 
-#### Construction
+#### Initialization
 
-```cpp
-ThreadPool() = default;
-```
+> ```cpp
+> explicit ThreadPool(std::size_t count = hardware_concurrency());
+> ```
 
-```cpp
-explicit ThreadPool(std::size_t thread_count);
-```
+Creates thread pool with `count` threads.
 
-Creates thread pool with `thread_count` worker threads.
+#### Threading
 
-```cpp
-~ThreadPool();
-```
+> ```cpp
+> void set_thread_count(std::size_t count = hardware_concurrency());
+> ```
 
-Finishes all tasks left in the queue then shuts down worker threads.
+Changes the number of threads in the thread pool.
 
-If the pool was paused, it will automatically resume to finish the work.
+**Note 1:** This method will block & wait for all in-flight tasks to be completed before resizing the thread pool.
 
-#### Threads
+**Note 2:** This and all the other thread pool methods are thread-safe, the pool can be resized from any number of external threads concurrently and no tasks will be lost. If called from a thread inside the pool itself (which would be a logical deadlock causing the thread to wait for its own termination)  throws [`std::runtime_error`](https://en.cppreference.com/w/cpp/error/runtime_error.html).
 
-```cpp
-std::size_t ThreadPool::get_thread_count();
-```
+> ```cpp
+> std::size_t get_thread_count();
+> ```
 
-Returns current number of worker threads in the thread pool.
+Returns the number of threads in the thread pool.
 
-```cpp
-void ThreadPool::set_thread_count(std::size_t thread_count);
-```
+#### Task queuing
 
-Changes the number of worker threads managed by the thread pool to `thread_count`.
+> ```cpp
+> template <class F, class... Args> void detached_task(F&& f, Args&&... args);
+> ```
 
-#### Task queue
+Launches asynchronous task to execute callable `f` with arguments `args...`.
 
-```cpp
-template <class Func, class... Args>
-void add_task(Func&& func, Args&&... args);
-```
+> ```cpp
+> template <class F, class... Args> future_type<R> awaitable_task(F&& f, Args&&... args);
+> ```
 
-Adds a task to execute callable `func` with arguments `args...` (`args...` may be empty).
+Launches asynchronous task to execute callable `f` with arguments `args...` and returns its future.
 
-**Note:** Callables include: function pointers, functors, lambdas, [std::function](https://en.cppreference.com/w/cpp/utility/functional/function), [std::packaged_task](https://en.cppreference.com/w/cpp/thread/packaged_task) and etc.
+> ```cpp
+> void wait();
+> ```
 
-```cpp
-template <class Func, class... Args>
-std::future<FuncReturnType> add_task_with_future(Func&& func, Args&&... args);
-```
+Blocks current thread until all in-flight tasks are completed.
 
-Adds a task to execute callable `func` with arguments `args...` (`args...` may be empty) and returns its [std::future](https://en.cppreference.com/w/cpp/thread/future).
+#### Future
 
-**Note:** `FuncReturnType` evaluates to the return type of the callable `func`.
+> ```cpp
+> template <class T = void> future_type { /* Same API as std::future<T> */ };
+> ```
 
-```cpp
-void wait_for_tasks();
-```
+A thin wrapper around [`std::future`](https://en.cppreference.com/w/cpp/thread/future) used by the thread pool. Exposes the same API as a standard future and can be constructed from it.
 
-Blocks current thread execution until all queued tasks are finished.
+This future allows the usage of recursive awaitable tasks. When waited with `get()` / `wait()` / `wait_for()` / `wait_until()` instead of just blocking it first looks for recursive work to do in the meantime.
 
-```cpp
-void ThreadPool::clear_task_queue();
-```
+> ```cpp
+> template <class T = void>
+> using Future = ThreadPool::future_type<T>;
+> ```
 
-Clears all currently queued tasks. Tasks already in progress continue running until finished.
-
-#### Pausing
-
-```cpp
-void ThreadPool::pause();
-```
-
-Stops execution of new tasks from the queue. Use `.unpause()` to resume. Tasks already in progress continue running until finished.
-
-```cpp
-void ThreadPool::unpause();
-```
-
-Resumes execution of queued tasks.
-
-```cpp
-bool ThreadPool::is_paused() const;
-```
-
-Returns whether the thread pool is paused.
-
-### Static thread pool
-
-```cpp
-ThreadPool& static_thread_pool();
-```
-
-Returns a global static instance of the threadpool.
-
-In most cases there is no need to manually maintain the thread pool at call-site, a global thread pool instance gets created automatically upon the first call to `parallel::static_thread_pool()` or any of the parallel algorithm functions.
-
-**Note:** In most cases even the global instance doesn't have to be directly accessed thorough this method, all threading logic will be automatically managed by `parallel::get_thread_count()`, `parallel::set_thread_count()`, `parallel::task()`, `parallel::for_loop()`, `parallel::reduce()` and etc.
-
-```cpp
-std::size_t get_thread_count();
-```
-
-Returns current number of worker threads in the static thread pool.
-
-```cpp
-void set_thread_count(std::size_t thread_count);
-```
-
-Changes the number of worker threads managed by the static thread pool to `thread_count`.
+Alias for `ThreadPool::future_type<T>` placed at the namespace level.
 
 ### Ranges
 
-```cpp
-template <class Iter>
-struct Range {
-    Range() = delete;
-    Range(Iter begin, Iter end);
-    Range(Iter begin, Iter end, std::size_t grain_size);
-    
-    template <class Container> Range(const Container& container);
-    template <class Container> Range(      Container& container);
-}
-```
+> ```cpp
+> template <class It>
+> struct Range {
+>     Range() = delete;
+>     Range(It begin, It end);
+>     Range(It begin, It end, std::size_t grain_size);
+> 
+>     template <class Container> Range(      Container& container);
+>     template <class Container> Range(const Container& container);
+> };
+> ```
 
-A lightweight wrapper representing an **iterator range**.
+A lightweight struct representing an **iterator range**.
 
 Constructor **(2)** creates a range spanning `begin` to `end` and selects grain size automatically, which is **recommended in most cases**.
 
 Constructor **(3)** allows manual selection of `grain_size`.
 
-Constructors **(4)** and **(5)** create a range spanning `container.begin()` to `container.end()` for any container that supports standard member types `Container::iterator` and `Container::const_iterator`.
+Constructors **(4)** and **(5)** create a range spanning `container.begin()` to `container.end()` for any container that supports standard member types `Container::iterator` and `Container::const_iterator`. Grain size is selected automatically.
 
-**Note:** In this context, `grain_size` is a maximum size of subranges, in which the main range gets split up for parallel execution. Splitting up workload into smaller grains can be beneficial for tasks with unpredictable or uneven complexity, but increases the overhead of scheduling & synchronization. By default, the workload is split into `parallel::get_thread_count() * 4` grains.
+**Note:** `grain_size` is a maximum size of subranges, in which the main range gets split up for parallel execution. Splitting up workload into smaller grains can be beneficial for tasks with unpredictable or uneven complexity, but increases the overhead of scheduling & synchronization. By default, the workload is split into `parallel::hardware_concurrency() * 4` grains.
 
-```cpp
-template <class Idx>
-struct IndexRange {
-    IndexRange() = delete;
-    IndexRange(Idx first, Idx last);
-    IndexRange(Idx first, Idx last, std::size_t grain_size);
-}
-```
+> ```cpp
+> template <class Idx = std::ptrdiff_t>
+> struct IndexRange {
+>     IndexRange() = delete;
+>     IndexRange(Idx first, Idx last);
+>     IndexRange(Idx first, Idx last, std::size_t grain_size);
+> }
+> ```
 
-A lightweight wrapper representing an **index range**.
+A lightweight struct representing an **index range**.
 
 Constructor **(2)** creates a range spanning `first` to `last` and selects grain size automatically, which is **recommended in most cases**.
 
 Constructor **(3)** allows manual selection of `grain_size`.
 
-**Note:** Like all the standard ranges, index range is **exclusive** and does not include `last`.
+**Note:** Like all standard ranges, index range is **exclusive** and does not include `last`.
 
-### Task API
-
-```cpp
-template <class Func, class... Args> void task(Func&& func, Args&&... args);
-```
-
-Launches asynchronous task to execute callable `func` with arguments `args...`.
-
-```cpp
-template <class Func, class... Args>
-std::future<FuncReturnType>   task_with_future(Func&& func, Args&&... args);
-```
-
-Launches asynchronous task to execute callable `func` with arguments `args...` and returns its [std::future](https://en.cppreference.com/w/cpp/thread/future).
-
-```cpp
-void wait_for_tasks();
-```
-
-Waits for all currently launched tasks to finish.
-
-### Parallel-for API
-
-```cpp
-template <class Iter,      class Func> void for_loop(     Range<Iter> range,     Func&& func);
-template <class Container, class Func> void for_loop(const Container& container, Func&& func);
-template <class Container, class Func> void for_loop(      Container& container, Func&& func);
-```
-
-Executes parallel `for` loop over a range `range` where `func` is a callable with a signature `void(Iter low, Iter high)` that defines how to compute a part of the `for` loop. See the [examples](#parallel-for-loop).
-
-Overloads **(2)** and **(3)** construct range spanning `container.begin()` to `container.end()` automatically.
-
-```cpp
-template <class Idx,       class Func> void for_loop( IndexRange<Idx> range,     Func&& func);
-```
-
-Executes parallel `for` loop over an **index range** `range` where `func` is a callable with a signature `void(Idx low, Idx high)` that defines how to compute a part of the `for` loop.
-
-### Reduction API
-
-```cpp
-template <std::size_t unroll = 1, class Iter,      class BinaryOp>
-auto reduce(     Range<Iter> range,     BinaryOp&& op) -> typename Iter::value_type;
-
-template <std::size_t unroll = 1, class Container, class BinaryOp>
-auto reduce(const Container& container, BinaryOp&& op) -> typename Container::value_type;
-
-template <std::size_t unroll = 1, class Container, class BinaryOp>
-auto reduce(      Container& container, BinaryOp&& op) -> typename Container::value_type;
-```
-
-Reduces range `range`  over the binary operation `op` in parallel.
-
-Overloads **(2)** and **(3)** construct range spanning `container.begin()` to `container.end()` automatically.
-
-`unroll` template parameter can be set to automatically unroll reduction loops with a given step, which oftentimes aids compiler with vectorization. By default, no loop unrolling takes place.
-
-**Note 1:** Binary operation can be anything with a signature `T(const T&, const T&)` or `T(T, T)`.
-
-**Note 2:** Be wary of passing binary operations as function pointers since that makes inlining more difficult. Lambdas and functor-classes don't experience the same issue, see [pre-defined binary operations](#pre-defined-binary-operations).
-
-**Note 3:** It is not unusual to see super-linear speedup with `unroll` set to `4`, `8`, `16` or `32`. Reduction loops are often difficult to vectorize otherwise due to reordering of float operations. Performance impact is hardware- and architecture- dependent.
-
-#### Pre-defined binary operations
+### Binary operations
 
 ```cpp
 template <class T> struct  sum { constexpr T operator()(const T& lhs, const T& rhs) const; }
@@ -336,17 +334,44 @@ template<> struct  min<void> { template<class T, class U> constexpr auto operato
 template<> struct  max<void> { template<class T, class U> constexpr auto operator()(T&& lhs, T&& rhs) const; }
 ```
 
-Pre-defined binary operations for `parallel::reduce()`.
+Pre-defined binary operations for parallel reductions.
 
 **Note 1:** All functors will be `noexcept` if possible.
 
-**Note 2:** "Transparent functors" are `void` specializations that deduce their parameter and return types from the arguments. This is how function objects should usually be used. See [cpprefence](https://en.cppreference.com/w/cpp/utility/functional#Transparent_function_objects) for details.
+**Note 2:** "Transparent functors" are `void` specializations that deduce their parameter and return types from the arguments. This is how function objects should usually be used. See [cppreference](https://en.cppreference.com/w/cpp/utility/functional#Transparent_function_objects) for details.
+
+### Global scheduler
+
+For user convenience all `Scheduler<>` and `ThreadPool` methods are also doubled at the namespace scope, in which case they use a global lazily-initialized `Scheduler<>` with a `ThreadPool` backend. See [examples](#examples).
+
+### Thread introspection
+
+> ```cpp
+> namespace this_thread {
+>     std::optional<      void*> get_pool () noexcept;
+>     std::optional<std::size_t> get_index() noexcept;
+> }
+> ```
+
+Returns thread index or type-erased pointer to the parent thread pool for the current thread.
+
+Returns [`std::nullopt`](https://en.cppreference.com/w/cpp/utility/optional/nullopt) if current thread does not belong to a thread pool.
+
+**Note 1:** Similar to functions from [`std::this_thread`](https://en.cppreference.com/w/cpp/header/thread.html).
+
+**Note 2:** Can be supported by any custom thread pool, assuming it sets the appropriate variables.
+
+> ```cpp
+> std::size_t hardware_concurrency() noexcept;
+> ```
+
+Same thing as [`std::thread::hardware_concurrency()`](https://en.cppreference.com/w/cpp/thread/thread/hardware_concurrency.html), but instead of returning `0` when the number of threads can't be determined, it returns `4` as a fallback.
 
 ## Examples
 
-### Launching async tasks
+### Detached tasks
 
-[ [Run this code](https://godbolt.org/#g:!((g:!((g:!((h:codeEditor,i:(filename:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,selection:(endColumn:1,endLineNumber:2,positionColumn:1,positionLineNumber:2,selectionStartColumn:1,selectionStartLineNumber:2,startColumn:1,startLineNumber:2),source:'%23include+%3Chttps://raw.githubusercontent.com/DmitriBogdanov/UTL/master/single_include/UTL.hpp%3E%0A%0Aint+main()+%7B%0A++++using+namespace+utl%3B%0A%0A++++const+std::string+message+%3D+%22%3Csome+hypothetically+very+large+message%3E%22%3B%0A%0A++++//+Log+the+message+asynchronously%0A++++parallel::task(%5B%26%5D%7B+std::ofstream(%22log.txt%22)+%3C%3C+message%3B+%7D)%3B%0A%0A++++//+...+do+some+other+work+in+the+meantime+...%0A%0A++++//+Destructor+will+automatically+wait+for+the+task+to+finish+before+exiting+!'main()!',%0A++++//+otherwise+you+can+wait+manually%0A++++parallel::wait_for_tasks()%3B%0A%7D%0A'),l:'5',n:'0',o:'C%2B%2B+source+%231',t:'0')),k:71.71783148269105,l:'4',n:'0',o:'',s:0,t:'0'),(g:!((g:!((h:compiler,i:(compiler:clang1600,filters:(b:'0',binary:'1',binaryObject:'1',commentOnly:'0',debugCalls:'1',demangle:'0',directives:'0',execute:'0',intel:'0',libraryCode:'0',trim:'1',verboseDemangling:'0'),flagsViewOpen:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,libs:!(),options:'-std%3Dc%2B%2B17+-O2',overrides:!(),selection:(endColumn:1,endLineNumber:1,positionColumn:1,positionLineNumber:1,selectionStartColumn:1,selectionStartLineNumber:1,startColumn:1,startLineNumber:1),source:1),l:'5',n:'0',o:'+x86-64+clang+16.0.0+(Editor+%231)',t:'0')),header:(),l:'4',m:50,n:'0',o:'',s:0,t:'0'),(g:!((h:output,i:(compilerName:'x86-64+clang+16.0.0',editorid:1,fontScale:14,fontUsePx:'0',j:1,wrap:'1'),l:'5',n:'0',o:'Output+of+x86-64+clang+16.0.0+(Compiler+%231)',t:'0')),k:46.69421860597116,l:'4',m:50,n:'0',o:'',s:0,t:'0')),k:28.282168517308946,l:'3',n:'0',o:'',t:'0')),l:'2',n:'0',o:'',t:'0')),version:4) ]
+[ [Run this code](https://godbolt.org/z/ahaEvnaq7) ] [ [Open source file](../examples/module_parallel/detached_tasks.cpp) ]
 
 ```cpp
 using namespace utl;
@@ -354,22 +379,20 @@ using namespace utl;
 const std::string message = "<some hypothetically very large message>";
 
 // Log the message asynchronously
-parallel::task([&]{ std::ofstream("log.txt") << message; });
+parallel::detached_task([&]{ std::ofstream("log.txt") << message; });
 
-// ... do some other work in the meantime ...
+// ... do some work in the meantime ...
 
-// Destructor will automatically wait for the task to finish before exiting 'main()',
-// otherwise you can wait manually
-parallel::wait_for_tasks();
+parallel::wait(); // wait for tasks to complete
 ```
 
-### Launching async tasks with future
+### Awaitable tasks
 
-[ [Run this code](https://godbolt.org/#g:!((g:!((g:!((h:codeEditor,i:(filename:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,selection:(endColumn:1,endLineNumber:7,positionColumn:1,positionLineNumber:7,selectionStartColumn:1,selectionStartLineNumber:7,startColumn:1,startLineNumber:7),source:'%23include+%3Chttps://raw.githubusercontent.com/DmitriBogdanov/UTL/master/single_include/UTL.hpp%3E%0A%0Adouble+some_heavy_computation(double+x)+%7B%0A++++std::this_thread::sleep_for(std::chrono::seconds(1))%3B%0A++++return+x+%2B+32.%3B%0A%7D%0A%0Aint+main()+%7B%0A++++using+namespace+utl%3B%0A%0A++++//+Lauch+the+computation+asynchronously+and+get+its+future%0A++++auto+future+%3D+parallel::task_with_future(some_heavy_computation,+10.)%3B%0A%0A++++//+...+do+some+other+work+in+the+meantime+...%0A%0A++++//+Get+the+value+from+std::future,+if+the+task+isn!'t+finished+it+will+wait+for+it+to+finish%0A++++const+double+result+%3D+future.get()%3B%0A%0A++++assert(+result+%3D%3D+42.+)%3B%0A%7D%0A'),l:'5',n:'0',o:'C%2B%2B+source+%231',t:'0')),k:71.71783148269105,l:'4',n:'0',o:'',s:0,t:'0'),(g:!((g:!((h:compiler,i:(compiler:clang1600,filters:(b:'0',binary:'1',binaryObject:'1',commentOnly:'0',debugCalls:'1',demangle:'0',directives:'0',execute:'0',intel:'0',libraryCode:'0',trim:'1',verboseDemangling:'0'),flagsViewOpen:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,libs:!(),options:'-std%3Dc%2B%2B17+-O2',overrides:!(),selection:(endColumn:1,endLineNumber:1,positionColumn:1,positionLineNumber:1,selectionStartColumn:1,selectionStartLineNumber:1,startColumn:1,startLineNumber:1),source:1),l:'5',n:'0',o:'+x86-64+clang+16.0.0+(Editor+%231)',t:'0')),header:(),l:'4',m:50,n:'0',o:'',s:0,t:'0'),(g:!((h:output,i:(compilerName:'x86-64+clang+16.0.0',editorid:1,fontScale:14,fontUsePx:'0',j:1,wrap:'1'),l:'5',n:'0',o:'Output+of+x86-64+clang+16.0.0+(Compiler+%231)',t:'0')),k:46.69421860597116,l:'4',m:50,n:'0',o:'',s:0,t:'0')),k:28.282168517308946,l:'3',n:'0',o:'',t:'0')),l:'2',n:'0',o:'',t:'0')),version:4) ]
+[ [Run this code](https://godbolt.org/z/73doqc894) ] [ [Open source file](../examples/module_parallel/awaitable_tasks.cpp) ]
 
 ```cpp
 double some_heavy_computation(double x) {
-    std::this_thread::sleep_for(std::chrono::seconds(1));
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
     return x + 32;
 }
 
@@ -377,12 +400,12 @@ double some_heavy_computation(double x) {
 
 using namespace utl;
 
-// Lauch the computation asynchronously and get its future
-auto future = parallel::task_with_future(some_heavy_computation, 10);
+// Launch asynchronous computation
+auto future = parallel::awaitable_task(some_heavy_computation, 10);
 
-// ... do some other work in the meantime ...
+// ... do some work in the meantime ...
 
-// Get the value from std::future, if the task isn't finished it will wait for it to finish
+// Await the result
 const double result = future.get();
 
 assert( result == 42 );
@@ -390,7 +413,8 @@ assert( result == 42 );
 
 ### Parallel for loop
 
-[ [Run this code](https://godbolt.org/#g:!((g:!((g:!((h:codeEditor,i:(filename:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,selection:(endColumn:53,endLineNumber:3,positionColumn:53,positionLineNumber:3,selectionStartColumn:53,selectionStartLineNumber:3,startColumn:53,startLineNumber:3),source:'%23include+%3Chttps://raw.githubusercontent.com/DmitriBogdanov/UTL/master/single_include/UTL.hpp%3E%0A%0Adouble+f(double+x)+%7B+return+std::exp(std::sin(x))%3B+%7D%0A%0Aint+main()+%7B%0A++++using+namespace+utl%3B%0A%0A++++std::vector%3Cdouble%3E+vals(1!'000!'000,+0.5)%3B%0A%0A++++//+(optional)+Select+the+number+of+threads+%0A++++parallel::set_thread_count(8)%3B%0A%0A++++//+Apply+f()+to+all+elements+of+the+vector%0A++++parallel::for_loop(vals,+%5B%26%5D(auto+low,+auto+high)+%7B%0A++++++++for+(auto+it+%3D+low%3B+it+!!%3D+high%3B+%2B%2Bit)+*it+%3D+f(*it)%3B%0A++++%7D)%3B%0A%0A++++//+Apply+f()+to+the+fist+half+of+the+vector%0A++++parallel::for_loop(parallel::IndexRange%3Cstd::size_t%3E%7B0,+vals.size()+/+2%7D,+%5B%26%5D(auto+low,+auto+high)+%7B%0A++++++++for+(auto+i+%3D+low%3B+i+!!%3D+high%3B+%2B%2Bi)+vals%5Bi%5D+%3D+f(vals%5Bi%5D)%3B%0A%7D)%3B%0A%7D%0A'),l:'5',n:'0',o:'C%2B%2B+source+%231',t:'0')),k:71.71783148269105,l:'4',n:'0',o:'',s:0,t:'0'),(g:!((g:!((h:compiler,i:(compiler:clang1600,filters:(b:'0',binary:'1',binaryObject:'1',commentOnly:'0',debugCalls:'1',demangle:'0',directives:'0',execute:'0',intel:'0',libraryCode:'0',trim:'1',verboseDemangling:'0'),flagsViewOpen:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,libs:!(),options:'-std%3Dc%2B%2B17+-O2',overrides:!(),selection:(endColumn:1,endLineNumber:1,positionColumn:1,positionLineNumber:1,selectionStartColumn:1,selectionStartLineNumber:1,startColumn:1,startLineNumber:1),source:1),l:'5',n:'0',o:'+x86-64+clang+16.0.0+(Editor+%231)',t:'0')),header:(),l:'4',m:50,n:'0',o:'',s:0,t:'0'),(g:!((h:output,i:(compilerName:'x86-64+clang+16.0.0',editorid:1,fontScale:14,fontUsePx:'0',j:1,wrap:'1'),l:'5',n:'0',o:'Output+of+x86-64+clang+16.0.0+(Compiler+%231)',t:'0')),k:46.69421860597116,l:'4',m:50,n:'0',o:'',s:0,t:'0')),k:28.282168517308946,l:'3',n:'0',o:'',t:'0')),l:'2',n:'0',o:'',t:'0')),version:4) ]
+[ [Run this code](https://godbolt.org/z/4K8njMGjK) ] [ [Open source file](../examples/module_parallel/parallel_for_loop.cpp) ]
+
 ```cpp
 double f(double x) { return std::exp(std::sin(x)); }
 
@@ -398,103 +422,236 @@ double f(double x) { return std::exp(std::sin(x)); }
 
 using namespace utl;
 
-std::vector<double> vals(1'000'000, 0.5);
+std::vector<double> vals(200'000, 0.5);
 
 // (optional) Select the number of threads 
 parallel::set_thread_count(8);
 
 // Apply f() to all elements of the vector
-parallel::for_loop(vals, [&](auto low, auto high) {
-    for (auto it = low; it != high; ++it) *it = f(*it);
-});
+parallel::blocking_loop(vals, [&](auto it) { *it = f(*it); });
 
-// Apply f() to the fist half of the vector
-parallel::for_loop(parallel::IndexRange<std::size_t>{0, vals.size() / 2}, [&](auto low, auto high) {
-    for (auto i = low; i != high; ++i) vals[i] = f(vals[i]);
+// Apply f() to indices [0, 100)
+parallel::blocking_loop(parallel::IndexRange{0, 100}, [&](int i) { vals[i] = f(vals[i]); });
+
+// Specify computation in blocks instead of element-wise
+parallel::blocking_loop(parallel::IndexRange{0, 100}, [&](int low, int high) {
+    for (int i = low; i < high; ++i) vals[i] = f(vals[i]);
 });
 ```
 
-### Reducing a range over a binary operation
+### Reducing over a binary operation
 
-[ [Run this code](https://godbolt.org/#g:!((g:!((g:!((h:codeEditor,i:(filename:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,selection:(endColumn:53,endLineNumber:18,positionColumn:1,positionLineNumber:6,selectionStartColumn:53,selectionStartLineNumber:18,startColumn:1,startLineNumber:6),source:'%23include+%3Chttps://raw.githubusercontent.com/DmitriBogdanov/UTL/master/single_include/UTL.hpp%3E%0A%0Adouble+f(double+x)+%7B+return+std::exp(std::sin(x))%3B+%7D%0A%0Aint+main()+%7B%0A++++using+namespace+utl%3B%0A%0A++++const+std::vector%3Cdouble%3E+vals(5!'000!'000,+2)%3B%0A%0A++++//+Reduce+container+over+a+binary+operation%0A++++const+double+sum+%3D+parallel::reduce(vals,+parallel::sum%3Cdouble%3E())%3B%0A%0A++++assert(+sum+%3D%3D+5!'000!'000+*+2+)%3B%0A%0A++++//+Reduce+range+over+a+binary+operation%0A++++const+double+subrange_sum+%3D+parallel::reduce(parallel::Range%7Bvals.begin()+%2B+100,+vals.end()%7D,+parallel::sum%3Cdouble%3E())%3B%0A%0A++++assert(+subrange_sum+%3D%3D+(5!'000!'000+-+100)+*+2+)%3B%0A%7D%0A'),l:'5',n:'0',o:'C%2B%2B+source+%231',t:'0')),k:71.71783148269105,l:'4',n:'0',o:'',s:0,t:'0'),(g:!((g:!((h:compiler,i:(compiler:clang1600,filters:(b:'0',binary:'1',binaryObject:'1',commentOnly:'0',debugCalls:'1',demangle:'0',directives:'0',execute:'0',intel:'0',libraryCode:'0',trim:'1',verboseDemangling:'0'),flagsViewOpen:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,libs:!(),options:'-std%3Dc%2B%2B17+-O2',overrides:!(),selection:(endColumn:1,endLineNumber:1,positionColumn:1,positionLineNumber:1,selectionStartColumn:1,selectionStartLineNumber:1,startColumn:1,startLineNumber:1),source:1),l:'5',n:'0',o:'+x86-64+clang+16.0.0+(Editor+%231)',t:'0')),header:(),l:'4',m:50,n:'0',o:'',s:0,t:'0'),(g:!((h:output,i:(compilerName:'x86-64+clang+16.0.0',editorid:1,fontScale:14,fontUsePx:'0',j:1,wrap:'1'),l:'5',n:'0',o:'Output+of+x86-64+clang+16.0.0+(Compiler+%231)',t:'0')),k:46.69421860597116,l:'4',m:50,n:'0',o:'',s:0,t:'0')),k:28.282168517308946,l:'3',n:'0',o:'',t:'0')),l:'2',n:'0',o:'',t:'0')),version:4) ]
+[ [Run this code](https://godbolt.org/z/6KWo6bvPs) ] [ [Open source file](../examples/module_parallel/reducing_over_a_binary_operation.cpp) ]
 
 ```cpp
 using namespace utl;
 
-const std::vector<double> vals(5'000'000, 2);
+const std::vector<double> vals(200'000, 2);
 
 // Reduce container over a binary operation
-const double sum = parallel::reduce(vals, parallel::sum<double>());
+const double sum = parallel::blocking_reduce(vals, parallel::sum<>());
 
-assert( sum == 5'000'000 * 2 );
+assert( sum == 200'000 * 2 );
 
-// Reduce range over a binary operation
-const double subrange_sum = parallel::reduce(parallel::Range{vals.begin() + 100, vals.end()}, parallel::sum<>());
+// Reduce iterator range over a binary operation
+const double subrange_sum = parallel::blocking_reduce(parallel::Range{vals.begin() + 100, vals.end()}, parallel::sum<>{});
 
-assert( subrange_sum == (5'000'000 - 100) * 2 );
+assert( subrange_sum == (200'000 - 100) * 2 );
 ```
+
+### Using a local thread pool
+
+[ [Run this code](https://godbolt.org/z/zh3PobGes) ] [ [Open source file](../examples/module_parallel/using_a_local_thread_pool.cpp) ]
+
+```cpp
+using namespace utl;
+
+parallel::ThreadPool pool; // uses as many threads as it detects
+
+pool.detached_task([]{ std::cout << "Hello from the task\n"; });
+
+pool.set_thread_count(0); // will wait for the tasks, join all threads and release the memory
+```
+
+Output:
+
+```
+Hello from the task
+```
+
+### Recursive tasks
+
+[ [Run this code](https://godbolt.org/z/5P43f5fPh) ] [ [Open source file](../examples/module_parallel/recursive_tasks.cpp) ]
+
+```cpp
+using namespace utl;
+
+// Deeply recursive illustrative task, not a practical way of computing fibonacci numbers
+std::function<int(int)> fibonacci = [&](int n) {
+    if (n < 2) return n;
+
+    auto future_prev_1 = parallel::awaitable_task([&] { return fibonacci(n - 1); });
+    auto future_prev_2 = parallel::awaitable_task([&] { return fibonacci(n - 2); });
+
+    return future_prev_1.get() + future_prev_2.get();
+};
+
+assert( fibonacci(8) == 21 );
+```
+
+### Awaitable parallel loop with specific grain size
+
+[ [Run this code](https://godbolt.org/z/7Msqjn6s9) ] [ [Open source file](../examples/module_parallel/awaitable_parallel_loop_with_specific_grain_size.cpp) ]
+
+```cpp
+using namespace utl;
+
+std::vector<int> a(200'000, 27);
+std::vector<int> b(200'000, 13);
+std::vector<int> c(200'000,  0);
+
+// Launch the task to compute { c = a + b } in parallel, we know this
+// workload is very even so we can use coarser grains than by default
+const std::size_t grain_size = 200'000 / parallel::get_thread_count();
+
+auto future = parallel::awaitable_loop(parallel::IndexRange<std::size_t>{0, 200'000, grain_size},
+    [&](std::size_t i){ c[i] = a[i] + b[i]; }
+);
+
+// ... do some work in the meantime ...
+
+// Await the result
+future.wait();
+
+for (std::size_t i = 0; i < 200'000; ++i) assert( c[i] == a[i] + b[i] );
+```
+
+### Thread introspection
+
+[ [Run this code](https://godbolt.org/z/3TEE5q1KG) ] [ [Open source file](../examples/module_parallel/thread_introspection.cpp) ]
+
+```cpp
+using namespace utl;
+
+// In debugging it is often useful to have some information about the thread whereabouts,
+// we can detect if current thread belongs to a pool, which pool and at which index
+auto future = parallel::awaitable_task([]{
+    std::cout << "I am a thread [" << *parallel::this_thread::get_index() << "]"
+              << " in the pool  [" << *parallel::this_thread::get_pool()  << "]" 
+              << std::endl;
+});
+future.wait();
+
+auto std_future = std::async([]{
+    std::cout << "Am I a pool thread? -> " << (parallel::this_thread::get_pool() ? "true" : "false")
+              << std::endl;
+});
+std_future.wait();
+```
+
+Output:
+
+```
+I am a thread [0] in the pool [0x5f0c90a781f0]
+Am I a pool thread? -> false
+```
+
+## Motivation
+
+### The problem
+
+Naive use of [std::async](https://en.cppreference.com/w/cpp/thread/async) and [std::thread](https://en.cppreference.com/w/cpp/thread/thread) suffers greatly from the overhead of thread creation, this overhead makes small tasks (under a few ms) largely inefficient and introduces a great degree of performance instability. 
+
+[Thread pools](https://en.wikipedia.org/wiki/Thread_pool) are a classic solution to this problem. There are many existing implementations in C++, most of them tend to use a shared-queue design. This approach is easy to implement and works for simple parallelization, however it doesn't really function for scatter-gather workloads with nested subtasks.
+
+Something as simple as splitting a task into awaitable subtasks will deadlock the **vast majority** of thread pool implementations found online (even the ones that do implement work-stealing as they tend to work only with detached recursion), which was the initial motivation behind writing this library.
+
+### What is work-stealing
+
+Large concurrency frameworks such as [OpenMP](https://en.wikipedia.org/wiki/OpenMP) and [Intel TBB](https://github.com/uxlfoundation/oneTBB) tend to use work-stealing design where each thread keeps its own queue of tasks and steals work from the backs of other queues when its own queue gets exhausted. Such approach introduces a whole slew of potential benefits:
+
+1. We can offload task scheduling to idle threads
+2. We can reduce lock contention by splitting scheduling over multiple queues
+3. Pushing/executing local tasks in the Last-In-First-Out (LIFO) order is likely to keep work hot in cache  
+4. Stealing in the First-In-First-Out (FIFO) order is likely to pull larger tasks (as they will be closer to the recursion root), minimizing contention over small task scheduling
+
+Recursive workloads in general are also quite difficult to sensibly implement with a single queue which is why work-stealing approach is usually used. All of this makes work-stealing a rather good general case solution as it tends to perform well on most workloads.
 
 ## Benchmarks
 
-While `utl::parallel` does not claim to provide superior performance to complex vendor-optimized libraries such as [OpenMP](https://en.wikipedia.org/wiki/OpenMP), [Intel TBB](https://github.com/uxlfoundation/oneTBB), [MPI](https://www.open-mpi.org) and etc., it provides a significant boost in both speed and convenience relative to the explicit use of [std::async](https://en.cppreference.com/w/cpp/thread/async) and [std::thread](https://en.cppreference.com/w/cpp/thread/thread) due to its ability to reuse threads and automatically distribute workload.
+ `utl::parallel` does not claim to be superior to vendor-optimized concurrency frameworks, what it does is expose a simple threading API with a concise (~`600` L.O.C.) implementation written entirely in standard C++17. As of now this niche seems to be rather empty as there is almost no stand-alone thread pools supporting recursion.
 
-Below are some of the [benchmarks](../benchmarks/benchmark_parallel.cpp) comparing performance of different approaches on trivially parallelizable tasks:
+Below are a few [benchmarks](https://github.com/DmitriBogdanov/UTL/tree/master/benchmarks/module_parallel/) comparing performance of `utl::parallel::ThreadPool` with `std::async` and some other thread pools. For comparison we will use [bshoshany/thread-pool](https://github.com/bshoshany/thread-pool) and [progschj/ThreadPool](https://github.com/progschj/ThreadPool) as those two seem to be the most popular stand-alone thread pool implementations.
+
+> [!Important]
+> Consequent benchmarks were measured on a `6`-core `AMD Ryzen 5 5600H` with hyper-threading disabled. Compiled with `g++ 11.4.0` at `-O2`. Ideal speedup from parallelization would be `600%`.
+
+#### Uneven non-recursive tasks
+
+**Scenario 1: Small tasks.** Submit `1000` tasks busy-waiting for `0` to `100` microseconds randomly. `std::async()` performs extremely poorly due to the overhead of thread creation overshadowing the actual work. Thread pools perform about the same, results might fluctuate a bit depending on the run.
 
 ```
-====== BENCHMARKING ON: Parallel vector sum ======
-
-Threads           -> 4
-N                 -> 25000000
-Data memory usage -> 190.73486328125 MiB
-
-| relative |               ms/op |                op/s |    err% |     total | Parallel vector sum
-|---------:|--------------------:|--------------------:|--------:|----------:|:--------------------
-|   100.0% |               18.86 |               53.03 |    2.1% |      2.34 | `Serial version`
-|   380.0% |                4.96 |              201.53 |    0.1% |      0.61 | `OpenMP reduce`
-|   288.2% |                6.54 |              152.83 |    1.1% |      0.88 | `Naive std::async()`
-|   373.5% |                9.99 |              100.13 |    0.2% |      1.22 | `parallel::reduce()`
-|   430.9% |                8.66 |              115.41 |    0.7% |      1.06 | `parallel::reduce<4>() (loop unrolling enabled)`
-
-|--------------------------------------------------|--------------------|
-|                                            Method|         Control sum|
-|--------------------------------------------------|--------------------|
-|                                            Serial| 50000000.0000000000|
-|                                  Naive std::async| 50000000.0000000000|
-|                                parallel::reduce()| 50000000.0000000000|
-|   parallel::reduce<4>() (loop unrolling enabled))| 50000000.0000000000|
-
-
-====== BENCHMARKING ON: Repeated matrix multiplication ======
-
-Threads           -> 4
-N                 -> 600
-repeats           -> 20
-Data memory usage -> 8.23974609375 MiB
-
-| relative |               ms/op |                op/s |    err% |     total | Repeated matrix multiplication
-|---------:|--------------------:|--------------------:|--------:|----------:|:-------------------------------
-|   100.0% |            1,112.58 |                0.90 |    0.0% |     80.11 | `Serial version`
-|   292.3% |              380.69 |                2.63 |    0.1% |     27.26 | `OpenMP parallel for`
-|   207.7% |              535.73 |                1.87 |   11.0% |     37.04 | `Naive std::async()`
-|   427.3% |              260.39 |                3.84 |    0.3% |     18.24 | `parallel::task()`
-|   429.3% |              259.14 |                3.86 |    0.1% |     18.68 | `parallel::for_loop()`
-
-|----------------------------------------|--------------------|
-|                                  Method|         Control sum|
-|----------------------------------------|--------------------|
-|                                  Serial|         1.07912e+09|
-|                     OpenMP parallel for|         1.07912e+09|
-|                      Naive std::async()|         1.07912e+09|
-|                        parallel::task()|         1.07912e+09|
-|                    parallel::for_loop()|         1.07912e+09|
-
-// Note 1: Notice extremely unstable measurement for `std::async()` (aka large `err%`),
-//         creating new threads is a highly unpredictable task due to OS scheduling.
-//
-// Note 2: Not sure why OpenMP doesn't give as much speedup as expected.
-//
-// Note 3: Speedup over 4x can happen on small matrices (like in this measurement)
-//         due to utilization of muliple cache lines in a distributed case.
-//         In case of reductions it is caused by SIMD unrolling, a version
-//         with no unrolling performs similarly to OpenMP.
+| relative |               ms/op |                op/s |    err% |     total | Small non-recursive tasks
+|---------:|--------------------:|--------------------:|--------:|----------:|:--------------------------
+|   100.0% |               50.09 |               19.97 |    0.1% |     12.12 | `Serial`
+|   214.0% |               23.40 |               42.73 |    0.8% |     12.11 | `std::async()`
+|   573.3% |                8.74 |              114.47 |    0.4% |     11.84 | `parallel::ThreadPool`
+|   570.2% |                8.78 |              113.84 |    0.9% |     11.81 | `BS::thread_pool`
+|   565.6% |                8.86 |              112.92 |    1.2% |     11.83 | `progschj/ThreadPool`
 ```
+
+**Scenario 2: Large tasks.** Submit `1000` tasks busy-waiting for `1000` to `3000` microseconds randomly. Since workload is large enough to overshadow the overhead of thread creation and scheduling, `std::async()` more-or-less catches up to the thread pools. This only becomes the case once the average task duration is over a millisecond.
+
+```
+| relative |               ms/op |                op/s |    err% |     total | Large non-recursive tasks
+|---------:|--------------------:|--------------------:|--------:|----------:|:--------------------------
+|   100.0% |            1,999.59 |                0.50 |    0.5% |     21.94 | `Serial`
+|   564.2% |              354.42 |                2.82 |    0.7% |     11.37 | `std::async()`
+|   597.0% |              334.96 |                2.99 |    0.4% |     11.41 | `parallel::ThreadPool`
+|   594.0% |              336.65 |                2.97 |    0.3% |     11.43 | `BS::thread_pool`
+|   593.4% |              336.95 |                2.97 |    0.2% |     11.45 | `progschj/ThreadPool`
+```
+
+#### Uneven recursive tasks
+
+**Scenario 1: Shallow recursion.** Submit `1000` tasks busy-waiting for `0` to `100` microseconds randomly and then spawning & awaiting another such task with a `70%` chance. `std::async()` gets the job done, but experiences significant slowdown. `BS::thread_pool` and `progschj/ThreadPool` **deadlock due to recursion**.
+
+```
+| relative |               ms/op |                op/s |    err% |     total | Shallow recursive tasks
+|---------:|--------------------:|--------------------:|--------:|----------:|:------------------------
+|   100.0% |              167.20 |                5.98 |    0.7% |     12.04 | `Serial`
+|   161.1% |              103.80 |                9.63 |    5.1% |     12.10 | `std::async()`
+|   583.0% |               28.68 |               34.87 |    0.3% |     12.09 | `parallel::ThreadPool`
+```
+
+**Scenario 2: Deep recursion.** Submit `1000` tasks busy-waiting for `0` to `100` microseconds randomly and then spawning & awaiting another **2** such tasks with a `49%` chance. This rate means on average tasks recursively expand into `50` different subtasks.
+
+```
+| relative |               ms/op |                op/s |    err% |     total | Deep recursive tasks
+|---------:|--------------------:|--------------------:|--------:|----------:|:---------------------
+|   100.0% |              183.88 |                5.44 |    0.6% |     12.29 | `Serial`
+|   154.7% |              118.83 |                8.42 |    6.8% |     11.94 | `std::async()`
+|   565.1% |               32.54 |               30.73 |    1.2% |     11.90 | `parallel::ThreadPool`
+```
+
+### Questions & answers
+
+**Q:** Why use custom future type instead of `std::future<>`?
+
+**A:** This is necessary for recursive tasks. When `wait()`'ed from a pool thread instead of blocking right-away it first checks if there any recursive subtasks tasks to do in the meantime. The usual future would deadlock in this case by design, no way around it. Other than that this is a very thin wrapper around a standard `std::future<>`.
+
+**Q:** Are there any improvement to be made in terms of performance?
+
+**A:** Indeed. "Ideal" work-stealing executor would likely use a global lock-free MPMC queue for external tasks and per-thread Chase-Lev SPMC lock-free queues for task stealing. "Ideal" thread pool would also use a custom implementation of `std::function<>` (something closer to `std::move_only_function<>` from C++23). Unfortunately all of those things are highly complex and there are very few clean and correct implementations out there. A proper lock-free MPMC queue implementation with exception correctness alone would be higher in size and complexity than this entire library, the same applies to custom delegates and SPMC queues, which is why they are often pulled in as dependencies. This implementation tries to do the best it can while keeping the thread pool logic simple enough to be copy-pastable into a different project. Additional gains can also be made by getting rid of `wait()` and making the API a bit more rigid. It is also likely that some locks can be replaced with atomics.
+
+**Q:** Is it possible to deadlock the pool?
+
+**A:** Deadlocks caused by the thread pool design itself shouldn't be possible. Logical deadlocks caused by a cyclical inter-thread dependency are still possible, but this is a user-level bug since no thread pool design could possibly prevent this.
+
+**Q:** How was this library tested?
+
+**A:** It has a wide [testing suite](https://github.com/DmitriBogdanov/UTL/tree/master/tests/module_parallel) covering a multitude of use cases that runs in CI on all major platforms. GCC & clang builds run under ASan, TSan (locally) and UBSan. Tests also include some reasonable fuzzing.
+
+**Q:** Why no benchmarks against [Leopard](https://github.com/hosseinmoein/Leopard), [riften::ThiefPool](https://github.com/ConorWilliams/Threadpool) and [dp::thread_pool](https://github.com/DeveloperPaul123/thread-pool)?
+
+**A:** All of these require **C++20** to build, which is above the required standard for building this repo. `riften::ThiefPool` also includes several dependencies. Out of these 3 implementations, recursive workload seems to only be supported by `Leopard` and even that requires some algorithm adjustments on user-side with `run_task()` needing to be called in the right places to avoid a deadlock.

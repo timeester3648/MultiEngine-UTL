@@ -8,23 +8,24 @@
 //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-#if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_MVL)
-#ifndef UTLHEADERGUARD_MVL
-#define UTLHEADERGUARD_MVL
+#if !defined(UTL_PICK_MODULES) || defined(UTL_MODULE_MVL)
+
+#ifndef utl_mvl_headerguard
+#define utl_mvl_headerguard
+
+#define UTL_MVL_VERSION_MAJOR 0 // [!] module in early experimental stage,
+#define UTL_MVL_VERSION_MINOR 1 //     functional, but needs significant work
+#define UTL_MVL_VERSION_PATCH 3 //     to complete and bring up-to-date
 
 // _______________________ INCLUDES _______________________
 
-#include <algorithm>        // swap(), find(), count(), is_sorted(), min_element(),
-                            // max_element(), sort(), stable_sort(), min(), max(), remove_if(), copy()
+#include <algorithm>        // swap(), find(), count(), is_sorted(), min_element(), max_element(), ...
 #include <cassert>          // assert() // Note: Perhaps temporary
 #include <charconv>         // to_chars()
 #include <cmath>            // isfinite()
 #include <cstddef>          // size_t, ptrdiff_t, nullptr_t
-#include <exception>        // exception
 #include <functional>       // reference_wrapper<>, multiplies<>
 #include <initializer_list> // initializer_list<>
-#include <iomanip>          // setw()
-#include <ios>              // right(), boolalpha(), ios::boolalpha
 #include <iterator>         // random_access_iterator_tag, reverse_iterator<>
 #include <memory>           // unique_ptr<>
 #include <numeric>          // accumulate()
@@ -39,13 +40,16 @@
 
 // ____________________ DEVELOPER DOCS ____________________
 
+// [experimental!] This header is still work in progress and likely to undergo significant changes to
+// its API & implementation.
+//
 // This module tries to implement an "unreasonably flexible yet convenient" template for vectors and matrices,
 // in order to do so we have to rely heavily on either conditional compilation or automatic code generation
 // (or both). There are multiple seemingly viable approaches to it, yet the most of them proved to be either
 // unsuitable or unreasonable from the implementation standpoint. Below is a little rundown of implementations
 // that were attempted and used/discared for various reasons.
 //
-// Currently matrix/vector/view/etc code reuse is implemented though a whole buch of conditional compilation with
+// Currently matrix/vector/view/etc code reuse is implemented though a whole bunch of conditional compilation with
 // SFINAE, abuse of conditional inheritance, conditional types and constexpr if's. While not perfect, this is
 // the best working approach so far. Below is a list of approaches that has been considered & tried:
 //
@@ -53,8 +57,8 @@
 //
 //    => [-] UNSUITABLE APPROACH
 //
-// 2) Regular OOP with virtual classes - having vtables in lightweigh containers is highly undesirable, we can
-//    avoid this using CRTP however we run into issues with multiple inheritance (see below)
+// 2) Regular OOP with virtual classes - having vtables in lightweight containers is highly undesirable,
+//    we can avoid this using CRTP however we run into issues with multiple inheritance (see below)
 //
 //    => [-] UNSUITABLE APPROACH
 //
@@ -92,7 +96,7 @@
 //
 //    => [+-] SUITABLE, BUT HEAVILY FLAWED APPROACH
 //
-// 6) A single class with all pars of API correctly enabled/disabled through SFINAE. Closes thing to a sensible
+// 6) A single class with all parts of API correctly enabled/disabled through SFINAE. Closest thing to a sensible
 //    approach with minimal (basically none) code duplication. However it has a number of non-trivial quirks
 //    when it comes to conditionally compiling member variables, types & functions (every group has a quirk of
 //    its own, functions are the least problematic). Some of such quirks limit possible conditional API (member
@@ -126,11 +130,10 @@ namespace utl::mvl {
 // --- Type Traits ---
 // ===================
 
-// MARK:
 // Macro for generating type traits with all their boilerplate
 //
 // While it'd be nice to avoid macro usage alltogether, having a few macros for generating standardized boilerplate
-// that gets repeated several dosen times DRASTICALLY improves the maintainability of the whole conditional compilation
+// that gets repeated several dozen times DRASTICALLY improves the maintainability of the whole conditional compilation
 // mechanism down the line. They will be later #undef'ed.
 
 #define utl_mvl_define_trait(trait_name_, ...)                                                                         \
@@ -191,8 +194,6 @@ utl_mvl_define_trait_has_member(_is_tensor, is_tensor);
 utl_mvl_define_trait_has_member(_is_sparse_entry_1d, is_sparse_entry_1d);
 utl_mvl_define_trait_has_member(_is_sparse_entry_2d, is_sparse_entry_2d);
 
-// MARK:
-
 // =======================
 // --- Stringification ---
 // =======================
@@ -230,8 +231,12 @@ constexpr int _max_float_digits =
 template <class T>
 constexpr int _max_int_digits = 2 + std::numeric_limits<T>::digits10;
 
-// --- Stringifiers ---
-// --------------------
+// --- Stringifier ---
+// -------------------
+
+// TODO:
+// Replace or rethink all of this stringifying stuff, perhaps it would be best to just have a super-simple
+// one and let other functions take custom stringifier from 'utl::log'
 
 template <class T>
 void _append_stringified(std::string& str, const T& value);
@@ -288,13 +293,13 @@ void _append_stringified_array(std::string& str, const T& value) {
     str += " }";
 }
 
-template <class Tuplelike, std::size_t... Idx>
-void _append_stringified_tuple_impl(std::string& str, Tuplelike value, std::index_sequence<Idx...>) {
+template <class Tuple, std::size_t... Idx>
+void _append_stringified_tuple_impl(std::string& str, Tuple value, std::index_sequence<Idx...>) {
     ((Idx == 0 ? "" : str += ", ", _append_stringified(str, std::get<Idx>(value))), ...);
 }
 
-template <template <class...> class Tuplelike, class... Args>
-void _append_stringified_tuple(std::string& str, const Tuplelike<Args...>& value) {
+template <template <class...> class Tuple, class... Args>
+void _append_stringified_tuple(std::string& str, const Tuple<Args...>& value) {
     str += "< ";
     _append_stringified_tuple_impl(str, value, std::index_sequence_for<Args...>{});
     str += " >";
@@ -374,7 +379,7 @@ struct default_stringifier {
 // --- Helper Functions ---
 // ========================
 
-// Shortuct for labda-type-based SFINAE.
+// Shortcut for lambda-type-based SFINAE.
 //
 // Callables in this module are usually takes as a template type since 'std::function<>' introduces very significant
 // overhead with its type erasure. With template args all lambdas and functors can be nicely inlined, however we lose
@@ -390,18 +395,14 @@ template <class T>
     return std::unique_ptr<T[]>(new T[size]);
 }
 
-// Marker for uncreachable code
-[[noreturn]] inline void _unreachable() {
-// (Implementation from https://en.cppreference.com/w/cpp/utility/unreachable)
-// Use compiler specific extensions if possible.
-// Even if no extension is used, undefined behavior is still raised by
-// an empty function body and the noreturn attribute.
+// Macro version of 'std::unreachable()' implementation from https://en.cppreference.com/w/cpp/utility/unreachable
+// we use macro instead of a function to work around false-positive MSVC /W4 warnings about "unreachable code"
+// in a function that exists to mark unreachable code
 #if defined(_MSC_VER) && !defined(__clang__) // MSVC
-    __assume(false);
+#define utl_mvl_unreachable static_assert(true)
 #else // GCC, Clang
-    __builtin_unreachable();
+#define utl_mvl_unreachable __builtin_unreachable()
 #endif
-}
 
 // =======================
 // --- Utility Classes ---
@@ -416,7 +417,7 @@ template <class T>
 // '_utl_storage_define_types' macro in every class => we have all the member types defined).
 //
 // (!) Since CRTP approach has been deprecated in favor of mixins, the original reasoning is no longer
-// accurate, however it is this a useful class whenever a pack of types have to be passed through a
+// accurate, however it is this a useful class whenever a pack of types has to be passed through a
 // template (like, for example, in iterator implementation)
 template <class T>
 struct _types {
@@ -569,7 +570,7 @@ private:
 // ======================================
 
 // Note:
-// All sparse entries and multi-dimensional indeces can be sorted lexicographically
+// All sparse entries and multi-dimensional indices can be sorted lexicographically
 
 template <class T>
 struct SparseEntry1D {
@@ -658,7 +659,9 @@ template <class L, class R, class Op, _is_sparse_entry_2d_enable_if<R> = true>
 std::decay_t<R> _apply_binary_op_to_value_and_sparse_entry(L&& left_value, R&& right, Op&& op) {
     return {right.i, right.j, std::forward<Op>(op)(std::forward<L>(left_value), std::forward<R>(right).value)};
 }
-// MARK:
+
+// TODO:
+// Fix binary ops, figure out what the hell did I even do here
 
 // =============
 // --- Enums ---
@@ -704,7 +707,7 @@ using _are_tensors_with_same_value_type_enable_if =
 
 #define utl_mvl_tensor_arg_vals T, _dimension, _type, _ownership, _checking, _layout
 
-// Incredibly improtant macros used for conditional compilation of member functions.
+// Incredibly important macros used for conditional compilation of member functions.
 // They automatically create the boilerplate that makes member functions dependant on the template parameters,
 // which is necessary for conditional compilation and "forward" to a 'enable_if' condition.
 //
@@ -720,7 +723,7 @@ using _are_tensors_with_same_value_type_enable_if =
 
 #define utl_mvl_reqs(condition_) template <utl_mvl_require(condition_)>
 
-// A somewhat scuffed version of trait-definig macro used to create SFINAE-restrictions
+// A somewhat scuffed version of trait-defining macro used to create SFINAE-restrictions
 // on tensor params in free functions. Only supports trivial conditions of the form
 // '<parameter> [==][!=] <value>'. Perhaps there is a better way of doing it, but I'm not yet sure.
 //
@@ -745,8 +748,8 @@ utl_mvl_define_tensor_param_restriction(_is_matrix_tensor, dimension == Dimensio
 
 // Unlike class method, member values can't be templated, which prevents us from using regular 'enable_if_t' SFINAE
 // for their conditional compilation. The (seemingly) best workaround to compile members conditionally is to inherit
-// 'std::contidional<T, EmptyClass>' where 'T' is a "dummy" class with the sole purpose of having data members to
-// inherit. This does not introduce virtualiztion (which is good, that how we want it).
+// 'std::conditional<T, EmptyClass>' where 'T' is a "dummy" class with the sole purpose of having data members to
+// inherit. This does not introduce virtualization (which is good, that how we want it).
 
 template <int id>
 struct _nothing {};
@@ -776,7 +779,7 @@ struct _2d_dense_data {
 private:
     using value_type = typename _types<T>::value_type;
     using _data_t    = _choose_based_on_ownership<_ownership, std::unique_ptr<value_type[]>, _observer_ptr<value_type>,
-                                               _observer_ptr<const value_type>>;
+                                                  _observer_ptr<const value_type>>;
 
 public:
     _data_t _data;
@@ -867,81 +870,74 @@ public:
     [[nodiscard]] const_reverse_iterator rbegin() const { return this->crbegin(); }
     [[nodiscard]] const_reverse_iterator rend() const { return this->crend(); }
 
-    utl_mvl_reqs(ownership != Ownership::CONST_VIEW) [[nodiscard]] iterator begin() { return iterator(this, 0); }
+    utl_mvl_reqs(ownership != Ownership::CONST_VIEW)
+    [[nodiscard]] iterator begin() { return iterator(this, 0); }
 
-    utl_mvl_reqs(ownership != Ownership::CONST_VIEW) [[nodiscard]] iterator end() {
-        return iterator(this, this->size());
-    }
+    utl_mvl_reqs(ownership != Ownership::CONST_VIEW)
+    [[nodiscard]] iterator end() { return iterator(this, this->size()); }
 
-    utl_mvl_reqs(ownership != Ownership::CONST_VIEW) [[nodiscard]] reverse_iterator rbegin() {
-        return reverse_iterator(this->end());
-    }
+    utl_mvl_reqs(ownership != Ownership::CONST_VIEW)
+    [[nodiscard]] reverse_iterator rbegin() { return reverse_iterator(this->end()); }
 
-    utl_mvl_reqs(ownership != Ownership::CONST_VIEW) [[nodiscard]] reverse_iterator rend() {
-        return reverse_iterator(this->begin());
-    }
+    utl_mvl_reqs(ownership != Ownership::CONST_VIEW)
+    [[nodiscard]] reverse_iterator rend() { return reverse_iterator(this->begin()); }
 
     // --- Basic getters ---
     // ---------------------
 public:
     utl_mvl_reqs(dimension == Dimension::MATRIX && (type == Type::DENSE || type == Type::STRIDED))
-        [[nodiscard]] size_type size() const noexcept {
-        return this->rows() * this->cols();
-    }
+    [[nodiscard]] size_type size() const noexcept { return this->rows() * this->cols(); }
 
-    utl_mvl_reqs(type == Type::SPARSE) [[nodiscard]] size_type size() const noexcept { return this->_data.size(); }
+    utl_mvl_reqs(type == Type::SPARSE)
+    [[nodiscard]] size_type size() const noexcept { return this->_data.size(); }
 
-    utl_mvl_reqs(dimension == Dimension::MATRIX) [[nodiscard]] size_type rows() const noexcept { return this->_rows; }
+    utl_mvl_reqs(dimension == Dimension::MATRIX)
+    [[nodiscard]] size_type rows() const noexcept { return this->_rows; }
 
-    utl_mvl_reqs(dimension == Dimension::MATRIX) [[nodiscard]] size_type cols() const noexcept { return this->_cols; }
+    utl_mvl_reqs(dimension == Dimension::MATRIX)
+    [[nodiscard]] size_type cols() const noexcept { return this->_cols; }
 
-    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::DENSE) [[nodiscard]] constexpr size_type
-        row_stride() const noexcept {
+    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::DENSE)
+    [[nodiscard]] constexpr size_type row_stride() const noexcept {
         if constexpr (self::params::layout == Layout::RC) return 0;
         if constexpr (self::params::layout == Layout::CR) return 1;
-        _unreachable();
+        utl_mvl_unreachable;
     }
 
-    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::DENSE) [[nodiscard]] constexpr size_type
-        col_stride() const noexcept {
+    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::DENSE)
+    [[nodiscard]] constexpr size_type col_stride() const noexcept {
         if constexpr (self::params::layout == Layout::RC) return 1;
         if constexpr (self::params::layout == Layout::CR) return 0;
-        _unreachable();
+        utl_mvl_unreachable;
     }
-    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::STRIDED) [[nodiscard]] size_type
-        row_stride() const noexcept {
-        return this->_row_stride;
-    }
+    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::STRIDED)
+    [[nodiscard]] size_type row_stride() const noexcept { return this->_row_stride; }
 
-    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::STRIDED) [[nodiscard]] size_type
-        col_stride() const noexcept {
-        return this->_col_stride;
-    }
+    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::STRIDED)
+    [[nodiscard]] size_type col_stride() const noexcept { return this->_col_stride; }
 
-    utl_mvl_reqs(type == Type::DENSE || type == Type::STRIDED) [[nodiscard]] const_pointer data() const noexcept {
-        return this->_data.get();
-    }
+    utl_mvl_reqs(type == Type::DENSE || type == Type::STRIDED)
+    [[nodiscard]] const_pointer data() const noexcept { return this->_data.get(); }
 
     utl_mvl_reqs(ownership != Ownership::CONST_VIEW && (type == Type::DENSE || type == Type::STRIDED))
-        [[nodiscard]] pointer data() noexcept {
-        return this->_data.get();
-    }
+    [[nodiscard]] pointer data() noexcept { return this->_data.get(); }
 
     [[nodiscard]] bool empty() const noexcept { return (this->size() == 0); }
 
     // --- Advanced getters ---
     // ------------------------
-    utl_mvl_reqs(_has_binary_op_equal<value_type>::value) [[nodiscard]] bool contains(const_reference value) const {
+    utl_mvl_reqs(_has_binary_op_equal<value_type>::value)
+    [[nodiscard]] bool contains(const_reference value) const {
         return std::find(this->cbegin(), this->cend(), value) != this->cend();
     }
 
-    utl_mvl_reqs(_has_binary_op_equal<value_type>::value) [[nodiscard]] size_type count(const_reference value) const {
+    utl_mvl_reqs(_has_binary_op_equal<value_type>::value)
+    [[nodiscard]] size_type count(const_reference value) const {
         return std::count(this->cbegin(), this->cend(), value);
     }
 
-    utl_mvl_reqs(_has_binary_op_less<value_type>::value) [[nodiscard]] bool is_sorted() const {
-        return std::is_sorted(this->cbegin(), this->cend());
-    }
+    utl_mvl_reqs(_has_binary_op_less<value_type>::value)
+    [[nodiscard]] bool is_sorted() const { return std::is_sorted(this->cbegin(), this->cend()); }
 
     template <class Compare>
     [[nodiscard]] bool is_sorted(Compare cmp) const {
@@ -950,15 +946,18 @@ public:
 
     [[nodiscard]] std::vector<value_type> to_std_vector() const { return std::vector(this->cbegin(), this->cend()); }
 
-    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::DENSE) self transposed() const {
+    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::DENSE)
+    self transposed() const {
         self res(this->cols(), this->rows());
         this->for_each([&](const value_type& element, size_type i, size_type j) { res(j, i) = element; });
         return res;
     }
 
-    utl_mvl_reqs(ownership == Ownership::CONTAINER) [[nodiscard]] self clone() const { return *this; }
+    utl_mvl_reqs(ownership == Ownership::CONTAINER)
+    [[nodiscard]] self clone() const { return *this; }
 
-    utl_mvl_reqs(ownership == Ownership::CONTAINER) [[nodiscard]] self move() & { return std::move(*this); }
+    utl_mvl_reqs(ownership == Ownership::CONTAINER)
+    [[nodiscard]] self move() & { return std::move(*this); }
 
     template <Type other_type, Ownership other_ownership, Checking other_checking, Layout other_layout>
     [[nodiscard]] bool
@@ -976,7 +975,8 @@ public:
         }
         // Different sparsity comparison
         // TODO: Impl here and use .all_of() OR .any_of()
-        return true;
+        else
+            return true;
     }
 
     // --- Indexation ---
@@ -989,32 +989,33 @@ public:
     [[nodiscard]] reference       back() { return this->operator[](this->size() - 1); }
 
 private:
-    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::STRIDED) [[nodiscard]] size_type
-        _get_memory_offset_strided_impl(size_type idx, size_type i, size_type j) const {
+    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::STRIDED)
+    [[nodiscard]] size_type _get_memory_offset_strided_impl(size_type idx, size_type i, size_type j) const {
         if constexpr (self::params::layout == Layout::RC) return idx * this->col_stride() + this->row_stride() * i;
         if constexpr (self::params::layout == Layout::CR) return idx * this->row_stride() + this->col_stride() * j;
-        _unreachable();
+        utl_mvl_unreachable;
     }
 
 public:
-    utl_mvl_reqs(type == Type::DENSE) [[nodiscard]] size_type get_memory_offset_of_idx(size_type idx) const {
+    utl_mvl_reqs(type == Type::DENSE)
+    [[nodiscard]] size_type get_memory_offset_of_idx(size_type idx) const {
         if constexpr (self::params::checking == Checking::BOUNDS) this->_bound_check_idx(idx);
         return idx;
     }
 
-    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::DENSE) [[nodiscard]] size_type
-        get_memory_offset_of_ij(size_type i, size_type j) const {
+    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::DENSE)
+    [[nodiscard]] size_type get_memory_offset_of_ij(size_type i, size_type j) const {
         return this->get_idx_of_ij(i, j);
     }
 
-    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::STRIDED) [[nodiscard]] size_type
-        get_memory_offset_of_idx(size_type idx) const {
+    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::STRIDED)
+    [[nodiscard]] size_type get_memory_offset_of_idx(size_type idx) const {
         const auto ij = this->get_ij_of_idx(idx);
         return _get_memory_offset_strided_impl(idx, ij.i, ij.j);
     }
 
-    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::STRIDED) [[nodiscard]] size_type
-        get_memory_offset_of_ij(size_type i, size_type j) const {
+    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::STRIDED)
+    [[nodiscard]] size_type get_memory_offset_of_ij(size_type i, size_type j) const {
         const auto idx = this->get_idx_of_ij(i, j);
         return _get_memory_offset_strided_impl(idx, i, j);
     }
@@ -1022,51 +1023,45 @@ public:
 public:
     // - Flat indexation -
     utl_mvl_reqs(ownership != Ownership::CONST_VIEW && dimension == Dimension::MATRIX &&
-                 (type == Type::DENSE || type == Type::STRIDED)) [[nodiscard]] reference
-    operator[](size_type idx) {
-        return this->data()[this->get_memory_offset_of_idx(idx)];
-    }
+                 (type == Type::DENSE || type == Type::STRIDED))
+    [[nodiscard]] reference operator[](size_type idx) { return this->data()[this->get_memory_offset_of_idx(idx)]; }
 
     utl_mvl_reqs(dimension == Dimension::MATRIX && (type == Type::DENSE || type == Type::STRIDED))
-        [[nodiscard]] const_reference
-        operator[](size_type idx) const {
+    [[nodiscard]] const_reference operator[](size_type idx) const {
         return this->data()[this->get_memory_offset_of_idx(idx)];
     }
 
     utl_mvl_reqs(ownership != Ownership::CONST_VIEW && dimension == Dimension::VECTOR || type == Type::SPARSE)
-        [[nodiscard]] reference
-        operator[](size_type idx) {
+    [[nodiscard]] reference operator[](size_type idx) {
         if constexpr (self::params::checking == Checking::BOUNDS) this->_bound_check_idx(idx);
         return this->_data[idx].value;
     }
 
-    utl_mvl_reqs(dimension == Dimension::VECTOR || type == Type::SPARSE) [[nodiscard]] const_reference
-    operator[](size_type idx) const {
+    utl_mvl_reqs(dimension == Dimension::VECTOR || type == Type::SPARSE)
+    [[nodiscard]] const_reference operator[](size_type idx) const {
         if constexpr (self::params::checking == Checking::BOUNDS) this->_bound_check_idx(idx);
         return this->_data[idx].value;
     }
 
     // - 2D indexation -
     utl_mvl_reqs(ownership != Ownership::CONST_VIEW && dimension == Dimension::MATRIX &&
-                 (type == Type::DENSE || type == Type::STRIDED)) [[nodiscard]] reference
-    operator()(size_type i, size_type j) {
+                 (type == Type::DENSE || type == Type::STRIDED))
+    [[nodiscard]] reference operator()(size_type i, size_type j) {
         return this->data()[this->get_memory_offset_of_ij(i, j)];
     }
 
     utl_mvl_reqs(dimension == Dimension::MATRIX && (type == Type::DENSE || type == Type::STRIDED))
-        [[nodiscard]] const_reference
-        operator()(size_type i, size_type j) const {
+    [[nodiscard]] const_reference operator()(size_type i, size_type j) const {
         return this->data()[this->get_memory_offset_of_ij(i, j)];
     }
 
     utl_mvl_reqs(ownership != Ownership::CONST_VIEW && dimension == Dimension::MATRIX && type == Type::SPARSE)
-        [[nodiscard]] reference
-        operator()(size_type i, size_type j) {
+    [[nodiscard]] reference operator()(size_type i, size_type j) {
         if constexpr (self::params::checking == Checking::BOUNDS) this->_bound_check_idx(i, j);
         return this->_data[this->get_idx_of_ij(i, j)].value;
     }
-    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::SPARSE) [[nodiscard]] const_reference
-    operator()(size_type i, size_type j) const {
+    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::SPARSE)
+    [[nodiscard]] const_reference operator()(size_type i, size_type j) const {
         if constexpr (self::params::checking == Checking::BOUNDS) this->_bound_check_idx(i, j);
         return this->_data[this->get_idx_of_ij(i, j)].value;
     }
@@ -1082,7 +1077,8 @@ private:
                 stringify("idx (which is ", idx, ") >= this->size() (which is ", this->size(), ")"));
     }
 
-    utl_mvl_reqs(dimension == Dimension::MATRIX) void _bound_check_ij(size_type i, size_type j) const {
+    utl_mvl_reqs(dimension == Dimension::MATRIX)
+    void _bound_check_ij(size_type i, size_type j) const {
         if (i >= this->rows())
             throw std::out_of_range(stringify("i (which is ", i, ") >= this->rows() (which is ", this->rows(), ")"));
         else if (j >= this->cols())
@@ -1092,21 +1088,21 @@ private:
     // - Dense & strided implementations -
 private:
     utl_mvl_reqs(dimension == Dimension::MATRIX && (type == Type::DENSE || type == Type::STRIDED))
-        [[nodiscard]] size_type _unchecked_get_idx_of_ij(size_type i, size_type j) const {
+    [[nodiscard]] size_type _unchecked_get_idx_of_ij(size_type i, size_type j) const {
         if constexpr (self::params::layout == Layout::RC) return i * this->cols() + j;
         if constexpr (self::params::layout == Layout::CR) return j * this->rows() + i;
-        _unreachable();
+        utl_mvl_unreachable;
     }
 
-    utl_mvl_reqs(dimension == Dimension::MATRIX && (type == Type::DENSE || type == Type::STRIDED)) [[nodiscard]] Index2D
-        _unchecked_get_ij_of_idx(size_type idx) const {
+    utl_mvl_reqs(dimension == Dimension::MATRIX && (type == Type::DENSE || type == Type::STRIDED))
+    [[nodiscard]] Index2D _unchecked_get_ij_of_idx(size_type idx) const {
         if constexpr (self::params::layout == Layout::RC) return {idx / this->cols(), idx % this->cols()};
         if constexpr (self::params::layout == Layout::CR) return {idx % this->rows(), idx / this->rows()};
-        _unreachable();
+        utl_mvl_unreachable;
     }
 
     utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::STRIDED && ownership == Ownership::CONTAINER)
-        [[nodiscard]] size_type _total_allocated_size() const noexcept {
+    [[nodiscard]] size_type _total_allocated_size() const noexcept {
         // Note 1: Allocated size of the strided matrix is NOT equal to .size() (which is same as rows * cols)
         // This is due to all the padding between the actual elements
         // Note 2: The question of whether .size() should return the number of 'strided' elements or the number
@@ -1120,40 +1116,40 @@ private:
             return (this->rows() - 1) * this->row_stride() + this->rows() * this->cols() * this->col_stride();
         if constexpr (self::params::layout == Layout::CR)
             return (this->cols() - 1) * this->col_stride() + this->rows() * this->cols() * this->row_stride();
-        _unreachable();
+        utl_mvl_unreachable;
     }
 
 public:
     utl_mvl_reqs(dimension == Dimension::MATRIX && (type == Type::DENSE || type == Type::STRIDED))
-        [[nodiscard]] size_type get_idx_of_ij(size_type i, size_type j) const {
+    [[nodiscard]] size_type get_idx_of_ij(size_type i, size_type j) const {
         if constexpr (self::params::checking == Checking::BOUNDS) this->_bound_check_ij(i, j);
         return _unchecked_get_idx_of_ij(i, j);
     }
 
-    utl_mvl_reqs(dimension == Dimension::MATRIX && (type == Type::DENSE || type == Type::STRIDED)) [[nodiscard]] Index2D
-        get_ij_of_idx(size_type idx) const {
+    utl_mvl_reqs(dimension == Dimension::MATRIX && (type == Type::DENSE || type == Type::STRIDED))
+    [[nodiscard]] Index2D get_ij_of_idx(size_type idx) const {
         if constexpr (self::params::checking == Checking::BOUNDS) this->_bound_check_idx(idx);
         return _unchecked_get_ij_of_idx(idx);
     }
 
     utl_mvl_reqs(dimension == Dimension::MATRIX && (type == Type::DENSE || type == Type::STRIDED))
-        [[nodiscard]] size_type extent_major() const noexcept {
+    [[nodiscard]] size_type extent_major() const noexcept {
         if constexpr (self::params::layout == Layout::RC) return this->rows();
         if constexpr (self::params::layout == Layout::CR) return this->cols();
-        _unreachable();
+        utl_mvl_unreachable;
     }
 
     utl_mvl_reqs(dimension == Dimension::MATRIX && (type == Type::DENSE || type == Type::STRIDED))
-        [[nodiscard]] size_type extent_minor() const noexcept {
+    [[nodiscard]] size_type extent_minor() const noexcept {
         if constexpr (self::params::layout == Layout::RC) return this->cols();
         if constexpr (self::params::layout == Layout::CR) return this->rows();
-        _unreachable();
+        utl_mvl_unreachable;
     }
 
     // - Sparse implementations -
 private:
-    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::SPARSE) [[nodiscard]] size_type
-        _search_ij(size_type i, size_type j) const noexcept {
+    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::SPARSE)
+    [[nodiscard]] size_type _search_ij(size_type i, size_type j) const noexcept {
         // Returns this->size() if {i, j} wasn't found.
         // Linear search for small .size() (more efficient fue to prediction and cache locality)
         if (true) {
@@ -1165,8 +1161,8 @@ private:
     }
 
 public:
-    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::SPARSE) [[nodiscard]] size_type
-        get_idx_of_ij(size_type i, size_type j) const {
+    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::SPARSE)
+    [[nodiscard]] size_type get_idx_of_ij(size_type i, size_type j) const {
         const size_type idx = this->_search_ij(i, j);
         // Return this->size() if {i, j} wasn't found. Throw with bound checking.
         if constexpr (self::params::checking == Checking::BOUNDS)
@@ -1175,34 +1171,32 @@ public:
         return idx;
     }
 
-    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::SPARSE) [[nodiscard]] Index2D
-        get_ij_of_idx(size_type idx) const {
+    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::SPARSE)
+    [[nodiscard]] Index2D get_ij_of_idx(size_type idx) const {
         if constexpr (self::params::checking == Checking::BOUNDS) this->_bound_check_idx(idx);
         return Index2D{this->_data[idx].i, this->_data[idx].j};
     }
 
     utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::SPARSE)
-        [[nodiscard]] bool contains_index(size_type i, size_type j) const noexcept {
+    [[nodiscard]] bool contains_index(size_type i, size_type j) const noexcept {
         return this->_search_ij(i, j) != this->size();
     }
 
     // --- Reductions ---
     // ------------------
-    utl_mvl_reqs(_has_binary_op_plus<value_type>::value) [[nodiscard]] value_type sum() const {
-        return std::accumulate(this->cbegin(), this->cend(), value_type());
-    }
+    utl_mvl_reqs(_has_binary_op_plus<value_type>::value)
+    [[nodiscard]] value_type sum() const { return std::accumulate(this->cbegin(), this->cend(), value_type()); }
 
-    utl_mvl_reqs(_has_binary_op_multiplies<value_type>::value) [[nodiscard]] value_type product() const {
+    utl_mvl_reqs(_has_binary_op_multiplies<value_type>::value)
+    [[nodiscard]] value_type product() const {
         return std::accumulate(this->cbegin(), this->cend(), value_type(), std::multiplies<value_type>());
     }
 
-    utl_mvl_reqs(_has_binary_op_less<value_type>::value) [[nodiscard]] value_type min() const {
-        return *std::min_element(this->cbegin(), this->cend());
-    }
+    utl_mvl_reqs(_has_binary_op_less<value_type>::value)
+    [[nodiscard]] value_type min() const { return *std::min_element(this->cbegin(), this->cend()); }
 
-    utl_mvl_reqs(_has_binary_op_less<value_type>::value) [[nodiscard]] value_type max() const {
-        return *std::max_element(this->cbegin(), this->cend());
-    }
+    utl_mvl_reqs(_has_binary_op_less<value_type>::value)
+    [[nodiscard]] value_type max() const { return *std::max_element(this->cbegin(), this->cend()); }
 
     // --- Predicate operations ---
     // ----------------------------
@@ -1234,14 +1228,14 @@ public:
 
     template <class PredType, _has_signature_enable_if<PredType, bool(const_reference)> = true>
     [[nodiscard]] bool true_for_all(PredType predicate) const {
-        auto inversed_predicate = [&](const_reference e) -> bool { return !predicate(e); };
-        return !this->true_for_any(inversed_predicate);
+        auto inverse_predicate = [&](const_reference e) -> bool { return !predicate(e); };
+        return !this->true_for_any(inverse_predicate);
     }
 
     template <class PredType, _has_signature_enable_if<PredType, bool(const_reference, size_type)> = true>
     [[nodiscard]] bool true_for_all(PredType predicate) const {
-        auto inversed_predicate = [&](const_reference e, size_type idx) -> bool { return !predicate(e, idx); };
-        return !this->true_for_any(inversed_predicate);
+        auto inverse_predicate = [&](const_reference e, size_type idx) -> bool { return !predicate(e, idx); };
+        return !this->true_for_any(inverse_predicate);
     }
 
     template <class PredType, _has_signature_enable_if<PredType, bool(const_reference, size_type, size_type)> = true,
@@ -1249,10 +1243,10 @@ public:
     [[nodiscard]] bool true_for_all(PredType predicate) const {
         // We can reuse .true_for_any() with inverted predicate due to following conjecture:
         // FOR_ALL (predicate)  ~  ! FOR_ANY (!predicate)
-        auto inversed_predicate = [&](const_reference e, size_type i, size_type j) -> bool {
+        auto inverse_predicate = [&](const_reference e, size_type i, size_type j) -> bool {
             return !predicate(e, i, j);
         };
-        return !this->true_for_any(inversed_predicate);
+        return !this->true_for_any(inverse_predicate);
     }
 
     // --- Const algorithms ---
@@ -1329,7 +1323,8 @@ public:
         return this->for_each(func_wrapper);
     }
 
-    utl_mvl_reqs(ownership != Ownership::CONST_VIEW) self& fill(const_reference value) {
+    utl_mvl_reqs(ownership != Ownership::CONST_VIEW)
+    self& fill(const_reference value) {
         for (size_type idx = 0; idx < this->size(); ++idx) this->operator[](idx) = value;
         return *this;
     }
@@ -1366,11 +1361,13 @@ public:
         return *this;
     }
 
-    utl_mvl_reqs(ownership != Ownership::CONST_VIEW && _has_binary_op_less<value_type>::value) self& sort() {
+    utl_mvl_reqs(ownership != Ownership::CONST_VIEW && _has_binary_op_less<value_type>::value)
+    self& sort() {
         std::sort(this->begin(), this->end());
         return *this;
     }
-    utl_mvl_reqs(ownership != Ownership::CONST_VIEW && _has_binary_op_less<value_type>::value) self& stable_sort() {
+    utl_mvl_reqs(ownership != Ownership::CONST_VIEW && _has_binary_op_less<value_type>::value)
+    self& stable_sort() {
         std::stable_sort(this->begin(), this->end());
         return *this;
     }
@@ -1423,12 +1420,13 @@ public:
         return sparse_const_view_type(this->rows(), this->cols(), std::move(triplets));
     }
 
-    utl_mvl_reqs(dimension == Dimension::MATRIX) [[nodiscard]] sparse_const_view_type diagonal() const {
+    utl_mvl_reqs(dimension == Dimension::MATRIX)
+    [[nodiscard]] sparse_const_view_type diagonal() const {
         // Sparse matrices have no better way of getting a diagonal than filtering (i ==j)
         if constexpr (self::params::type == Type::SPARSE) {
             return this->filter([](const_reference, size_type i, size_type j) { return i == j; });
         }
-        // Non-sparce matrices can just iterate over diagonal directly
+        // Non-sparse matrices can just iterate over diagonal directly
         else {
             const size_type     min_size = std::min(this->rows(), this->cols());
             _cref_triplet_array triplets;
@@ -1486,12 +1484,12 @@ public:
         return sparse_view_type(this->rows(), this->cols(), std::move(triplets));
     }
 
-    utl_mvl_reqs(dimension == Dimension::MATRIX && ownership != Ownership::CONST_VIEW) [[nodiscard]] sparse_view_type
-        diagonal() {
+    utl_mvl_reqs(dimension == Dimension::MATRIX && ownership != Ownership::CONST_VIEW)
+    [[nodiscard]] sparse_view_type diagonal() {
         /* Sparse matrices have no better way of getting a diagonal than filtering (i == j) */
         if constexpr (self::params::type == Type::SPARSE) {
             return this->filter([](const_reference, size_type i, size_type j) { return i == j; });
-        } /* Non-sparce matrices can just iterate over diagonal directly */
+        } /* Non-sparse matrices can just iterate over diagonal directly */
         else {
             const size_type    min_size = std::min(this->rows(), this->cols());
             _ref_triplet_array triplets;
@@ -1510,8 +1508,9 @@ public:
                            GenericTensor<value_type, self::params::dimension, Type::STRIDED, Ownership::CONST_VIEW,
                                          self::params::checking, self::params::layout>>;
 
-    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::SPARSE) [[nodiscard]] block_const_view_type
-        block(size_type block_i, size_type block_j, size_type block_rows, size_type block_cols) const {
+    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::SPARSE)
+    [[nodiscard]] block_const_view_type block(size_type block_i, size_type block_j, size_type block_rows,
+                                              size_type block_cols) const {
         // Sparse matrices have no better way of getting a block than filtering by { i, j }
 
         // Do the same thing as in .filter(), but shrink resulting view size to
@@ -1529,8 +1528,9 @@ public:
         return block_const_view_type(block_rows, block_cols, std::move(triplets));
     }
 
-    utl_mvl_reqs(dimension == Dimension::MATRIX && type != Type::SPARSE) [[nodiscard]] block_const_view_type
-        block(size_type block_i, size_type block_j, size_type block_rows, size_type block_cols) const {
+    utl_mvl_reqs(dimension == Dimension::MATRIX && type != Type::SPARSE)
+    [[nodiscard]] block_const_view_type block(size_type block_i, size_type block_j, size_type block_rows,
+                                              size_type block_cols) const {
         if constexpr (self::params::layout == Layout::RC) {
             const size_type row_stride = this->row_stride() + this->col_stride() * (this->cols() - block_cols);
             const size_type col_stride = this->col_stride();
@@ -1543,16 +1543,14 @@ public:
             return block_const_view_type(block_rows, block_cols, row_stride, col_stride,
                                          &this->operator()(block_i, block_j));
         }
-        _unreachable();
+        utl_mvl_unreachable;
     }
 
-    utl_mvl_reqs(dimension == Dimension::MATRIX) [[nodiscard]] block_const_view_type row(size_type i) const {
-        return this->block(i, 0, 1, this->cols());
-    }
+    utl_mvl_reqs(dimension == Dimension::MATRIX)
+    [[nodiscard]] block_const_view_type row(size_type i) const { return this->block(i, 0, 1, this->cols()); }
 
-    utl_mvl_reqs(dimension == Dimension::MATRIX) [[nodiscard]] block_const_view_type col(size_type j) const {
-        return this->block(0, j, this->rows(), 1);
-    }
+    utl_mvl_reqs(dimension == Dimension::MATRIX)
+    [[nodiscard]] block_const_view_type col(size_type j) const { return this->block(0, j, this->rows(), 1); }
 
     // - Mutable views -
     using block_view_type =
@@ -1561,8 +1559,8 @@ public:
                                          self::params::checking, self::params::layout>>;
 
     utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::SPARSE && ownership != Ownership::CONST_VIEW)
-        [[nodiscard]] block_view_type
-        block(size_type block_i, size_type block_j, size_type block_rows, size_type block_cols) {
+    [[nodiscard]] block_view_type block(size_type block_i, size_type block_j, size_type block_rows,
+                                        size_type block_cols) {
         // Sparse matrices have no better way of getting a block than filtering by { i, j }
 
         // Do the same thing as in .filter(), but shrink resulting view size to
@@ -1581,8 +1579,8 @@ public:
     }
 
     utl_mvl_reqs(dimension == Dimension::MATRIX && type != Type::SPARSE && ownership != Ownership::CONST_VIEW)
-        [[nodiscard]] block_view_type
-        block(size_type block_i, size_type block_j, size_type block_rows, size_type block_cols) {
+    [[nodiscard]] block_view_type block(size_type block_i, size_type block_j, size_type block_rows,
+                                        size_type block_cols) {
         if constexpr (self::params::layout == Layout::RC) {
             const size_type row_stride = this->row_stride() + this->col_stride() * (this->cols() - block_cols);
             const size_type col_stride = this->col_stride();
@@ -1593,18 +1591,14 @@ public:
             const size_type col_stride = this->col_stride() + this->row_stride() * (this->rows() - block_rows);
             return block_view_type(block_rows, block_cols, row_stride, col_stride, &this->operator()(block_i, block_j));
         }
-        _unreachable();
+        utl_mvl_unreachable;
     }
 
-    utl_mvl_reqs(dimension == Dimension::MATRIX && ownership != Ownership::CONST_VIEW) [[nodiscard]] block_view_type
-        row(size_type i) {
-        return this->block(i, 0, 1, this->cols());
-    }
+    utl_mvl_reqs(dimension == Dimension::MATRIX && ownership != Ownership::CONST_VIEW)
+    [[nodiscard]] block_view_type row(size_type i) { return this->block(i, 0, 1, this->cols()); }
 
-    utl_mvl_reqs(dimension == Dimension::MATRIX && ownership != Ownership::CONST_VIEW) [[nodiscard]] block_view_type
-        col(size_type j) {
-        return this->block(0, j, this->rows(), 1);
-    }
+    utl_mvl_reqs(dimension == Dimension::MATRIX && ownership != Ownership::CONST_VIEW)
+    [[nodiscard]] block_view_type col(size_type j) { return this->block(0, j, this->rows(), 1); }
 
     // --- Sparse operations ---
     // -------------------------
@@ -1617,17 +1611,14 @@ private:
 public:
     using sparse_entry_type = _triplet_t;
 
-    utl_mvl_reqs(type == Type::SPARSE) [[nodiscard]] const std::vector<sparse_entry_type>& entries() const noexcept {
-        return this->_data;
-    }
+    utl_mvl_reqs(type == Type::SPARSE)
+    [[nodiscard]] const std::vector<sparse_entry_type>& entries() const noexcept { return this->_data; }
 
     utl_mvl_reqs(type == Type::SPARSE && ownership != Ownership::CONST_VIEW)
-        [[nodiscard]] std::vector<sparse_entry_type>& entries() noexcept {
-        return this->_data;
-    }
+    [[nodiscard]] std::vector<sparse_entry_type>& entries() noexcept { return this->_data; }
 
-    utl_mvl_reqs(dimension == Dimension::MATRIX &&
-                 type == Type::SPARSE) self& insert_triplets(const std::vector<sparse_entry_type>& triplets) {
+    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::SPARSE)
+    self& insert_triplets(const std::vector<sparse_entry_type>& triplets) {
         // Bulk-insert triplets and sort by index
         const auto ordering = [](const sparse_entry_type& l, const sparse_entry_type& r) -> bool {
             return (l.i < r.i) && (l.j < r.j);
@@ -1639,8 +1630,8 @@ public:
         return *this;
     }
 
-    utl_mvl_reqs(dimension == Dimension::MATRIX &&
-                 type == Type::SPARSE) self& rewrite_triplets(std::vector<sparse_entry_type>&& triplets) {
+    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::SPARSE)
+    self& rewrite_triplets(std::vector<sparse_entry_type>&& triplets) {
         // Move-construct all triplets at once and sort by index
         const auto ordering = [](const sparse_entry_type& l, const sparse_entry_type& r) -> bool {
             return (l.i < r.i) && (l.j < r.j);
@@ -1652,8 +1643,8 @@ public:
         return *this;
     }
 
-    utl_mvl_reqs(dimension == Dimension::MATRIX &&
-                 type == Type::SPARSE) self& erase_triplets(std::vector<Index2D> indices) {
+    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::SPARSE)
+    self& erase_triplets(std::vector<Index2D> indices) {
         // Erase triplets with {i, j} from 'indices' using the fact that both
         // 'indices' and triplets are sorted. We can scan through triplets once
         // while advancing 'cursor' when 'indices[cursor]' gets deleted, which
@@ -1724,10 +1715,12 @@ public:
     }
 
     // Default-ctor (containers)
-    utl_mvl_reqs(ownership == Ownership::CONTAINER) GenericTensor() noexcept {}
+    utl_mvl_reqs(ownership == Ownership::CONTAINER)
+    GenericTensor() noexcept {}
 
     // Default-ctor (views)
-    utl_mvl_reqs(ownership != Ownership::CONTAINER) GenericTensor() noexcept = delete;
+    utl_mvl_reqs(ownership != Ownership::CONTAINER)
+    GenericTensor() noexcept = delete;
 
     // Copy-assignment over the config boundaries
     // We can change checking config, copy from matrices with different layouts,
@@ -1754,7 +1747,7 @@ public:
         this->_rows       = other.rows();
         this->_cols       = other.cols();
         this->_row_stride = other.row_stride();
-        this->_col_strude = other.col_stride();
+        this->_col_stride = other.col_stride();
         this->_data       = std::move(_make_unique_ptr_array<value_type>(this->size()));
         this->fill(value_type());
         // Not quite sure whether swapping strides when changing layouts like this is okay,
@@ -1843,10 +1836,8 @@ public:
     }
 
     // Init-with-value
-    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::DENSE &&
-                 ownership ==
-                     Ownership::CONTAINER) explicit GenericTensor(size_type rows, size_type cols,
-                                                                  const_reference value = value_type()) noexcept {
+    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::DENSE && ownership == Ownership::CONTAINER)
+    explicit GenericTensor(size_type rows, size_type cols, const_reference value = value_type()) {
         this->_rows = rows;
         this->_cols = cols;
         this->_data = std::move(_make_unique_ptr_array<value_type>(this->size()));
@@ -1866,7 +1857,7 @@ public:
 
     // Init-with-ilist
     utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::DENSE && ownership == Ownership::CONTAINER)
-        GenericTensor(std::initializer_list<std::initializer_list<value_type>> init) {
+    GenericTensor(std::initializer_list<std::initializer_list<value_type>> init) {
         this->_rows = init.size();
         this->_cols = (*init.begin()).size();
         this->_data = std::move(_make_unique_ptr_array<value_type>(this->size()));
@@ -1882,9 +1873,8 @@ public:
     }
 
     // Init-with-data
-    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::DENSE &&
-                 ownership == Ownership::CONTAINER) explicit GenericTensor(size_type rows, size_type cols,
-                                                                           pointer data_ptr) noexcept {
+    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::DENSE && ownership == Ownership::CONTAINER)
+    explicit GenericTensor(size_type rows, size_type cols, pointer data_ptr) noexcept {
         this->_rows = rows;
         this->_cols = cols;
         this->_data = std::move(decltype(this->_data)(data_ptr));
@@ -1893,9 +1883,8 @@ public:
     // - Matrix View -
 
     // Init-from-data
-    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::DENSE &&
-                 ownership == Ownership::VIEW) explicit GenericTensor(size_type rows, size_type cols,
-                                                                      pointer data_ptr) {
+    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::DENSE && ownership == Ownership::VIEW)
+    explicit GenericTensor(size_type rows, size_type cols, pointer data_ptr) {
         this->_rows = rows;
         this->_cols = cols;
         this->_data = data_ptr;
@@ -1914,9 +1903,8 @@ public:
     // - Const Matrix View -
 
     // Init-from-data
-    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::DENSE &&
-                 ownership == Ownership::CONST_VIEW) explicit GenericTensor(size_type rows, size_type cols,
-                                                                            const_pointer data_ptr) {
+    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::DENSE && ownership == Ownership::CONST_VIEW)
+    explicit GenericTensor(size_type rows, size_type cols, const_pointer data_ptr) {
         this->_rows = rows;
         this->_cols = cols;
         this->_data = data_ptr;
@@ -1936,11 +1924,9 @@ public:
     // - Strided Matrix -
 
     // Init-with-value
-    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::STRIDED &&
-                 ownership ==
-                     Ownership::CONTAINER) explicit GenericTensor(size_type rows, size_type cols, size_type row_stride,
-                                                                  size_type       col_stride,
-                                                                  const_reference value = value_type()) noexcept {
+    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::STRIDED && ownership == Ownership::CONTAINER)
+    explicit GenericTensor(size_type rows, size_type cols, size_type row_stride, size_type col_stride,
+                           const_reference value = value_type()) {
         this->_rows       = rows;
         this->_cols       = cols;
         this->_row_stride = row_stride;
@@ -1967,8 +1953,8 @@ public:
 
     // Init-with-ilist
     utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::STRIDED && ownership == Ownership::CONTAINER)
-        GenericTensor(std::initializer_list<std::initializer_list<value_type>> init, size_type row_stride,
-                      size_type col_stride) {
+    GenericTensor(std::initializer_list<std::initializer_list<value_type>> init, size_type row_stride,
+                  size_type col_stride) {
         this->_rows       = init.size();
         this->_cols       = (*init.begin()).size();
         this->_row_stride = row_stride;
@@ -1987,10 +1973,9 @@ public:
     }
 
     // Init-with-data
-    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::STRIDED &&
-                 ownership == Ownership::CONTAINER) explicit GenericTensor(size_type rows, size_type cols,
-                                                                           size_type row_stride, size_type col_stride,
-                                                                           pointer data_ptr) noexcept {
+    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::STRIDED && ownership == Ownership::CONTAINER)
+    explicit GenericTensor(size_type rows, size_type cols, size_type row_stride, size_type col_stride,
+                           pointer data_ptr) noexcept {
         this->_rows       = rows;
         this->_cols       = cols;
         this->_row_stride = row_stride;
@@ -2001,10 +1986,9 @@ public:
     // - Strided Matrix View -
 
     // Init-from-data
-    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::STRIDED &&
-                 ownership == Ownership::VIEW) explicit GenericTensor(size_type rows, size_type cols,
-                                                                      size_type row_stride, size_type col_stride,
-                                                                      pointer data_ptr) {
+    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::STRIDED && ownership == Ownership::VIEW)
+    explicit GenericTensor(size_type rows, size_type cols, size_type row_stride, size_type col_stride,
+                           pointer data_ptr) {
         this->_rows       = rows;
         this->_cols       = cols;
         this->_row_stride = row_stride;
@@ -2027,10 +2011,9 @@ public:
     // - Const Strided Matrix View -
 
     // Init-from-data
-    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::STRIDED &&
-                 ownership == Ownership::CONST_VIEW) explicit GenericTensor(size_type rows, size_type cols,
-                                                                            size_type row_stride, size_type col_stride,
-                                                                            const_pointer data_ptr) {
+    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::STRIDED && ownership == Ownership::CONST_VIEW)
+    explicit GenericTensor(size_type rows, size_type cols, size_type row_stride, size_type col_stride,
+                           const_pointer data_ptr) {
         this->_rows       = rows;
         this->_cols       = cols;
         this->_row_stride = row_stride;
@@ -2054,18 +2037,16 @@ public:
     // - Sparse Matrix / Sparse Matrix View / Sparse Matrix Const View -
 
     // Init-from-data (copy)
-    utl_mvl_reqs(dimension == Dimension::MATRIX &&
-                 type == Type::SPARSE) explicit GenericTensor(size_type rows, size_type cols,
-                                                              const std::vector<sparse_entry_type>& data) {
+    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::SPARSE)
+    explicit GenericTensor(size_type rows, size_type cols, const std::vector<sparse_entry_type>& data) {
         this->_rows = rows;
         this->_cols = cols;
         this->insert_triplets(std::move(data));
     }
 
     // Init-from-data (move)
-    utl_mvl_reqs(dimension == Dimension::MATRIX &&
-                 type == Type::SPARSE) explicit GenericTensor(size_type rows, size_type cols,
-                                                              std::vector<sparse_entry_type>&& data) {
+    utl_mvl_reqs(dimension == Dimension::MATRIX && type == Type::SPARSE)
+    explicit GenericTensor(size_type rows, size_type cols, std::vector<sparse_entry_type>&& data) {
         this->_rows = rows;
         this->_cols = cols;
         this->rewrite_triplets(std::move(data));
@@ -2145,18 +2126,18 @@ template <utl_mvl_tensor_arg_defs>
     return stringify(_tensor_meta_string(tensor), "  <hidden due to large size>\n");
 }
 
-// Generic method to do "dense matrix print" with given delimers.
-// Cuts down on repitition since a lot of formats only differ in the delimers used.
+// Generic method to do "dense matrix print" with given delimiters.
+// Cuts down on repetition since a lot of formats only differ in the delimiters used.
 template <class T, Type type, Ownership ownership, Checking checking, Layout layout, class Func>
 [[nodiscard]] std::string
-_generic_dense_format(const GenericTensor<T, Dimension::MATRIX, type, ownership, checking, layout>& tensor,      //
-                      std::string_view                                                              begin,       //
-                      std::string_view                                                              row_begin,   //
-                      std::string_view                                                              col_delimer, //
-                      std::string_view                                                              row_end,     //
-                      std::string_view                                                              row_delimer, //
-                      std::string_view                                                              end,         //
-                      Func                                                                          stringifier  //
+_generic_dense_format(const GenericTensor<T, Dimension::MATRIX, type, ownership, checking, layout>& tensor,     //
+                      std::string_view                                                              begin,      //
+                      std::string_view                                                              row_begin,  //
+                      std::string_view                                                              col_delim,  //
+                      std::string_view                                                              row_end,    //
+                      std::string_view                                                              row_delim,  //
+                      std::string_view                                                              end,        //
+                      Func                                                                          stringifier //
 ) {
     if (tensor.empty()) return (std::string() += begin) += end;
 
@@ -2181,10 +2162,10 @@ _generic_dense_format(const GenericTensor<T, Dimension::MATRIX, type, ownership,
         for (std::size_t j = 0; j < strings.cols(); ++j) {
             if (strings(i, j).size() < column_widths[j]) buffer.append(column_widths[j] - strings(i, j).size(), ' ');
             buffer += strings(i, j);
-            if (j + 1 < strings.cols()) buffer += col_delimer;
+            if (j + 1 < strings.cols()) buffer += col_delim;
         }
         buffer += row_end;
-        if (i + 1 < strings.rows()) buffer += row_delimer;
+        if (i + 1 < strings.rows()) buffer += row_delim;
     }
     buffer += end;
 
@@ -2325,7 +2306,7 @@ auto operator-(L&& left) {
 
 // Doing things "in a dumb but simple way" would be to just have all operators take arguments as const-refs and
 // return a copy, however we can speed things up a lot by properly using perfect forwarding, which would reuse
-// r-lvalues if possible to avoid allocation. Doing so would effectively change something like this:
+// r-values if possible to avoid allocation. Doing so would effectively change something like this:
 //    res = A + B - C - D + E
 // from 5 (!) copies to only 1, since first operator will create an r-value that gets propagated and reused by
 // all others. This however introduces it's own set of challenges since instead of traditional overloading we
@@ -2353,7 +2334,7 @@ auto operator-(L&& left) {
 //
 // It's a good question whether to threat binary '*' as element-wise product (which would be in line with other
 // operators) or a matrix product, but in the end it seems doing it element-wise would be too confusing for the
-// user, so we leave '*' as a matrix product and declate element-wise product as a function 'elementwise_product()'
+// user, so we leave '*' as a matrix product and declare element-wise product as a function 'elementwise_product()'
 // since no existing operators seem suitable for such overload.
 
 // (1)  dense +  dense =>  dense

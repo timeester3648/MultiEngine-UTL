@@ -1,10 +1,25 @@
+[<img src ="images/badge_language_cpp_17.svg">](https://en.cppreference.com/w/cpp/17.html)
+[<img src ="images/badge_license_mit.svg">](LICENSE.md)
+[<img src ="images/badge_semver.svg">](guide_versioning.md)
+[<img src ="images/badge_docs.svg">](https://dmitribogdanov.github.io/UTL/)
+[<img src ="images/badge_header_only.svg">](https://en.wikipedia.org/wiki/Header-only)
+[<img src ="images/badge_no_dependencies.svg">](https://github.com/DmitriBogdanov/UTL/tree/master/include/UTL)
+
+[<img src ="images/badge_workflow_windows.svg">](https://github.com/DmitriBogdanov/UTL/actions/workflows/windows.yml)
+[<img src ="images/badge_workflow_ubuntu.svg">](https://github.com/DmitriBogdanov/UTL/actions/workflows/ubuntu.yml)
+[<img src ="images/badge_workflow_macos.svg">](https://github.com/DmitriBogdanov/UTL/actions/workflows/macos.yml)
+[<img src ="images/badge_workflow_freebsd.svg">](https://github.com/DmitriBogdanov/UTL/actions/workflows/freebsd.yml)
+
 # utl::struct_reflect
 
 [<- to README.md](..)
 
 [<- to implementation.hpp](../include/UTL/struct_reflect.hpp)
 
-**struct_reflect** is a lean `struct` reflection library based around the [map-macro](https://github.com/swansontec/map-macro).
+**utl::struct_reflect** is a lean `struct` reflection library based around the [map-macro](https://github.com/swansontec/map-macro).
+
+> [!Important]
+> When compiling with [MSVC](https://en.wikipedia.org/wiki/Microsoft_Visual_C%2B%2B) use [`/Zc:preprocessor`](https://learn.microsoft.com/en-us/cpp/build/reference/zc-preprocessor) to enable standard-compliant preprocessor. Default MSVC preprocessor is notoriously non-compliant due to legacy reasons and might not handle macro expansion properly.
 
 ## Definitions
 
@@ -80,14 +95,14 @@ Returns a tuple with perfectly-forwarded references corresponding to the fields 
 
 Below is an **example table** for the reflection of `struct Struct { int x; };`:
 
-| Value category                              | Forwared reference                   | `field_view` return type |
-| ------------------------------------------- | ------------------------------------ | ------------------------ |
-| `value` is a const reference to a struct    | `S&&` corresponds to `const Struct&` | `std:tuple<const int&>`  |
-| `value` is an l-value reference to a struct | `S&&` corresponds to `Struct&`       | `std:tuple<int&>`        |
-| `value` is an r-value reference to a struct | `S&&` corresponds to `Struct&&`      | `std:tuple<int&&>`       |
+| Value category                              | Forwarded reference                   | `field_view` return type |
+| ------------------------------------------- | ------------------------------------- | ------------------------ |
+| `value` is a const reference to a struct    | `S&&` corresponds to `const Struct&`  | `std:tuple<const int&>`  |
+| `value` is an l-value reference to a struct | `S&&` corresponds to `Struct&`        | `std:tuple<int&>`        |
+| `value` is an r-value reference to a struct | `S&&` corresponds to `Struct&&`       | `std:tuple<int&&>`       |
 
 > [!Tip]
-> This effectively means that `field_view` allows struct members to be accessed exactly as one would expect when working with struct members directly, except using a tuple API. See [examples]().
+> This effectively means that `field_view` allows struct members to be accessed exactly as one would expect when working with struct members directly, except using a tuple API. See the [examples](#field--entry-views).
 
 > ```cpp
 > template <class S> constexpr auto entry_view(S&& value) noexcept;
@@ -97,11 +112,11 @@ Returns a tuple with pairs of names and perfectly-forwarded references correspon
 
 Reference forwarding logic is exactly the same as it is in `field_view()`. Below is an **example table** for the reflection of `struct Struct { int x; };`:
 
-| Value category                              | Forwared reference                   | `entry_view()` return type                           |
-| ------------------------------------------- | ------------------------------------ | ---------------------------------------------------- |
-| `value` is a const reference to a struct    | `S&&` corresponds to `const Struct&` | `std:tuple<std::pair<std::string_view, const int&>>` |
-| `value` is an l-value reference to a struct | `S&&` corresponds to `Struct&`       | `std:tuple<std::pair<std::string_view, int&>>`       |
-| `value` is an r-value reference to a struct | `S&&` corresponds to `Struct&&`      | `std:tuple<std::pair<std::string_view, int&&>>`      |
+| Value category                              | Forwarded reference                   | `entry_view()` return type                           |
+| ------------------------------------------- | ------------------------------------- | ---------------------------------------------------- |
+| `value` is a const reference to a struct    | `S&&` corresponds to `const Struct&`  | `std:tuple<std::pair<std::string_view, const int&>>` |
+| `value` is an l-value reference to a struct | `S&&` corresponds to `Struct&`        | `std:tuple<std::pair<std::string_view, int&>>`       |
+| `value` is an r-value reference to a struct | `S&&` corresponds to `Struct&&`       | `std:tuple<std::pair<std::string_view, int&&>>`      |
 
 > ```cpp
 > template <std::size_t I, class S> constexpr auto get(S&& value) noexcept;
@@ -125,7 +140,7 @@ Applies function `func` to all fields of the struct `value`.
 
 Applies function `func` to all fields of a struct pair `value_1`, `value_2`.
 
-**Note:** This is useful for defining binary functions over custom types, see [examples]().
+**Note:** This is useful for defining binary functions over custom types, see the [examples](#using-reflection-to-define-binary-operations).
 
 > ```cpp
 > template <class S, class Pred>
@@ -167,7 +182,7 @@ Applies binary function `func` to all elements of the tuple pair `tuple_1`, `tup
 
 ### Basic reflection
 
-[ [Run this code](https://godbolt.org/#g:!((g:!((g:!((h:codeEditor,i:(filename:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,selection:(endColumn:5,endLineNumber:11,positionColumn:5,positionLineNumber:11,selectionStartColumn:5,selectionStartLineNumber:11,startColumn:5,startLineNumber:11),source:'%23include+%3Chttps://raw.githubusercontent.com/DmitriBogdanov/UTL/master/single_include/UTL.hpp%3E%0A%0A//+Define+struct+%26+reflection%0Astruct+Quaternion+%7B+double+r,+i,+j,+k%3B+%7D%3B+//+could+be+any+struct+with+a+lot+of+fields%0A%0AUTL_STRUCT_REFLECT(Quaternion,+r,+i,+j,+k)%3B%0A%0Aint+main()+%7B%0A++++//+Test+basic+reflection%0A++++using+namespace+utl%3B%0A++++%0A++++static_assert(+struct_reflect::type_name%3CQuaternion%3E+%3D%3D+%22Quaternion%22+)%3B%0A%0A++++static_assert(+struct_reflect::size%3CQuaternion%3E+%3D%3D+4+)%3B%0A%0A++++static_assert(+struct_reflect::names%3CQuaternion%3E%5B0%5D+%3D%3D+%22r%22+)%3B%0A++++static_assert(+struct_reflect::names%3CQuaternion%3E%5B1%5D+%3D%3D+%22i%22+)%3B%0A++++static_assert(+struct_reflect::names%3CQuaternion%3E%5B2%5D+%3D%3D+%22j%22+)%3B%0A++++static_assert(+struct_reflect::names%3CQuaternion%3E%5B3%5D+%3D%3D+%22k%22+)%3B%0A%7D%0A'),l:'5',n:'0',o:'C%2B%2B+source+%231',t:'0')),k:71.71783148269105,l:'4',n:'0',o:'',s:0,t:'0'),(g:!((g:!((h:compiler,i:(compiler:clang1600,filters:(b:'0',binary:'1',binaryObject:'1',commentOnly:'0',debugCalls:'1',demangle:'0',directives:'0',execute:'0',intel:'0',libraryCode:'0',trim:'1',verboseDemangling:'0'),flagsViewOpen:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,libs:!(),options:'-std%3Dc%2B%2B17+-O2',overrides:!(),selection:(endColumn:1,endLineNumber:1,positionColumn:1,positionLineNumber:1,selectionStartColumn:1,selectionStartLineNumber:1,startColumn:1,startLineNumber:1),source:1),l:'5',n:'0',o:'+x86-64+clang+16.0.0+(Editor+%231)',t:'0')),header:(),l:'4',m:50,n:'0',o:'',s:0,t:'0'),(g:!((h:output,i:(compilerName:'x86-64+clang+16.0.0',editorid:1,fontScale:14,fontUsePx:'0',j:1,wrap:'1'),l:'5',n:'0',o:'Output+of+x86-64+clang+16.0.0+(Compiler+%231)',t:'0')),k:46.69421860597116,l:'4',m:50,n:'0',o:'',s:0,t:'0')),k:28.282168517308946,l:'3',n:'0',o:'',t:'0')),l:'2',n:'0',o:'',t:'0')),version:4) ]
+[ [Run this code](https://godbolt.org/z/e5qq7eb11) ] [ [Open source file](../examples/module_struct_reflect/basic_reflection.cpp) ]
 
 ```cpp
 // Define struct & reflection
@@ -197,7 +212,7 @@ static_assert( struct_reflect::get<3>(q) == 8. );
 
 ### Field & entry views
 
-[ [Run this code](https://godbolt.org/#z:OYLghAFBqd5QCxAYwPYBMCmBRdBLAF1QCcAaPECAMzwBtMA7AQwFtMQByARg9KtQYEAysib0QXACx8BBAKoBnTAAUAHpwAMvAFYTStJg1DIApACYAQuYukl9ZATwDKjdAGFUtAK4sGEgMykrgAyeAyYAHI%2BAEaYxCAAHKQADqgKhE4MHt6%2BASlpGQKh4VEssfFJdpgOmUIETMQE2T5%2BXIFVNQJ1DQTFkTFxibb1jc25bcM9faXliQCUtqhexMjsHOb%2BYcjeWADUJv5uCAQEyQogAPQXxEwA7gB0wIQIXtFeSiuyjAT3aCwXABEWIRiHgLKhgOhDKgAG4XOQAFWCFxYTAUBDiF3SRnoAH0tjtMPCkfcEMlkgdsCYNABBak0q67AGYGjhXbo4heBz7MwANl2xBZ9kcAnpHK5BF2AEUvEwMcQGJl9gB2Cy7dBLaL0AWkXZ4XXaXUAawOapMyoBpt2jLQXlo6F2sV2hgAnuyCJzubdns7drRUJLUFRdjRMPaFPT6YjgrihAiAEpyNwI3Hx7AAMWC2GTEBlcriioEurIeoNxrmpsjtLCktRYQgcxVVlpu1b1ouuwRmHRIbwYYd5n532IbphfduEZbbfeYWAu2YbAUySYq12XgItErtPpbd2aAY6MwqmSxGlsvlhYYuwAjvt/ACm7sAKz3XW81%2B7ZUfhL3FWW/zNnSU6tuicp4MguJoh8BAQO6noELigpUMKIAgKG9q4mOmC3BA16Ngc/4Pui6CoQQXjJPQ5pqi%2Bb4fl%2Buo/n%2BuwVgBVY0ruoGOBBUFxDB7okSAwCYAQBxuBolIQOKDiIUK1QEKhw4uph464XMcz3DQxA9nehE8mYxDmGYzFbuxbaceBkEKNBsHEahQkiYc4n%2BNgkkehKMnIXJCmCCOynYap6lKPuA73gRz6/sZrHAe6YHcVZvE2QQAn2aJXASVJCFIShICKX5OF4epmnaQRYWGXghmRYBHH1FxlnWfxdnCal6VudJWVeTlPlKVh%2BVqfcQUCCFunvq2LFVWZNUWTxjSJclTWHGYLXwR52W5T1AUaXgWmSjppVmGY2gVWNO4TbFdUJQ1gnzW4i3Oa5y3tQ43ket1KkFf11SDbt96fhFx3ReZcX1bZV0OW4/hLe5j3yZ1L15RtRU7SVP2GSa%2B2VSdIGTUDF0gylhwQ3dGUrR1a1vX1A0MENYWMRj24A9j50zXBUOyU9oOiU5Ll4d9D4vnTplY2d018cT0ONWDaV3TzyMPiN/2CzFtUi4lD1szD%2BM3RJMuhT9X4C9VwvxczYvqxLomE9z%2BG6w%2BjEK%2Balq0hwCy0JwT68H4HBaKQqCcG41jWOySwrJgPL%2BDwpDyV7zsLEaIDKlw9wJ8qCTh5ICR8gAnFwGhPvonCSB7mi8L7HC8OcGiR8XCxwLAMCICgqAsMkdBxOQlB/C39DxNshjAFwvIaJXNC0PK5wQNExekNEYQNC6nARzPzAjgA8tE2hedwvB/GwggrwwtDz9HpBYG8wBuGItDnFvJ%2BYKiOJrN7%2BCCjUMLdlPR7VOuj%2B8DWYZT7QPA0Qbgjg8FgKeHo8AsAXrwN%2BxBohpEwMye%2BwBAFGGrnwAwwAFAADVxwr2SIwGBMhBAiDEOwKQJD5BKDUFPXQXB9B9xQAHSw%2BggHnEgAsVAyQRQHk4AAWmIgRUwlhrBcGVLsfhK8zAlzgaCLAHCGy2DDHJTILgqZjFaEEKm0wBjxAYakdIvDNF6EMYUBguiyiDAYR0Xh3RRieBaHoWxtQRi9DCP0Kx%2BjJgOJyFo0CjRLGzC4AsBQwdVgSBdm7Iux9S67FUAkXk/DeSSD3AYIwuwB73A0Nk3YEBcCEBIGHEJvAo5aDUqQBAmAmBYHiEo12HBC6kGgU%2BSuntval3LiASuZTnakFrg3JYpx1ztwgJ3VuxAIisDWAkpJKS0l90ye%2BHJ3tMD4CIPIvQ/BSGiHEJQ7Z1CVDqGPvQ0gtwbjJBgVEjg7tSDtJLpwFe65kjrl2EGeJiTkmpN7hkrJKy8keGbhM4pcxSnV1jiASQ75eSZ0kGYLgiTc6ZwTgPfOjTeAtLaVPTpthulV2jhUuOZgfzEvhbyBIT5xH%2BA0AkWFvI0X%2BBiR0zgYKCXXJkXc7FLL8XlIWHA9IzhJBAA%3D%3D%3D) ]
+[ [Run this code](https://godbolt.org/z/oz1zPY95f) ] [ [Open source file](../examples/module_struct_reflect/field_and_entry_views.cpp) ]
 
 ```cpp
 // Define struct & reflection
@@ -224,7 +239,7 @@ static_assert( std::get<3>(struct_reflect::entry_view(q)).second == 8.  );
 
 ### Using reflection to define binary operations
 
-[ [Run this code](https://godbolt.org/#g:!((g:!((g:!((h:codeEditor,i:(filename:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,selection:(endColumn:1,endLineNumber:7,positionColumn:1,positionLineNumber:7,selectionStartColumn:1,selectionStartLineNumber:7,startColumn:1,startLineNumber:7),source:'%23include+%3Chttps://raw.githubusercontent.com/DmitriBogdanov/UTL/master/single_include/UTL.hpp%3E%0A%0A//+Define+struct+%26+reflection%0Astruct+Quaternion+%7B+double+r,+i,+j,+k%3B+%7D%3B+//+could+be+any+struct+with+a+lot+of+fields%0A%0AUTL_STRUCT_REFLECT(Quaternion,+r,+i,+j,+k)%3B%0A%0A//+Define+binary+operation+(member-wise+addition)%0Aconstexpr+Quaternion+operator%2B(const+Quaternion%26+lhs,+const+Quaternion+%26rhs)+noexcept+%7B%0A++++Quaternion+res+%3D+lhs%3B%0A++++utl::struct_reflect::for_each(res,+rhs,+%5B%26%5D(auto%26+l,+const+auto%26+r)%7B+l+%2B%3D+r%3B+%7D)%3B%0A++++return+res%3B%0A%7D%0A%0A//+Define+binary+operation+with+predicates+(member-wise+equality)%0Aconstexpr+bool+operator%3D%3D(const+Quaternion%26+lhs,+const+Quaternion+%26rhs)+noexcept+%7B%0A++++bool+res+%3D+true%3B%0A++++utl::struct_reflect::true_for_all(lhs,+rhs,+%5B%26%5D(const+auto%26+l,+const+auto%26+r)%7B+return+l+%3D%3D+r%3B+%7D)%3B%0A++++return+res%3B%0A%7D%0A%0Aint+main()+%7B%0A++++//+Test+operations%0A++++static_assert(+Quaternion%7B1,+2,+3,+4%7D+%2B+Quaternion%7B5,+6,+7,+8%7D+%3D%3D+Quaternion%7B6,+8,+10,+12%7D+)%3B%0A%7D%0A'),l:'5',n:'0',o:'C%2B%2B+source+%231',t:'0')),k:71.71783148269105,l:'4',n:'0',o:'',s:0,t:'0'),(g:!((g:!((h:compiler,i:(compiler:clang1600,filters:(b:'0',binary:'1',binaryObject:'1',commentOnly:'0',debugCalls:'1',demangle:'0',directives:'0',execute:'0',intel:'0',libraryCode:'0',trim:'1',verboseDemangling:'0'),flagsViewOpen:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,libs:!(),options:'-std%3Dc%2B%2B17+-O2',overrides:!(),selection:(endColumn:1,endLineNumber:1,positionColumn:1,positionLineNumber:1,selectionStartColumn:1,selectionStartLineNumber:1,startColumn:1,startLineNumber:1),source:1),l:'5',n:'0',o:'+x86-64+clang+16.0.0+(Editor+%231)',t:'0')),header:(),l:'4',m:50,n:'0',o:'',s:0,t:'0'),(g:!((h:output,i:(compilerName:'x86-64+clang+16.0.0',editorid:1,fontScale:14,fontUsePx:'0',j:1,wrap:'1'),l:'5',n:'0',o:'Output+of+x86-64+clang+16.0.0+(Compiler+%231)',t:'0')),k:46.69421860597116,l:'4',m:50,n:'0',o:'',s:0,t:'0')),k:28.282168517308946,l:'3',n:'0',o:'',t:'0')),l:'2',n:'0',o:'',t:'0')),version:4) ]
+[ [Run this code](https://godbolt.org/z/aWMeKx1sx) ] [ [Open source file](../examples/module_struct_reflect/using_reflection_to_define_binary_operations.cpp) ]
 
 ```cpp
 // Define struct & reflection
@@ -250,7 +265,7 @@ static_assert( Quaternion{1, 2, 3, 4} + Quaternion{5, 6, 7, 8} == Quaternion{6, 
 
 ### Iterating over a generic tuple
 
-[ [Run this code](https://godbolt.org/#g:!((g:!((g:!((h:codeEditor,i:(filename:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,selection:(endColumn:1,endLineNumber:10,positionColumn:1,positionLineNumber:10,selectionStartColumn:1,selectionStartLineNumber:10,startColumn:1,startLineNumber:10),source:'%23include+%3Chttps://raw.githubusercontent.com/DmitriBogdanov/UTL/master/single_include/UTL.hpp%3E%0A%0A//+Define+struct+%26+reflection%0Astruct+Quaternion+%7B+double+r,+i,+j,+k%3B+%7D%3B+//+could+be+any+struct+with+a+lot+of+fields%0A%0AUTL_STRUCT_REFLECT(Quaternion,+r,+i,+j,+k)%3B%0A%0Aint+main()+%7B%0A++++using+namespace+utl%3B%0A%0A++++std::tuple%3Cstd::string,+int+++%3E+tuple_1%7B+%22lorem%22,+2+%7D%3B%0A++++std::tuple%3Cconst+char*,+double%3E+tuple_2%7B+%22ipsum%22,+3+%7D%3B%0A%0A++++//+Print+tuple%0A++++struct_reflect::tuple_for_each(tuple_1,+%5B%26%5D(auto%26%26+x)%7B+std::cout+%3C%3C+x+%3C%3C+!'%5Cn!'%3B+%7D)%3B%0A%0A++++//+Print+tuple+sum%0A++++struct_reflect::tuple_for_each(tuple_1,+tuple_2,+%5B%26%5D(auto%26%26+x,+auto%26%26+y)%7B+std::cout+%3C%3C+x+%2B+y+%3C%3C+!'%5Cn!'%3B+%7D)%3B%0A%0A++++//+notice+that+tuples+don!'t+have+to+be+homogenous,%0A++++//+what+matters+is+that+binary+function+can+be+called+on+all+corresponding+pairs%0A%7D%0A'),l:'5',n:'0',o:'C%2B%2B+source+%231',t:'0')),k:71.71783148269105,l:'4',n:'0',o:'',s:0,t:'0'),(g:!((g:!((h:compiler,i:(compiler:clang1600,filters:(b:'0',binary:'1',binaryObject:'1',commentOnly:'0',debugCalls:'1',demangle:'0',directives:'0',execute:'0',intel:'0',libraryCode:'0',trim:'1',verboseDemangling:'0'),flagsViewOpen:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,libs:!(),options:'-std%3Dc%2B%2B17+-O2',overrides:!(),selection:(endColumn:1,endLineNumber:1,positionColumn:1,positionLineNumber:1,selectionStartColumn:1,selectionStartLineNumber:1,startColumn:1,startLineNumber:1),source:1),l:'5',n:'0',o:'+x86-64+clang+16.0.0+(Editor+%231)',t:'0')),header:(),l:'4',m:50,n:'0',o:'',s:0,t:'0'),(g:!((h:output,i:(compilerName:'x86-64+clang+16.0.0',editorid:1,fontScale:14,fontUsePx:'0',j:1,wrap:'1'),l:'5',n:'0',o:'Output+of+x86-64+clang+16.0.0+(Compiler+%231)',t:'0')),k:46.69421860597116,l:'4',m:50,n:'0',o:'',s:0,t:'0')),k:28.282168517308946,l:'3',n:'0',o:'',t:'0')),l:'2',n:'0',o:'',t:'0')),version:4) ]
+[ [Run this code](https://godbolt.org/z/o8noxx6P6) ] [ [Open source file](../examples/module_struct_reflect/iterating_over_a_generic_tuple.cpp) ]
 
 ```cpp
 using namespace utl;
@@ -279,7 +294,7 @@ loremipsum
 
 ### Debug printing with `utl::log`
 
-[ [Run this code](https://godbolt.org/#g:!((g:!((g:!((h:codeEditor,i:(filename:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,selection:(endColumn:1,endLineNumber:7,positionColumn:1,positionLineNumber:7,selectionStartColumn:1,selectionStartLineNumber:7,startColumn:1,startLineNumber:7),source:'%23include+%3Chttps://raw.githubusercontent.com/DmitriBogdanov/UTL/master/single_include/UTL.hpp%3E%0A%0A//+Define+struct+%26+reflection%0Astruct+Quaternion+%7B+double+r,+i,+j,+k%3B+%7D%3B+//+could+be+any+struct+with+a+lot+of+fields%0A%0AUTL_STRUCT_REFLECT(Quaternion,+r,+i,+j,+k)%3B%0A%0Aint+main()+%7B%0A++++//+Print+struct%0A++++using+namespace+utl%3B%0A%0A++++constexpr+Quaternion+q+%3D+%7B+0.5,+1.5,+2.5,+3.5+%7D%3B%0A%0A++++log::println(%22q+%3D+%22,+struct_reflect::entry_view(q))%3B%0A%0A++++//+Note:+there+is+no+tight+coupling+between+the+modules,+%0A++++//+++++++!'utl::log!'+just+knows+how+to+expand+tuples,%0A++++//+++++++other+logger+that+do+this+will+also+work%0A%7D%0A'),l:'5',n:'0',o:'C%2B%2B+source+%231',t:'0')),k:71.71783148269105,l:'4',n:'0',o:'',s:0,t:'0'),(g:!((g:!((h:compiler,i:(compiler:clang1600,filters:(b:'0',binary:'1',binaryObject:'1',commentOnly:'0',debugCalls:'1',demangle:'0',directives:'0',execute:'0',intel:'0',libraryCode:'0',trim:'1',verboseDemangling:'0'),flagsViewOpen:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,libs:!(),options:'-std%3Dc%2B%2B17+-O2',overrides:!(),selection:(endColumn:1,endLineNumber:1,positionColumn:1,positionLineNumber:1,selectionStartColumn:1,selectionStartLineNumber:1,startColumn:1,startLineNumber:1),source:1),l:'5',n:'0',o:'+x86-64+clang+16.0.0+(Editor+%231)',t:'0')),header:(),l:'4',m:50,n:'0',o:'',s:0,t:'0'),(g:!((h:output,i:(compilerName:'x86-64+clang+16.0.0',editorid:1,fontScale:14,fontUsePx:'0',j:1,wrap:'1'),l:'5',n:'0',o:'Output+of+x86-64+clang+16.0.0+(Compiler+%231)',t:'0')),k:46.69421860597116,l:'4',m:50,n:'0',o:'',s:0,t:'0')),k:28.282168517308946,l:'3',n:'0',o:'',t:'0')),l:'2',n:'0',o:'',t:'0')),version:4) ]
+[ [Run this code](https://godbolt.org/z/h3h8f3KWW) ] [ [Open source file](../examples/module_struct_reflect/debug_printing_with_utl_log.cpp) ]
 
 ```cpp
 // Define struct & reflection

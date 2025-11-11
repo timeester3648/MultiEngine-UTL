@@ -1,21 +1,27 @@
-# Macro for defining a benchmark with proper compile options
-macro(add_utl_benchmark filename)
-    add_executable(${filename} ${filename}.cpp)
-    target_compile_features(${filename} PRIVATE cxx_std_17)
-    target_compile_options(${filename} PRIVATE -O2 -Wall -Wextra -Wpedantic -Werror -fno-unroll-loops -fmax-errors=10)
-endmacro()
+# Function for defining a benchmark with proper args
+function(utl_add_benchmark file_name)
+    string(REPLACE "/" "-" target_name "${file_name}") # CMake doesn't like target names with slashes
+    string(PREPEND target_name "benchmark-") # so we don't intersect names with tests & examples
+    
+    add_executable(${target_name} ${file_name}.cpp)
+    
+    target_compile_features   (${target_name} PRIVATE ${UTL_COMPILE_FEATURES}      )
+    target_compile_options    (${target_name} PRIVATE ${UTL_BENCHMARK_FLAGS}       )
+    target_link_options       (${target_name} PRIVATE ${UTL_BENCHMARK_LINKER_FLAGS})
+    target_include_directories(${target_name} PRIVATE ${CMAKE_SOURCE_DIR}          )
+    
+endfunction()
 
-add_utl_benchmark(benchmark_json)
-add_utl_benchmark(benchmark_log)
-add_utl_benchmark(benchmark_mvl)
-add_utl_benchmark(benchmark_parallel)
-add_utl_benchmark(benchmark_profiler)
-add_utl_benchmark(benchmark_random)
-
-# Link OpenMP if doing benchmarks with it.
-# Don't forget to add '-fopenmp' to 'target_compile_options' 
-# find_package(OpenMP REQUIRED)
-# target_link_libraries(benchmark_parallel PRIVATE OpenMP::OpenMP_CXX)
-
-# Profiling flags for 'perf':
-# -O2 -g -ggdb -fno-omit-frame-pointer
+# Benchmarks
+utl_add_benchmark("module_json/parse_serialize")
+utl_add_benchmark("module_log/logging_overhead")
+utl_add_benchmark("module_log/stringification")
+utl_add_benchmark("module_mvl/experimental")
+# utl_add_benchmark("module_parallel/parallel_repeated_matmul") // TODO:
+# utl_add_benchmark("module_parallel/parallel_vector_sum")
+utl_add_benchmark("module_parallel/thread_pool_comparison")
+# utl_add_benchmark("module_profiler/profiling_overhead")
+utl_add_benchmark("module_random/normal_distributions")
+utl_add_benchmark("module_random/prngs")
+utl_add_benchmark("module_random/uniform_int_distributions")
+utl_add_benchmark("module_random/uniform_real_distributions")

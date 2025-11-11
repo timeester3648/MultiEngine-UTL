@@ -1,277 +1,412 @@
+[<img src ="images/badge_language_cpp_17.svg">](https://en.cppreference.com/w/cpp/17.html)
+[<img src ="images/badge_license_mit.svg">](LICENSE.md)
+[<img src ="images/badge_semver.svg">](guide_versioning.md)
+[<img src ="images/badge_docs.svg">](https://dmitribogdanov.github.io/UTL/)
+[<img src ="images/badge_header_only.svg">](https://en.wikipedia.org/wiki/Header-only)
+[<img src ="images/badge_no_dependencies.svg">](https://github.com/DmitriBogdanov/UTL/tree/master/include/UTL)
+
+[<img src ="images/badge_workflow_windows.svg">](https://github.com/DmitriBogdanov/UTL/actions/workflows/windows.yml)
+[<img src ="images/badge_workflow_ubuntu.svg">](https://github.com/DmitriBogdanov/UTL/actions/workflows/ubuntu.yml)
+[<img src ="images/badge_workflow_macos.svg">](https://github.com/DmitriBogdanov/UTL/actions/workflows/macos.yml)
+[<img src ="images/badge_workflow_freebsd.svg">](https://github.com/DmitriBogdanov/UTL/actions/workflows/freebsd.yml)
+
 # utl::profiler
 
 [<- to README.md](..)
 
 [<- to implementation.hpp](../include/UTL/profiler.hpp)
 
-**utl::profiler** module contains macros for quick scope profiling and micro-benchmarking with x86 intrinsics (GCC/clang only).
+**utl::profiler** is a single-include solution for localized profiling. It features simple macros to measure how much time is taken by a certain scope / expression / code segment. The profiler automatically builds a call graph for all profiled functions and prints a nicely formatted table for every thread. See the [examples](#examples).
+
+Key features:
+
+- Easy to use
+- Low overhead
+- No reliance on system APIs
+- [Supports multi-threading](#profiling-parallel-section) & recursion
+- Supports [CPU-counter timestamps](#reducing-overhead-with-x86-intrinsics)
+- [Can export results at any point](#profiling-detached-threads-uploading-results) of the program
+- Can be [fully disabled](#disabling-profiling)
+
+Below is an output example from profiling a JSON parser:
+
+<img src ="images/profiler_output_example.png">
 
 ## Definitions
 
 ```cpp
-// Profiling
+// Profiling macros
+UTL_PROFILER_SCOPE(label);
+
 UTL_PROFILER(label);
 
-UTL_PROFILER_EXCLUSIVE(label);
+UTL_PROFILER_BEGIN(segment, label);
+UTL_PROFILER_END(segment);
+
+// Style options
+struct Style {
+    std::size_t indent = 2;
+    bool        color  = true;
+
+    double cutoff_red    = 0.40; // > 40% of total runtime
+    double cutoff_yellow = 0.20; // > 20% of total runtime
+    double cutoff_gray   = 0.01; // <  1% of total runtime
+};
+
+// Global profiler object
+struct Profiler {
+    void print_at_exit(bool value) noexcept;
     
-UTL_PROFILER_BEGIN(segment_label, label);
-UTL_PROFILER_END(segment_label);
+    void upload_this_thread();
+    
+    std::string format_results(const Style& style = Style{});
+};
 
-UTL_PROFILER_EXCLUSIVE_BEGIN(segment_label, label);
-UTL_PROFILER_EXCLUSIVE_END(segment_label);
-
-// Other utils
-using clock; // alias for 'std::chrono::steady_clock' or a custom implementetion, depending on macro- options
-using duration   = clock::duration;
-using time_point = clock::time_point;
+inline Profiler profiler;
 ```
 
 ## Methods
 
-### Profiling
+### Profiling macros
+
+> ```cpp
+> UTL_PROFILER_SCOPE(label);
+> ```
+
+Attaches profiler to the current scope.
+
+If profiled scope was entered at any point of the program, upon exiting `main()` a per-thread call graph will be built for all profiled segments.
+
+**Note 1:** `label` is a **string literal** name that will be shown in the results table.
+
+**Note 2:** Automatic printing on exit can be disabled.
 
 > ```cpp
 > UTL_PROFILER(label);
 > ```
 
-Profiles the following scope or expression. If profiled scope was entered at any point of the program, upon exiting `main()` the table with profiling results will be printed. Profiling results include:
+Attaches profiler to the scope of the following expression.
 
-- Total program runtime
-- Total runtime of each profiled scope
-- % of total runtime taken by each profiled scope
-- Profiler **labels**
-- Profiler call-sites: file, function, line
-
-**Note:** Multiple profilers can exist at the same time. Profiled scopes can be nested. Profiler overhead corresponds to entering & exiting the profiled scope, while insignificant in most applications, it may affect runtime in a tight loop.
+Convenient to profile individual loops / function calls / ifs and etc.
 
 > ```cpp
-> UTL_PROFILER_EXCLUSIVE(label);
+> UTL_PROFILER_BEGIN(segment, label);
+> UTL_PROFILER_END(segment);
 > ```
 
-Similar to a `UTL_PROFILER`, but unlike a regular case only one `UTL_PROFILER_EXCLUSIVE` can exit at the same time. This is useful for profiling recursive functions, see [recursion profiling example](#profiling-recursion) and [why recursion is a rather non-trivial thing to measure](#why-recursion-is-a-rather-non-trivial-thing-to-measure).
+Attaches profiler to the code section between two `BEGIN`/`END` macros with the same `segment` label.
+
+### Style options
 
 > ```cpp
-> UTL_PROFILER_BEGIN(segment_label, label);
-> UTL_PROFILER_END(segment_label);
+> struct Style {
+>     std::size_t indent = 2;
+>     bool        color  = true;
 > 
-> UTL_PROFILER_EXCLUSIVE_BEGIN(segment_label, label);
-> UTL_PROFILER_EXCLUSIVE_END(segment_label);
+>     double cutoff_red    = 0.40; // > 40% of total runtime
+>     double cutoff_yellow = 0.20; // > 20% of total runtime
+>     double cutoff_gray   = 0.01; // <  1% of total runtime
+> };
 > ```
 
-Same thing as `UTL_PROFILER(label)`, except instead of measuring the time inside a following scope, the measurement happens between the pair of `UTL_PROFILER_BEGIN` & `UTL_PROFILER_END` macros with the same `segment_label`.
+A struct with formatting settings for `Profiler::format_results()`.
 
-Same thing for `EXCLUSIVE` versions.
+### Global profiler object
 
-### Other utils
+> ```cpp
+> void Profiler::print_at_exit(bool value) noexcept;
+>    ```
 
-```cpp
-using clock;
-using duration   = clock::duration;
-using time_point = clock::time_point;
-```
+Sets whether profiling results should be automatically printed after exiting from `main()`. `true` by default.
 
-Alias for the underlying clock implementation. By default `clock` is [`std::chrono::steady_clock`](https://en.cppreference.com/w/cpp/chrono/steady_clock), however when the use of intrinsics is enabled with `#define UTL_PROFILER_OPTION_USE_x86_INTRINSICS_FOR_FREQUENCY <user_cpu_frequency_hz>` (see [example](micro-benchmarking-with-x86-intrinsics)) it switches to a custom implementation using `rdstc` ASM instruction, which tends to have a much lower overhead than the portable implementations, thus making profilers suitable for a more precise benchmarking on a hot path.
+**Note:** This and all other profiler object methods are thread-safe.
 
-`clock` is compatible with all [`<chrono>`](https://en.cppreference.com/w/cpp/chrono)  functionality and works like any other `std::chrono::` clock, providing a user with a way of leveraging fast time measurements of `rdtsc` intrinsic by simply replacing the clock type inside a regular C++ code.
+> ```cpp
+> void Profiler::upload_this_thread();
+>    ```
+
+Uploads profiling results from the current thread to the profiler object.
+
+Can be used to upload results from detached threads. Otherwise results are automatically uploaded once detached thread joins another one. 
+
+> ```cpp
+> std::string Profiler::format_results(const Style& style = Style{});
+>    ```
+
+Formats profiling results to a string using given `style` options.
+
+> ```cpp
+> inline Profiler profiler;
+> ```
+
+Global profiler object.
 
 ## Examples
 
-### Profiling code segment
-
-[ [Run this code](https://godbolt.org/#g:!((g:!((g:!((h:codeEditor,i:(filename:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,selection:(endColumn:1,endLineNumber:8,positionColumn:1,positionLineNumber:8,selectionStartColumn:1,selectionStartLineNumber:8,startColumn:1,startLineNumber:8),source:'%23include+%3Chttps://raw.githubusercontent.com/DmitriBogdanov/UTL/master/single_include/UTL.hpp%3E%0A%0Avoid+computation_1()+%7B+std::this_thread::sleep_for(std::chrono::milliseconds(300))%3B+%7D%0Avoid+computation_2()+%7B+std::this_thread::sleep_for(std::chrono::milliseconds(200))%3B+%7D%0Avoid+computation_3()+%7B+std::this_thread::sleep_for(std::chrono::milliseconds(400))%3B+%7D%0Avoid+computation_4()+%7B+std::this_thread::sleep_for(std::chrono::milliseconds(600))%3B+%7D%0Avoid+computation_5()+%7B+std::this_thread::sleep_for(std::chrono::milliseconds(100))%3B+%7D%0A%0Aint+main(int+argc,+char+**argv)+%7B%0A++++//+Profile+a+scope%0A++++UTL_PROFILER(%22Computation+1+%26+2%22)+%7B%0A++++++++computation_1()%3B%0A++++++++computation_2()%3B%0A++++%7D%0A%0A++++//+Profile+a+single+statement%0A++++UTL_PROFILER(%22Computation+3%22)+computation_3()%3B%0A%0A++++//+Profile+a+code+segment%0A++++UTL_PROFILER_BEGIN(segment_label,+%22Computation+4+%26+5%22)%3B%0A++++computation_4()%3B%0A++++computation_5()%3B%0A++++UTL_PROFILER_END(segment_label)%3B%0A%0A++++return+0%3B%0A%7D%0A'),l:'5',n:'0',o:'C%2B%2B+source+%231',t:'0')),k:71.71783148269105,l:'4',n:'0',o:'',s:0,t:'0'),(g:!((g:!((h:compiler,i:(compiler:clang1600,filters:(b:'0',binary:'1',binaryObject:'1',commentOnly:'0',debugCalls:'1',demangle:'0',directives:'0',execute:'0',intel:'0',libraryCode:'0',trim:'1',verboseDemangling:'0'),flagsViewOpen:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,libs:!(),options:'-std%3Dc%2B%2B17+-O2',overrides:!(),selection:(endColumn:1,endLineNumber:1,positionColumn:1,positionLineNumber:1,selectionStartColumn:1,selectionStartLineNumber:1,startColumn:1,startLineNumber:1),source:1),l:'5',n:'0',o:'+x86-64+clang+16.0.0+(Editor+%231)',t:'0')),header:(),l:'4',m:50,n:'0',o:'',s:0,t:'0'),(g:!((h:output,i:(compilerName:'x86-64+clang+16.0.0',editorid:1,fontScale:12,fontUsePx:'0',j:1,wrap:'1'),l:'5',n:'0',o:'Output+of+x86-64+clang+16.0.0+(Compiler+%231)',t:'0')),k:46.69421860597116,l:'4',m:50,n:'0',o:'',s:0,t:'0')),k:28.282168517308946,l:'3',n:'0',o:'',t:'0')),l:'2',n:'0',o:'',t:'0')),version:4) ]
+### Profiling a code segment
 
 > [!Note]
 > Online compiler explorer may be a little weird when it comes to sleep & time measurement precision.
 
+[ [Run this code](https://godbolt.org/z/n4e54vdo5) ] [ [Open source file](../examples/module_profiler/profiling_code_segment.cpp) ]
+
 ```cpp
-void computation_1() { std::this_thread::sleep_for(std::chrono::milliseconds(300)); }
-void computation_2() { std::this_thread::sleep_for(std::chrono::milliseconds(200)); }
-void computation_3() { std::this_thread::sleep_for(std::chrono::milliseconds(400)); }
-void computation_4() { std::this_thread::sleep_for(std::chrono::milliseconds(600)); }
-void computation_5() { std::this_thread::sleep_for(std::chrono::milliseconds(100)); }
+using namespace std::chrono_literals;
+
+void computation_1() { std::this_thread::sleep_for(300ms); }
+void computation_2() { std::this_thread::sleep_for(200ms); }
+void computation_3() { std::this_thread::sleep_for(400ms); }
+void computation_4() { std::this_thread::sleep_for(600ms); }
+void computation_5() { std::this_thread::sleep_for(100ms); }
 
 // ...
 
 // Profile a scope
-UTL_PROFILER("Computation 1 & 2") {
-    computation_1();
-    computation_2();
-}
+UTL_PROFILER_SCOPE("Computation 1 - 5");
+computation_1();
+computation_2();
 
-// Profile a single statement
+// Profile an expression
 UTL_PROFILER("Computation 3") computation_3();
 
 // Profile a code segment
-UTL_PROFILER_BEGIN(segment_label, "Computation 4 & 5");
+UTL_PROFILER_BEGIN(comp_45, "Computation 4 - 5");
 computation_4();
 computation_5();
-UTL_PROFILER_END(segment_label);
+UTL_PROFILER_END(comp_45);
 ```
 
 Output:
-```
---------------------- UTL PROFILING RESULTS ----------------------
 
- Total runtime -> 1.60 sec
-
- |              Call Site |             Label |   Time | Time % |
- |------------------------|-------------------|--------|--------|
- | example.cpp:21, main() | Computation 4 & 5 | 0.70 s |  43.8% |
- | example.cpp:12, main() | Computation 1 & 2 | 0.50 s |  31.2% |
- | example.cpp:18, main() |     Computation 3 | 0.40 s |  25.0% |
-```
-
-### Nested profilers & loops
-
-[ [Run this code](https://godbolt.org/#g:!((g:!((g:!((h:codeEditor,i:(filename:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,selection:(endColumn:6,endLineNumber:12,positionColumn:6,positionLineNumber:12,selectionStartColumn:6,selectionStartLineNumber:12,startColumn:6,startLineNumber:12),source:'%23include+%3Chttps://raw.githubusercontent.com/DmitriBogdanov/UTL/master/single_include/UTL.hpp%3E%0A%0Avoid+some_function()+%7B+std::this_thread::sleep_for(std::chrono::milliseconds(200))%3B+%7D%0A%0Aint+main(int+argc,+char+**argv)+%7B%0A++++//+Profile+how+much+of+a+loop+runtime+is+spent+inside+!'some_function()!'%0A++++UTL_PROFILER(%22whole+loop%22)%0A++++for+(int+i+%3D+0%3B+i+%3C+5%3B+%2B%2Bi)+%7B%0A++++++++std::this_thread::sleep_for(std::chrono::milliseconds(200))%3B%0A%0A++++++++UTL_PROFILER(%22some_function()%22)+some_function()%3B%0A++++%7D%0A%0A++++return+0%3B%0A%7D%0A'),l:'5',n:'0',o:'C%2B%2B+source+%231',t:'0')),k:71.71783148269105,l:'4',n:'0',o:'',s:0,t:'0'),(g:!((g:!((h:compiler,i:(compiler:clang1600,filters:(b:'0',binary:'1',binaryObject:'1',commentOnly:'0',debugCalls:'1',demangle:'0',directives:'0',execute:'0',intel:'0',libraryCode:'0',trim:'1',verboseDemangling:'0'),flagsViewOpen:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,libs:!(),options:'-std%3Dc%2B%2B17+-O2',overrides:!(),selection:(endColumn:1,endLineNumber:1,positionColumn:1,positionLineNumber:1,selectionStartColumn:1,selectionStartLineNumber:1,startColumn:1,startLineNumber:1),source:1),l:'5',n:'0',o:'+x86-64+clang+16.0.0+(Editor+%231)',t:'0')),header:(),l:'4',m:50,n:'0',o:'',s:0,t:'0'),(g:!((h:output,i:(compilerName:'x86-64+clang+16.0.0',editorid:1,fontScale:12,fontUsePx:'0',j:1,wrap:'1'),l:'5',n:'0',o:'Output+of+x86-64+clang+16.0.0+(Compiler+%231)',t:'0')),k:46.69421860597116,l:'4',m:50,n:'0',o:'',s:0,t:'0')),k:28.282168517308946,l:'3',n:'0',o:'',t:'0')),l:'2',n:'0',o:'',t:'0')),version:4) ]
-
-```cpp
-void some_function() { std::this_thread::sleep_for(std::chrono::milliseconds(200)); }
-
-// ...
-
-// Profile how much of a loop runtime is spent inside 'some_function()'
-UTL_PROFILER("whole loop")
-for (int i = 0; i < 5; ++i) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
-
-    UTL_PROFILER("some_function()") some_function();
-}
-
-// we expect to see that 'some_function()' will measure ~half the time of the 'whole loop'
-```
-
-Output:
-```
--------------------- UTL PROFILING RESULTS ---------------------
-
- Total runtime -> 2.00 sec
-
- |              Call Site |           Label |   Time | Time % |
- |------------------------|-----------------|--------|--------|
- |  example.cpp:8, main() |      whole loop | 2.00 s | 100.0% |
- | example.cpp:12, main() | some_function() | 1.00 s |  50.0% |
-```
+<img src ="images/profiler_profiling_code_segment.png">
 
 ### Profiling recursion
 
-[ [Run this code](https://godbolt.org/#g:!((g:!((g:!((h:codeEditor,i:(filename:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,selection:(endColumn:1,endLineNumber:22,positionColumn:1,positionLineNumber:22,selectionStartColumn:1,selectionStartLineNumber:22,startColumn:1,startLineNumber:22),source:'%23include+%3Chttps://raw.githubusercontent.com/DmitriBogdanov/UTL/master/single_include/UTL.hpp%3E%0A%0Adouble+some_computation()+%7B%0A++++utl::sleep::spinlock(1)%3B%0A++++return+utl::random::rand_double()%3B%0A%7D%0A%0Adouble+recursive_function(int+recursion)+%7B%0A++++if+(recursion+%3E+5)+return+some_computation()%3B%0A++++%0A++++UTL_PROFILER_EXCLUSIVE_BEGIN(segment_1,+%221st+recursion+branch%22)%3B%0A++++const+double+s1+%3D+recursive_function(recursion+%2B+1)%3B%0A++++UTL_PROFILER_EXCLUSIVE_END(segment_1)%3B%0A++++%0A++++UTL_PROFILER_EXCLUSIVE_BEGIN(segment_2,+%222nd+recursion+branch%22)%3B%0A++++const+double+s2+%3D+recursive_function(recursion+%2B+1)%3B%0A++++const+double+s3+%3D+recursive_function(recursion+%2B+1)%3B%0A++++UTL_PROFILER_EXCLUSIVE_END(segment_2)%3B%0A++++%0A++++return+s1+%2B+s2+%2B+s3%3B%0A%7D%0A%0Aint+main()+%7B%0A%0A++++std::cout+%3C%3C+%22SUM+%3D+%22+%3C%3C+recursive_function(0)+%3C%3C+!'%5Cn!'%3B%0A++++%0A++++//+we+expect+that+!'1st+recursion+branch!'+will+measure+~33%25+and%0A++++//+!'2nd+recursion+branch!'+will+measure+~66%25%0A%0A%7D%0A'),l:'5',n:'0',o:'C%2B%2B+source+%231',t:'0')),k:71.71783148269105,l:'4',n:'0',o:'',s:0,t:'0'),(g:!((g:!((h:compiler,i:(compiler:clang1600,filters:(b:'0',binary:'1',binaryObject:'1',commentOnly:'0',debugCalls:'1',demangle:'0',directives:'0',execute:'0',intel:'0',libraryCode:'0',trim:'1',verboseDemangling:'0'),flagsViewOpen:'1',fontScale:14,fontUsePx:'0',j:1,lang:c%2B%2B,libs:!(),options:'-std%3Dc%2B%2B17+-O2',overrides:!(),selection:(endColumn:1,endLineNumber:1,positionColumn:1,positionLineNumber:1,selectionStartColumn:1,selectionStartLineNumber:1,startColumn:1,startLineNumber:1),source:1),l:'5',n:'0',o:'+x86-64+clang+16.0.0+(Editor+%231)',t:'0')),header:(),l:'4',m:50,n:'0',o:'',s:0,t:'0'),(g:!((h:output,i:(compilerName:'x86-64+clang+16.0.0',editorid:1,fontScale:12,fontUsePx:'0',j:1,wrap:'1'),l:'5',n:'0',o:'Output+of+x86-64+clang+16.0.0+(Compiler+%231)',t:'0')),k:46.69421860597116,l:'4',m:50,n:'0',o:'',s:0,t:'0')),k:28.282168517308946,l:'3',n:'0',o:'',t:'0')),l:'2',n:'0',o:'',t:'0')),version:4) ]
+[ [Run this code](https://godbolt.org/z/vYqaz91jY) ] [ [Open source file](../examples/module_profiler/profiling_recursion.cpp) ]
 
 ```cpp
-double some_computation() {
-    utl::sleep::spinlock(1);
-    return utl::random::rand_double();
-}
-
-double recursive_function(int recursion) {
-    if (recursion > 5) return some_computation();
+void recursive(int depth = 0) {
+    if (depth > 4) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        return;
+    }
     
-    UTL_PROFILER_EXCLUSIVE_BEGIN(segment_1, "1st recursion branch");
-    const double s1 = recursive_function(recursion + 1);
-    UTL_PROFILER_EXCLUSIVE_END(segment_1);
-    
-    UTL_PROFILER_EXCLUSIVE_BEGIN(segment_2, "2nd recursion branch");
-    const double s2 = recursive_function(recursion + 1);
-    const double s3 = recursive_function(recursion + 1);
-    UTL_PROFILER_EXCLUSIVE_END(segment_2);
-    
-    return s1 + s2 + s3;
+    UTL_PROFILER("1st recursion branch") recursive(depth + 1);
+    UTL_PROFILER("2nd recursion branch") recursive(depth + 2);
 }
 
 // ...
 
-std::cout << "SUM = " << recursive_function(0) << '\n';
-
-// we expect that '1st recursion branch' will measure ~33% and
-// '2nd recursion branch' will measure ~66%
+recursive();
 ```
 
 Output:
-```
-SUM = 359.147
 
------------------------------- UTL PROFILING RESULTS ------------------------------
+<img src ="images/profiler_profiling_recursion.png">
 
- Total runtime -> 0.73 sec
-
- |                            Call Site |                Label |   Time | Time % |
- |--------------------------------------|----------------------|--------|--------|
- | example.cpp:15, recursive_function() | 2nd recursion branch | 0.49 s |  66.7% |
- | example.cpp:11, recursive_function() | 1st recursion branch | 0.24 s |  33.3% |
-```
-
-## Why recursion is a rather non-trivial thing to measure
-
-Let's imagine we have a recursive function `f()` that calls 2 instances of itself recursively. Let's limit recursion depth to **2** and define following variables:
-
-- $t$ —  time spent on a single recursion tail-call;
-- $T$ — total time spent inside the recursive function `f()`;
-- $T_1$ — total time spent inside the **1st** branch of recursion;
-- $T_2$ — total time spent inside the **2nd** branch of recursion.
-
-The function will end up with a following call graph:
-
-<img src ="images/profiler_recursion_call_graph.svg">
-
-If we profile  **1st** and **2nd** branches independently, we will measure following parts of the call graph:
-
-<img src ="images/profiler_recursion_independent_profiling_branch_1.svg">
-
-<img src ="images/profiler_recursion_independent_profiling_branch_2.svg">
-
-Which means $T_1 + T_2 \neq T$, which goes against the logic of what were actually trying to measure. In essense, when profiling recursion, different profilers should be aware of each other and not invoke measurement while inside the call graph of a another already existing profiler.
-
-This is exactly the problem solved by `UTL_PROFILER_EXCLUSIVE()`, as it guarantees no other profiler will be invoked under an already existing one. We will end up with a following call graph:
-
-<img src ="images/profiler_recursion_exclusive_profiling_branch_1.svg">
-
-<img src ="images/profiler_recursion_exclusive_profiling_branch_2.svg">
-
-which corresponds to the parts we were trying to measure and satisfies $T_1 + T_2 = T$. The same logic can be generalized to an arbitrary recursion with $N$ different profilers.
+### Profiling parallel section
 
 > [!Note]
-> There are some other non-trivial questions such as "how to automatically detect recursion and avoid double-counting the time spent inside the profiler that is nested under itself in the call graph", but those fall under the "implementation details" umbrella.
+> In this example we will use [utl::parallel](module_parallel.md) to represent a parallel section concisely.
 
-## Micro-benchmarking With x86 Intrinsics
-
-To enable the use of intrinsics add folowing `#define` before including the `proto_utils` header:
+[ [Run this code](https://godbolt.org/z/3fexeW638) ] [ [Open source file](../examples/module_profiler/profiling_parallel_section.cpp) ]
 
 ```cpp
-#define UTL_PROFILER_OPTION_USE_x86_INTRINSICS_FOR_FREQUENCY 3'300'000'000
-// I have 3.3 GHz CPU in this example (AMD Ryzen 5 5600H)
+using namespace utl;
+using namespace std::chrono_literals;
 
-#include "proto_utils.hpp"
+// Run loop on the main thread
+UTL_PROFILER("Single-threaded loop")
+for (int i = 0; i < 30; ++i) std::this_thread::sleep_for(10ms);
+
+// Run the same loop on 3 threads
+parallel::set_thread_count(3);
+
+UTL_PROFILER("Multi-threaded loop")
+parallel::blocking_loop(parallel::IndexRange{0, 30}, [](int low, int high){
+    UTL_PROFILER("Worker thread loop")
+    for (int i = low; i < high; ++i) std::this_thread::sleep_for(10ms);
+});
+
+parallel::set_thread_count(0);
 ```
 
-This will switch `profiler::clock` from `std::chrono::steady_clock` to a custom [`<chrono>`](https://en.cppreference.com/w/cpp/chrono)-compatible implementation using GCC/clang [RDTSC x86 intrinsic](https://en.wikipedia.org/wiki/Time_Stamp_Counter) that is likely to be DRASTICALLY faster at getting time that std-lib solutions like `std::chrono::steady_clock` or `ctime()`.
+Output:
 
-This is exceedingly helpful when benchmarking code on a hot path, however it comes at a price of producing a non-portable executable. Below are a few [benchmarks](../benchmarks/benchmark_profiler.cpp) showcasing the difference on a particular hardware:
+<img src ="images/profiler_profiling_parallel_section.png">
+
+### Profiling detached threads & uploading results
+
+> [!Note]
+> In this example we will use [utl::parallel](module_parallel.md) to represent detached section concisely.
+
+[ [Run this code](https://godbolt.org/z/o6ojTv8oc) ] [ [Open source file](../examples/module_profiler/profiling_detached_threads_and_uploading_results.cpp) ]
+
+```cpp
+using namespace utl;
+using namespace std::chrono_literals;
+
+parallel::set_thread_count(2);
+
+// Detached task
+UTL_PROFILER("Uploading task 1")
+parallel::detached_task([]{
+    UTL_PROFILER("Detached task 1: part 1") std::this_thread::sleep_for(700ms);
+});
+
+// Detached task with explicit result upload
+UTL_PROFILER("Uploading task 2")
+parallel::detached_task([]{
+    UTL_PROFILER("Detached task 2: part 1") std::this_thread::sleep_for(50ms);
+    UTL_PROFILER("Detached task 2: part 2") std::this_thread::sleep_for(50ms);
+
+    // Manually upload results to the main thread,
+    // otherwise results get collected once the thread joins
+    profiler::profiler.upload_this_thread();
+
+    UTL_PROFILER("Detached task 2: part 3") std::this_thread::sleep_for(500ms);
+});
+
+// Wait a little so the 2nd task has time to reach manual upload
+UTL_PROFILER("Waiting for task 2 to be partially done")
+std::this_thread::sleep_for(200ms);
+
+// Format results explicitly
+profiler::profiler.print_at_exit(false);
+
+std::cout << profiler::profiler.format_results();
+```
+
+Output:
+
+<img src ="images/profiler_profiling_detached_threads.png">
+
+### Custom style & exporting results to a file
+
+[ [Run this code](https://godbolt.org/z/f3483G995) ] [ [Open source file](../examples/module_profiler/custom_style_and_exporting_results_to_a_file.cpp) ]
+
+```cpp
+using namespace utl;
+using namespace std::chrono_literals;
+
+// Profile something
+UTL_PROFILER("Loop")
+for (int i = 0; i < 10; ++i) {
+    UTL_PROFILER("1st half of the loop") std::this_thread::sleep_for(10ms);
+    UTL_PROFILER("2nd half of the loop") std::this_thread::sleep_for(10ms);
+}
+
+// Disable automatic printing
+profiler::profiler.print_at_exit(false);
+
+// Disable colors, remove indent, format to string
+profiler::Style style;
+style.color  = false;
+style.indent = 0;
+
+const std::string results = profiler::profiler.format_results(style);
+
+// Export to file & console
+std::ofstream("profiling_results.txt") << results;
+std::cout                              << results;
+```
+
+Output:
+
+```
+-------------------- UTL PROFILING RESULTS ---------------------
+
+# Thread [main] (reuse 0) (running) (runtime -> 201.81 ms)
+ - 99.99%  | 201.79 ms |                 Loop | example.cpp:8, main()  |
+ - 49.91%  | 100.73 ms | 1st half of the loop | example.cpp:10, main() |
+ - 50.07%  | 101.04 ms | 2nd half of the loop | example.cpp:11, main() |
+```
+
+## Reducing overhead with x86 intrinsics
+
+By far the most significant part of profiling overhead comes from calls to `std::chrono::steady_clock::now()`.
+
+It is possible to significantly reduce that overhead by using CPU-counter intrinsics. To do so simply define `UTL_PROFILER_USE_INTRINSICS_FOR_FREQUENCY` macro for appropriate frequency:
+
+```cpp
+#define UTL_PROFILER_USE_INTRINSICS_FOR_FREQUENCY 3.3e9 // 3.3 GHz (AMD Ryzen 5 5600H)
+#include "UTL/profiler.hpp"                             // will now use 'rdtsc' for timestamps
+```
+
+This is exceedingly helpful when profiling code on a hot path. Below are a few [benchmarks](https://github.com/DmitriBogdanov/UTL/tree/master/benchmarks/module_profiler/) showcasing the difference on particular hardware:
 
 ```
 ======= USING std::chrono ========
 
 | relative |               ms/op |                op/s |    err% |     total | benchmark
 |---------:|--------------------:|--------------------:|--------:|----------:|:----------
-|   100.0% |                5.15 |              194.16 |    1.2% |      0.62 | `UTL_PROFILE()`
-|   102.5% |                5.02 |              199.04 |    0.3% |      0.61 | `Theoretical best std::chrono profiler`
-|   209.8% |                2.45 |              407.38 |    0.2% |      0.30 | `Theoretical best __rdtsc() profiler`
-|   233.8% |                2.20 |              453.91 |    1.4% |      0.26 | `Runtime without profiling`
+|   100.0% |                3.46 |              289.22 |    0.1% |      0.44 | `Runtime without profiling`
+|    53.9% |                6.41 |              155.90 |    0.3% |      0.77 | `Theoretical best std::chrono profiler`
+|    52.2% |                6.62 |              151.07 |    0.2% |      0.80 | `UTL_PROFILER()`
 
-// light workload is difficult to time and sensitive to overhead, here profiled code is ~2x slower then
-// the non-profiled workload, measurement is going to be inaccurate and affect other segments of the code
+// very light workload - just 8 computations of 'std::cos()' per 2 time measurements, difficult to
+// time and sensitive to overhead, here profiled code is ~2x slower then the non-profiled workload
 
-====== USING x86 INTRINSICS ======
+====== USING __rdtsc() ======
 
 | relative |               ms/op |                op/s |    err% |     total | benchmark
 |---------:|--------------------:|--------------------:|--------:|----------:|:----------
-|   100.0% |                2.53 |              394.91 |    0.4% |      0.33 | `UTL_PROFILE()`
-|    49.9% |                5.07 |              197.09 |    0.2% |      0.61 | `Theoretical best std::chrono profiler`
-|   102.8% |                2.46 |              405.79 |    0.3% |      0.30 | `Theoretical best __rdtsc() profiler`
-|   116.8% |                2.17 |              461.13 |    0.5% |      0.26 | `Runtime without profiling`
+|   100.0% |                3.50 |              286.11 |    0.6% |      0.43 | `Runtime without profiling`
+|    86.3% |                4.05 |              247.01 |    0.2% |      0.49 | `Theoretical best __rdtsc() profiler`
+|    73.7% |                4.74 |              210.97 |    0.3% |      0.57 | `UTL_PROFILER()`
 
-// while profiling overhead is still present, it is much less significant,
-// this is more-or-less reliable despite measuring a rather lightweight operation
+// notable reduction in profiling overhead
 ```
 
 > [!Note]
 > Here *"theoretical best"* refers to a hypothetical profiler that requires zero operations aside from measuring the time at two points  — before and after entering the code segment.
+
+## Disabling profiling
+
+To disable any profiling code from interfering with the program, simply define `UTL_PROFILER_DISABLE` before including the header:
+
+```cpp
+#define UTL_PROFILER_DISABLE
+#include "UTL/profiler.hpp"
+// - the header is now stripped of any and all code and only provides no-op mocks of the public API,
+//   this means effectively no impact on compile times
+// - 'profiler.format_results()' now returns "<profiling is disabled>"
+```
+
+
+## Behind the scenes
+
+A simple & naive way to construct a call graph would be through building a tree of nodes using `std::unordered_map<std::string, Node>` with call-site as a key. Such approach however makes the overhead of tree expansion & traversal incredibly high, rendering profiler useless for small tasks.
+
+### Call graph traversal
+
+This library uses a bunch of `thread_local` variables (created by macros) to correlate call-sites with integer IDs and reduces tree traversal logic to traversing a "network" of indices encoded as a dense $M \times N$ matrix where $M$ — number of call-sites visited by this thread, $N$ — number of nodes in the call graph.
+
+There are some additional details & arrays, but the bottom-line is that by associating everything we can with linearly growing IDs and delaying "heavy" things as much as possible until thread destruction / formatting, we can reduce almost all common operations outside of time measurement to trivial integer array lookups.
+
+This way, the cost of re-entry on existing call graph nodes (aka the fast path taken most of the time) is reduced down to a single array lookup & branch that gets predicted most of the time.
+
+New call-site entry & new node creation are rare slow paths, they only happen during call-graph expansion and will have very little contribution to the runtime outside of measuring very deep recursion. By using an `std::vector`-like allocation strategy for both rows & columns it is possible to make reallocation amortized $O(1)$.
+
+### Memory usage
+
+Memory overhead of profiling is mostly defined by the aforementioned call graph matrix. For example, on a thread that runs into `20` profiling macros and creates `100` nodes, memory overhead is going to be `8 kB`. A thread that runs into `100` profiling macros and creates `500` call graph nodes, memory overhead will be `0.2 MB`.
+
+It is possible to further reduce memory overhead (down to `4 kB` and `0.1 MB`) by defining a `UTL_PROFILER_USE_SMALL_IDS` macro before the include:
+
+```cpp
+#define UTL_PROFILER_USE_SMALL_IDS
+#include "UTL/profiler.hpp"
+```
+
+This switches implementation to 16-bit IDs, which limits the max number of nodes to `65535`. For most practical purposes this should be more than enough as most machines will reach stack overflow far before reaching such depth of the call graph.
+
+### Thread safety
+
+Almost all profiling is lock-free, there are only 3 points at which implementation needs to lock a mutex:
+
+- When creating a new thread
+- When joining a thread
+- When manually calling `profiler.upload_this_thread()`
+
+All public API is thread-safe.

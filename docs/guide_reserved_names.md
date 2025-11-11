@@ -1,4 +1,4 @@
-# Names reserved by UTL implementation
+# Names reserved by implementation
 
 [<- back to README.md](..)
 
@@ -8,17 +8,17 @@ Identifiers that are not a part of the public interface are considered **impleme
 
 ## Reserved Local Identifiers
 
-All identifiers residing inside a module namespace and prefixed with `_`:
+All identifiers residing inside the `impl` namespace of a module:
 
 ```cpp
-utl::<module_name>::_<local_identifier_name>
+utl::<module_name>::impl::<identifier>
 ```
 
 ## Reserved Global Identifiers
 
-All global identifiers prefixed with `UTL_`:
+Macros prefixed with `utl_`:
 
 ```cpp
-UTL_<global_identifier_name>
+utl_<module_name>_<identifier>
 ```
 

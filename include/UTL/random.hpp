@@ -8,208 +8,280 @@
 //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-#if !defined(UTL_PICK_MODULES) || defined(UTLMODULE_RANDOM)
-#ifndef UTLHEADERGUARD_RANDOM
-#define UTLHEADERGUARD_RANDOM
+#if !defined(UTL_PICK_MODULES) || defined(UTL_MODULE_RANDOM)
+
+#ifndef utl_random_headerguard
+#define utl_random_headerguard
+
+#define UTL_RANDOM_VERSION_MAJOR 2
+#define UTL_RANDOM_VERSION_MINOR 1
+#define UTL_RANDOM_VERSION_PATCH 7
 
 // _______________________ INCLUDES _______________________
 
 #include <array>            // array<>
 #include <cassert>          // assert()
 #include <chrono>           // high_resolution_clock
-#include <cstdint>          // uint64_t
+#include <cstdint>          // uint8_t, uint16_t, uint32_t, uint64_t
 #include <initializer_list> // initializer_list<>
 #include <limits>           // numeric_limits<>::digits, numeric_limits<>::min(), numeric_limits<>::max()
 #include <mutex>            // mutex, lock_guard<>
-#include <random>           // random_device, std::uniform_int_distribution<>,
-                            // std::uniform_real_distribution<>, generate_canonical<>
-#include <type_traits>      // is_integral_v<>
+#include <random>           // random_device, uniform_..._distribution<>, generate_canonical<>, seed_seq<>
+#include <thread>           // thread::id, this_thread::get_id()
+#include <type_traits>      // enable_if_t<>, is_integral<>, is_unsigned<>, is_floating_point<>
 #include <utility>          // declval<>()
 #include <vector>           // vector<>, hash<>
 
 // ____________________ DEVELOPER DOCS ____________________
 
-// Implements a proper modern PRNG engine, compatible with std <random>.
-// Adds 'sensible std <random> wrappers' for people who aren't fond of writing
-// 3 lines code just to get a simple rand value.
+// Several <random> compatible PRNGs, slightly improved re-implementations of uniform distributions,
+// "better" entropy sources and several convenience wrappers for rng.
 //
-// # XorShift64StarGenerator #
-// Random 'std::uint64_t' generator that satisfies uniform random number generator requirements
-// from '<random>' (see https://en.cppreference.com/w/cpp/named_req/UniformRandomBitGenerator).
-// Implementation "XorShift64* suggested by Marsaglia G. in 2003 "Journal of Statistical Software"
-// (see https://www.jstatsoft.org/article/view/v008i14).
-// Slightly faster than 'std::rand()', while providing higher quality random.
-// Significantly faster than 'std::mt19937'.
-// State consists of a single 'std::uint64_t', requires seed >= 1.
+// Everything implemented here should be portable assuming reasonable assumptions (like existence of
+// uint32_t, uint64_t, 8-bit bytes, 32-bit floats, 64-bit doubles and etc.) which hold for most platforms.
 //
-// # xorshift64star #
-// Global instance of XorShift64StarGenerator.
-//
-// # ::seed(), ::seed_with_time(), ::seed_with_random_device() #
-// Seeds random with value/current_time/random_device.
-// Random device is a better source of entropy, however it's more expensive to initialize
-// than just taking current time with <ctime>, in some cases a "worse by lightweigh" can
-// be prefered.
-//
-// # ::rand_int(), ::rand_uint(), ::rand_float(), ::rand_double() #
-// Random value in [min, max] range.
-// Floats with no parameters assume range [0, 1].
-//
-// # ::rand_bool() #
-// Randomly chooses 0 or 1.
-//
-// # ::rand_choice() #
-// Randomly chooses a value from initializer list.
-//
-// # ::rand_linear_combination() #
-// Produces "c A + (1-c) B" with random "0 < c < 1" assuming objects "A", "B" support arithmetic operations.
-// Useful for vector and color operations.
+// Optional macros:
+// - #define UTL_RANDOM_USE_INTRINSICS // use rdtsc timestamps for entropy
 
 // ____________________ IMPLEMENTATION ____________________
 
-// ======================================
-// --- Ugly platform-specific entropy ---
-// ======================================
+// ==================================
+// --- Optional __rdtsc() support ---
+// ==================================
 
-// MSVC
-#if defined(UTL_RANDOM_USE_INTRINSICS) && !defined(utl_random_cpu_counter) && defined(_MSC_VER)
-#if defined(_M_IX86)
+#ifdef UTL_RANDOM_USE_INTRINSICS
+
+// x86 RDTSC timestamps make for a good source of entropy
+#ifdef _MSC_VER
 #include <intrin.h>
+#else
+#include <x86intrin.h>
+#endif
+
 #define utl_random_cpu_counter __rdtsc()
-#endif
-#endif
 
-// GCC
-#if defined(UTL_RANDOM_USE_INTRINSICS) && !defined(utl_random_cpu_counter) && defined(__GNUC__)
-#if __has_builtin(__builtin_ia32_rdtsc)
-#define utl_random_cpu_counter __builtin_ia32_rdtsc()
-#endif
-#endif
+#else
 
-// clang
-#if defined(UTL_RANDOM_USE_INTRINSICS) && !defined(utl_random_cpu_counter) && !defined(__GNUC__) && defined(__clang__)
-#if __has_builtin(__builtin_readcyclecounter) && __has_include(<xmmintrin.h>)
-#include <xmmintrin.h>
-#define utl_random_cpu_counter __builtin_readcyclecounter()
-#endif
-#endif
-
-// Fallback onto a constant that changes with each compilation,
-// not good, but better than nothing
-#if !defined(utl_random_cpu_counter)
-#include <string>
+// Fallback onto a constant that changes with each compilation, not good, but better than nothing
+#include <string> // string
 #define utl_random_cpu_counter std::hash<std::string>{}(std::string(__TIME__))
+
 #endif
 
-namespace utl::random {
+namespace utl::random::impl {
 
 // ============================
-// --- Implementation utils ---
+// --- SFINAE & type traits ---
 // ============================
 
+template <class T, class = void>
+struct is_seed_seq : std::false_type {};
 
-// --- Type traits ---
-// -------------------
+template <class T>
+struct is_seed_seq<T, std::void_t<decltype(std::declval<T>().generate(
+                          std::declval<std::uint32_t*>(), std::declval<std::uint32_t*>()))>> : std::true_type {};
 
-#define utl_random_define_trait(trait_name_, ...)                                                                      \
-    template <class T, class = void>                                                                                   \
-    struct trait_name_ : std::false_type {};                                                                           \
-                                                                                                                       \
-    template <class T>                                                                                                 \
-    struct trait_name_<T, std::void_t<decltype(__VA_ARGS__)>> : std::true_type {};                                     \
-                                                                                                                       \
-    template <class T>                                                                                                 \
-    constexpr bool trait_name_##_v = trait_name_<T>::value;                                                            \
-                                                                                                                       \
-    template <class T>                                                                                                 \
-    using trait_name_##_enable_if = std::enable_if_t<trait_name_<T>::value, bool>
+template <class T>
+constexpr bool is_seed_seq_v = is_seed_seq<T>::value;
 
+template <class T>
+using require_is_seed_seq = std::enable_if_t<is_seed_seq<T>::value, bool>;
 
-utl_random_define_trait(_is_seed_seq,
-                        std::declval<T>().generate(std::declval<std::uint32_t*>(), std::declval<std::uint32_t*>()));
-// this type trait is necessary to restrict template constructors & seed function that take 'SeedSeq&& seq', otherwise
-// they will get pick instead of regular seeding methods for even for integer conversions. This is how standard library
-// seems to do it (based on GCC implementation) so we follow their API.
-
-#undef utl_random_define_trait
+// this type trait is necessary to restrict template constructors & seed functions that take 'SeedSeq&& seq',
+// otherwise they will get picked instead of regular seeding methods even for integer arguments.
+// This is how standard library seems to do it (based on GCC implementation) so we follow their API.
 
 template <class>
-constexpr bool _always_false_v = false;
+constexpr bool always_false_v = false;
 
 template <bool Cond>
-using _require = std::enable_if_t<Cond, bool>; // makes SFINAE a bit less cumbersome
+using require = std::enable_if_t<Cond, bool>; // makes SFINAE a bit less cumbersome
+
+template <class T>
+using require_integral = require<std::is_integral_v<T>>;
+
+template <class T>
+using require_bool = require<std::is_same_v<T, bool>>;
+
+template <class T>
+using require_not_bool = require<!std::is_same_v<T, bool>>;
+
+template <class T>
+using require_float = require<std::is_floating_point_v<T>>;
+
+template <class T>
+using require_uint = require<std::is_integral_v<T> && std::is_unsigned_v<T>>;
+
+// ====================
+// --- 128-bit uint ---
+// ====================
+
+// We need 128-bit uint for Lemire's uniform integer distribution algorithm,
+// some PRNGs can also make use of wide integers
+
+// GCC & clang provide 128-bit integers as compiler extension
+#if defined(__SIZEOF_INT128__) && !defined(__wasm__)
+using Uint128 = __uint128_t;
+
+// Otherwise fallback onto either MSVC intrinsics or manual emulation
+#else
+
+// Emulation of 128-bit unsigned integer tailored specifically for usage in 64-bit Lemire's algorithm,
+// this allows us to skip a lot of generic logic since we really only need 3 things:
+//
+//    1) 'uint128(x) * uint128(y)'       that performs 64x64 -> 128 bit multiplication
+//    2) 'static_cast<std::uint64_t>(x)' that returns lower 64 bits
+//    3) 'x >> 64'                       that returns upper 64 bits
+//
+struct Uint128 {
+    std::uint64_t low{}, high{};
+
+    constexpr Uint128(std::uint64_t low) noexcept : low(low) {}
+    constexpr explicit Uint128(std::uint64_t low, std::uint64_t high) noexcept : low(low), high(high) {}
+
+    [[nodiscard]] constexpr operator std::uint64_t() const noexcept { return this->low; }
+
+    [[nodiscard]] constexpr Uint128 operator*(Uint128 other) const noexcept {
+#if defined(UTL_RANDOM_USE_INTRINSICS) && defined(_MSC_VER) && (defined(__x86_64__) || defined(__amd64__))
+        // Unlike GCC, MSVC also requires 'UTL_RANDOM_USE_INTRINSICS' flag since it also needs '#include <intrin.h>'
+        // for 128-bit multiplication, which could be considered a somewhat intrusive thing to include
+
+        std::uint64_t upper = 0;
+        std::uint64_t lower = _umul128(this->low, other.low, &upper);
+
+        return Uint128{lower, upper};
+
+#else
+
+        // Compute all of the cross products
+        const std::uint64_t lo_lo = (this->low & 0xFFFFFFFF) * (other.low & 0xFFFFFFFF);
+        const std::uint64_t hi_lo = (this->low >> 32) * (other.low & 0xFFFFFFFF);
+        const std::uint64_t lo_hi = (this->low & 0xFFFFFFFF) * (other.low >> 32);
+        const std::uint64_t hi_hi = (this->low >> 32) * (other.low >> 32);
+
+        // Add products together, this will never overflow
+        const std::uint64_t cross = (lo_lo >> 32) + (hi_lo & 0xFFFFFFFF) + lo_hi;
+        const std::uint64_t upper = (hi_lo >> 32) + (cross >> 32) + hi_hi;
+        const std::uint64_t lower = (cross << 32) | (lo_lo & 0xFFFFFFFF);
+
+        return Uint128{lower, upper};
+
+#endif
+    }
+
+    [[nodiscard]] constexpr Uint128 operator>>(int) const noexcept { return this->high; }
+};
+
+#endif
 
 // clang-format off
-template<class T> struct _wider { static_assert(_always_false_v<T>, "Missing specialization."); };
+template<class T> struct wider { static_assert(always_false_v<T>, "Missing specialization."); };
 
-template<> struct _wider<std::uint8_t > { using type = std::uint16_t; };
-template<> struct _wider<std::uint16_t> { using type = std::uint32_t; };
-template<> struct _wider<std::uint32_t> { using type = std::uint64_t; };
-template<> struct _wider<std::uint64_t> { using type = void; };
+template<> struct wider<std::uint8_t > { using type = std::uint16_t; };
+template<> struct wider<std::uint16_t> { using type = std::uint32_t; };
+template<> struct wider<std::uint32_t> { using type = std::uint64_t; };
+template<> struct wider<std::uint64_t> { using type = Uint128;       };
 
-template<class T> using _wider_t = typename _wider<T>::type;
-
-template <class T> constexpr bool _has_wider = !std::is_void_v<_wider_t<T>>;
+template<class T> using wider_t = typename wider<T>::type;
 // clang-format on
 
-// --- Bit twiddling utils ---
-// ---------------------------
+// ===========================
+// --- Bit-twiddling utils ---
+// ===========================
+
+template <class T, require_uint<T> = true>
+[[nodiscard]] constexpr T uint_minus(T value) noexcept {
+    return ~value + T(1);
+    // MSVC with '/W2' warning level gives a warning when using unary minus with an unsigned value, this warning
+    // gets elevated to a compilation error by '/sdl' flag, see
+    // https://learn.microsoft.com/en-us/cpp/error-messages/compiler-warnings/compiler-warning-level-2-c4146
+    //
+    // This is a case of MSVC not being standard-compliant, as unsigned '-x' is a perfectly defined operation which
+    // evaluates to the same thing as '~x + 1u'. To work around such warning we define this function
+}
 
 // Merging integers into the bits of a larger one
-[[nodiscard]] constexpr std::uint64_t _merge_uint32_into_uint64(std::uint32_t a, std::uint32_t b) {
+[[nodiscard]] constexpr std::uint64_t merge_uint32_into_uint64(std::uint32_t a, std::uint32_t b) noexcept {
     return static_cast<std::uint64_t>(a) | (static_cast<std::uint64_t>(b) << 32);
 }
 
 // Helper method to crush large uints to uint32_t,
 // inspired by Melissa E. O'Neil's randutils https://gist.github.com/imneme/540829265469e673d045
-template <class T, std::enable_if_t<std::is_integral_v<T> && sizeof(T) <= 8, bool> = true>
-[[nodiscard]] constexpr std::uint32_t _crush_to_uint32(T value) {
+template <class T, require_integral<T> = true, require<sizeof(T) <= 8> = true>
+[[nodiscard]] constexpr std::uint32_t crush_to_uint32(T value) noexcept {
     if constexpr (sizeof(value) <= 4) {
         return std::uint32_t(value);
     } else {
-        std::uint64_t res = value;
-        res *= 0xbc2ad017d719504d;
+        const std::uint64_t res = static_cast<std::uint64_t>(value) * 0xbc2ad017d719504d;
         return static_cast<std::uint32_t>(res ^ (res >> 32));
     }
 }
 
 // Seed sequence helpers
-template <class SeedSeq, _is_seed_seq_enable_if<SeedSeq> = true>
-std::uint32_t _seed_seq_to_uint32(SeedSeq&& seq) {
+template <class SeedSeq, std::size_t size, require_is_seed_seq<SeedSeq> = true>
+void seed_seq_generate(SeedSeq&& seq, std::array<std::uint32_t, size>& dest) noexcept {
+    seq.generate(dest.begin(), dest.end());
+}
+
+template <class SeedSeq, std::size_t size, require_is_seed_seq<SeedSeq> = true>
+void seed_seq_generate(SeedSeq&& seq, std::array<std::uint64_t, size>& dest) noexcept {
+    // since seed_seq produces 32-bit ints, for 64-bit state arrays we have to
+    // generate twice as much values to properly initialize the entire state
+
+    std::array<std::uint32_t, size * 2> temp;
+    seq.generate(temp.begin(), temp.end());
+
+    for (std::size_t i = 0; i < size; ++i) dest[i] = merge_uint32_into_uint64(temp[2 * i], temp[2 * i + 1]);
+}
+
+template <class SeedSeq, require_is_seed_seq<SeedSeq> = true>
+void seed_seq_generate(SeedSeq&& seq, std::uint32_t& dest) noexcept {
     std::array<std::uint32_t, 1> temp;
-    seq.generate(temp.begin(), temp.end());
-    return temp[0];
+    seed_seq_generate(std::forward<SeedSeq>(seq), temp);
+    dest = temp[0];
 }
 
-template <class SeedSeq, _is_seed_seq_enable_if<SeedSeq> = true>
-std::uint64_t _seed_seq_to_uint64(SeedSeq&& seq) {
-    std::array<std::uint32_t, 2> temp;
-    seq.generate(temp.begin(), temp.end());
-    return _merge_uint32_into_uint64(temp[0], temp[1]);
+template <class SeedSeq, require_is_seed_seq<SeedSeq> = true>
+void seed_seq_generate(SeedSeq&& seq, std::uint64_t& dest) noexcept {
+    std::array<std::uint64_t, 1> temp;
+    seed_seq_generate(std::forward<SeedSeq>(seq), temp);
+    dest = temp[0];
 }
 
-// 'std::rotl()' from C++20, used by many PRNGs,
-// have to use long name because platform-specific includes declare '_rotl' as a macro
-template <class T>
-[[nodiscard]] constexpr T _rotl_value(T x, int k) noexcept {
+// Note: 'SeedSeq::generate()' should only throw when used with potentially throwing iterators,
+//       since 'std::array<>::iterator' is non-throwing we can safely mark the functions 'noexcept'
+
+// 'std::rotl()' from C++20, used by many PRNGs
+template <class T, require_uint<T> = true>
+[[nodiscard]] constexpr T rotl(T x, int k) noexcept {
     return (x << k) | (x >> (std::numeric_limits<T>::digits - k));
 }
 
 // Some generators shouldn't be zero initialized, in a perfect world the user would never
 // do that, but in case they happened to do so regardless we can remap 0 to some "weird"
-// value that isn't like to intersect with any other seeds generated by the user. Rejecting
-// zero seeds completely wouldn't be appropriate for compatibility reasons.
-template <class T, std::size_t N>
-[[nodiscard]] constexpr bool _is_zero_state(const std::array<T, N>& state) {
+// value that isn't likely to intersect with any other seeds generated by the user.
+// Rejecting zero seeds completely wouldn't be appropriate for compatibility reasons.
+template <class T, std::size_t N, require_uint<T> = true>
+[[nodiscard]] constexpr bool is_zero_state(const std::array<T, N>& state) {
     for (const auto& e : state)
-        if (e != 0) return false;
+        if (e != T(0)) return false;
     return true;
 }
 
-template <class T>
-constexpr T _default_seed = std::numeric_limits<T>::max() / 2 + 1;
-// an "overall decent" default seed - doesn't gave too many zeroes,
-// unlikely to accidentaly match with a user-defined seed
+template <class ResultType>
+[[nodiscard]] constexpr ResultType mix_seed(ResultType seed) {
+    std::uint64_t state = (static_cast<std::uint64_t>(seed) + 0x9E3779B97f4A7C15);
+    state               = (state ^ (state >> 30)) * 0xBF58476D1CE4E5B9;
+    state               = (state ^ (state >> 27)) * 0x94D049BB133111EB;
+    return static_cast<ResultType>(state ^ (state >> 31));
+    // some of the 16/32-bit PRNGs have bad correlation on the successive seeds, this can  usually be alleviated
+    // by adding a single iteration of a "good" PRNG to pre-mix the seed, here we have an iteration of SplitMix64
+}
+
+template <class T, require_uint<T> = true>
+constexpr T default_seed = std::numeric_limits<T>::max() / 2 + 1;
+// an "overall decent" default seed - doesn't have too many zeroes,
+// unlikely to accidentally match with a user-defined seed
 
 
 // =========================
@@ -223,7 +295,7 @@ constexpr T _default_seed = std::numeric_limits<T>::max() / 2 + 1;
 // (C++20 and above, see https://en.cppreference.com/w/cpp/numeric/random/uniform_random_bit_generator)
 
 // Note:
-// Here PRNGs take 'SeedSeq' as a forwaring reference 'SeedSeq&&', while standard PRNGS take 'SeedSeq&',
+// Here PRNGs take 'SeedSeq' as a forwarding reference 'SeedSeq&&', while standard PRNGS take 'SeedSeq&',
 // this is how it should've been done in the standard too, but for some reason they only standardized
 // l-value references, perfect forwarding probably just wasn't in use at the time.
 
@@ -240,10 +312,10 @@ namespace generators {
 // Quality:     2/5
 // State:       4 bytes
 //
-// Romu family provides extemely fast non-linear PRNGs, "RomuMono16" is the fastest 16-bit option available
+// Romu family provides extremely fast non-linear PRNGs, "RomuMono16" is the fastest 16-bit option available
 // that still provides some resemblance of quality. There has been some concerns over the math used
 // in its original paper (see https://news.ycombinator.com/item?id=22447848), however I'd yet to find
-// a faster 16-bit PRNG, so if speed is needed at all cost this one provides it.
+// a faster 16-bit PRNG, so if speed is needed at all costs, this one provides it.
 //
 class RomuMono16 {
 public:
@@ -253,9 +325,9 @@ private:
     std::uint32_t s{}; // notice 32-bit value as a state rather than two 16-bit ints
 
 public:
-    constexpr explicit RomuMono16(result_type seed = _default_seed<result_type>) noexcept { this->seed(seed); }
+    constexpr explicit RomuMono16(result_type seed = default_seed<result_type>) noexcept { this->seed(seed); }
 
-    template <class SeedSeq, _is_seed_seq_enable_if<SeedSeq> = true>
+    template <class SeedSeq, require_is_seed_seq<SeedSeq> = true>
     explicit RomuMono16(SeedSeq&& seq) {
         this->seed(seq);
     }
@@ -265,19 +337,23 @@ public:
 
     constexpr void seed(result_type seed) noexcept {
         this->s = (seed & 0x1fffffffu) + 1156979152u; // accepts 29 seed-bits
+
+        for (std::size_t i = 0; i < 10; ++i) this->operator()();
+        // naively seeded RomuMono produces correlating patterns on the first iterations
+        // for successive seeds, we can do a few iterations to escape that
     }
 
-    template <class SeedSeq, _is_seed_seq_enable_if<SeedSeq> = true>
+    template <class SeedSeq, require_is_seed_seq<SeedSeq> = true>
     void seed(SeedSeq&& seq) {
-        this->s = _seed_seq_to_uint32(seq);
+        seed_seq_generate(std::forward<SeedSeq>(seq), this->s);
 
-        if (this->s == 0) this->seed(_default_seed<result_type>);
+        if (this->s == 0) this->seed(default_seed<result_type>);
     }
 
     constexpr result_type operator()() noexcept {
         const result_type result = this->s >> 16;
         this->s *= 3611795771u;
-        this->s = _rotl_value(this->s, 12);
+        this->s = rotl(this->s, 12);
         return result;
     }
 };
@@ -302,15 +378,15 @@ public:
 //
 class SplitMix32 {
 public:
-    using result_type = std::uint64_t;
+    using result_type = std::uint32_t;
 
 private:
     result_type s{};
 
 public:
-    constexpr explicit SplitMix32(result_type seed = _default_seed<result_type>) noexcept { this->seed(seed); }
+    constexpr explicit SplitMix32(result_type seed = default_seed<result_type>) noexcept { this->seed(seed); }
 
-    template <class SeedSeq, _is_seed_seq_enable_if<SeedSeq> = true>
+    template <class SeedSeq, require_is_seed_seq<SeedSeq> = true>
     explicit SplitMix32(SeedSeq&& seq) {
         this->seed(seq);
     }
@@ -318,11 +394,15 @@ public:
     [[nodiscard]] static constexpr result_type min() noexcept { return 0; }
     [[nodiscard]] static constexpr result_type max() noexcept { return std::numeric_limits<result_type>::max(); }
 
-    constexpr void seed(result_type seed) noexcept { this->s = seed; }
+    constexpr void seed(result_type seed) noexcept {
+        this->s = mix_seed(seed);
+        // naively seeded SplitMix32 has a horrible correlation between successive seeds, we can mostly alleviate
+        // the issue by pre-mixing the seed with a single iteration of a "better" 64-bit algorithm
+    }
 
-    template <class SeedSeq, _is_seed_seq_enable_if<SeedSeq> = true>
+    template <class SeedSeq, require_is_seed_seq<SeedSeq> = true>
     void seed(SeedSeq&& seq) {
-        this->s = _seed_seq_to_uint32(seq);
+        seed_seq_generate(std::forward<SeedSeq>(seq), this->s);
     }
 
     constexpr result_type operator()() noexcept {
@@ -352,9 +432,9 @@ private:
     std::array<result_type, 4> s{};
 
 public:
-    constexpr explicit Xoshiro128PP(result_type seed = _default_seed<result_type>) noexcept { this->seed(seed); }
+    constexpr explicit Xoshiro128PP(result_type seed = default_seed<result_type>) noexcept { this->seed(seed); }
 
-    template <class SeedSeq, _is_seed_seq_enable_if<SeedSeq> = true>
+    template <class SeedSeq, require_is_seed_seq<SeedSeq> = true>
     explicit Xoshiro128PP(SeedSeq&& seq) {
         this->seed(seq);
     }
@@ -371,23 +451,23 @@ public:
         this->s[3] = splitmix();
     }
 
-    template <class SeedSeq, _is_seed_seq_enable_if<SeedSeq> = true>
+    template <class SeedSeq, require_is_seed_seq<SeedSeq> = true>
     void seed(SeedSeq&& seq) {
-        seq.generate(this->s.begin(), this->s.end());
+        seed_seq_generate(std::forward<SeedSeq>(seq), this->s);
 
         // ensure we don't hit an invalid all-zero state
-        if (_is_zero_state(this->s)) this->seed(_default_seed<result_type>);
+        if (is_zero_state(this->s)) this->seed(default_seed<result_type>);
     }
 
     constexpr result_type operator()() noexcept {
-        const result_type result = _rotl_value(this->s[0] + this->s[3], 7) + this->s[0];
+        const result_type result = rotl(this->s[0] + this->s[3], 7) + this->s[0];
         const result_type t      = s[1] << 9;
         this->s[2] ^= this->s[0];
         this->s[3] ^= this->s[1];
         this->s[1] ^= this->s[2];
         this->s[0] ^= this->s[3];
         this->s[2] ^= t;
-        this->s[3] = _rotl_value(this->s[3], 11);
+        this->s[3] = rotl(this->s[3], 11);
         return result;
     }
 };
@@ -400,7 +480,7 @@ public:
 // Quality:     2/5
 // State:       12 bytes
 //
-// Romu family provides extemely fast non-linear PRNGs, "RomuTrio" is the fastest 32-bit option available
+// Romu family provides extremely fast non-linear PRNGs, "RomuTrio" is the fastest 32-bit option available
 // that still provides some resemblance of quality. There has been some concerns over the math used
 // in its original paper (see https://news.ycombinator.com/item?id=22447848), however I'd yet to find
 // a faster 32-bit PRNG, so if speed is needed at all cost this one provides it.
@@ -413,9 +493,9 @@ private:
     std::array<result_type, 3> s{};
 
 public:
-    constexpr explicit RomuTrio32(result_type seed = _default_seed<result_type>) noexcept { this->seed(seed); }
+    constexpr explicit RomuTrio32(result_type seed = default_seed<result_type>) noexcept { this->seed(seed); }
 
-    template <class SeedSeq, _is_seed_seq_enable_if<SeedSeq> = true>
+    template <class SeedSeq, require_is_seed_seq<SeedSeq> = true>
     explicit RomuTrio32(SeedSeq&& seq) {
         this->seed(seq);
     }
@@ -430,21 +510,21 @@ public:
         this->s[2] = splitmix();
     }
 
-    template <class SeedSeq, _is_seed_seq_enable_if<SeedSeq> = true>
+    template <class SeedSeq, require_is_seed_seq<SeedSeq> = true>
     void seed(SeedSeq&& seq) {
-        seq.generate(this->s.begin(), this->s.end());
+        seed_seq_generate(std::forward<SeedSeq>(seq), this->s);
 
         // ensure we don't hit an invalid all-zero state
-        if (_is_zero_state(this->s)) this->seed(_default_seed<result_type>);
+        if (is_zero_state(this->s)) this->seed(default_seed<result_type>);
     }
 
     constexpr result_type operator()() noexcept {
         const result_type xp = this->s[0], yp = this->s[1], zp = this->s[2];
         this->s[0] = 3323815723u * zp;
         this->s[1] = yp - xp;
-        this->s[1] = _rotl_value(this->s[1], 6);
+        this->s[1] = rotl(this->s[1], 6);
         this->s[2] = zp - yp;
-        this->s[2] = _rotl_value(this->s[2], 22);
+        this->s[2] = rotl(this->s[2], 22);
         return xp;
     }
 };
@@ -472,9 +552,9 @@ private:
     result_type s{};
 
 public:
-    constexpr explicit SplitMix64(result_type seed = _default_seed<result_type>) noexcept { this->seed(seed); }
+    constexpr explicit SplitMix64(result_type seed = default_seed<result_type>) noexcept { this->seed(seed); }
 
-    template <class SeedSeq, _is_seed_seq_enable_if<SeedSeq> = true>
+    template <class SeedSeq, require_is_seed_seq<SeedSeq> = true>
     explicit SplitMix64(SeedSeq&& seq) {
         this->seed(seq);
     }
@@ -484,9 +564,9 @@ public:
 
     constexpr void seed(result_type seed) noexcept { this->s = seed; }
 
-    template <class SeedSeq, _is_seed_seq_enable_if<SeedSeq> = true>
+    template <class SeedSeq, require_is_seed_seq<SeedSeq> = true>
     void seed(SeedSeq&& seq) {
-        this->s = _seed_seq_to_uint64(seq);
+        seed_seq_generate(std::forward<SeedSeq>(seq), this->s);
     }
 
     constexpr result_type operator()() noexcept {
@@ -516,9 +596,9 @@ private:
     std::array<result_type, 4> s{};
 
 public:
-    constexpr explicit Xoshiro256PP(result_type seed = _default_seed<result_type>) noexcept { this->seed(seed); }
+    constexpr explicit Xoshiro256PP(result_type seed = default_seed<result_type>) noexcept { this->seed(seed); }
 
-    template <class SeedSeq, _is_seed_seq_enable_if<SeedSeq> = true>
+    template <class SeedSeq, require_is_seed_seq<SeedSeq> = true>
     explicit Xoshiro256PP(SeedSeq&& seq) {
         this->seed(seq);
     }
@@ -535,26 +615,23 @@ public:
         this->s[3] = splitmix();
     }
 
-    template <class SeedSeq, _is_seed_seq_enable_if<SeedSeq> = true>
+    template <class SeedSeq, require_is_seed_seq<SeedSeq> = true>
     void seed(SeedSeq&& seq) {
-        this->s[0] = _seed_seq_to_uint64(seq); // since seed_seq produces 32-bit ints,
-        this->s[1] = _seed_seq_to_uint64(seq); // we have to generate multiple and then
-        this->s[2] = _seed_seq_to_uint64(seq); // join them into std::uint64_t's to
-        this->s[3] = _seed_seq_to_uint64(seq); // properly initialize the entire state
+        seed_seq_generate(std::forward<SeedSeq>(seq), this->s);
 
         // ensure we don't hit an invalid all-zero state
-        if (_is_zero_state(this->s)) this->seed(_default_seed<result_type>);
+        if (is_zero_state(this->s)) this->seed(default_seed<result_type>);
     }
 
     constexpr result_type operator()() noexcept {
-        const result_type result = _rotl_value(this->s[0] + this->s[3], 23) + this->s[0];
+        const result_type result = rotl(this->s[0] + this->s[3], 23) + this->s[0];
         const result_type t      = this->s[1] << 17;
         this->s[2] ^= this->s[0];
         this->s[3] ^= this->s[1];
         this->s[1] ^= this->s[2];
         this->s[0] ^= this->s[3];
         this->s[2] ^= t;
-        this->s[3] = _rotl_value(this->s[3], 45);
+        this->s[3] = rotl(this->s[3], 45);
         return result;
     }
 };
@@ -567,7 +644,7 @@ public:
 // Quality:     2/5
 // State:       16 bytes
 //
-// Romu family provides extemely fast non-linear PRNGs, "DuoJr" is the fastest 64-bit option available
+// Romu family provides extremely fast non-linear PRNGs, "DuoJr" is the fastest 64-bit option available
 // that still provides some resemblance of quality. There has been some concerns over the math used
 // in its original paper (see https://news.ycombinator.com/item?id=22447848), however I'd yet to find
 // a faster 64-bit PRNG, so if speed is needed at all cost this one provides it.
@@ -580,9 +657,9 @@ private:
     std::array<result_type, 2> s{};
 
 public:
-    constexpr explicit RomuDuoJr64(result_type seed = _default_seed<result_type>) noexcept { this->seed(seed); }
+    constexpr explicit RomuDuoJr64(result_type seed = default_seed<result_type>) noexcept { this->seed(seed); }
 
-    template <class SeedSeq, _is_seed_seq_enable_if<SeedSeq> = true>
+    template <class SeedSeq, require_is_seed_seq<SeedSeq> = true>
     explicit RomuDuoJr64(SeedSeq&& seq) {
         this->seed(seq);
     }
@@ -596,20 +673,19 @@ public:
         this->s[1] = splitmix(); // using SplitMix64 to initialize its state
     }
 
-    template <class SeedSeq, _is_seed_seq_enable_if<SeedSeq> = true>
+    template <class SeedSeq, require_is_seed_seq<SeedSeq> = true>
     void seed(SeedSeq&& seq) {
-        this->s[0] = _seed_seq_to_uint64(seq); // seed_seq returns 32-bit ints, we have to generate
-        this->s[1] = _seed_seq_to_uint64(seq); // multiple to initialize full state of 64-bit values
+        seed_seq_generate(std::forward<SeedSeq>(seq), this->s);
 
         // ensure we don't hit an invalid all-zero state
-        if (_is_zero_state(this->s)) this->seed(_default_seed<result_type>);
+        if (is_zero_state(this->s)) this->seed(default_seed<result_type>);
     }
 
     constexpr result_type operator()() noexcept {
         const result_type res = this->s[0];
         this->s[0]            = 15241094284759029579u * this->s[1];
         this->s[1]            = this->s[1] - res;
-        this->s[1]            = _rotl_value(this->s[1], 27);
+        this->s[1]            = rotl(this->s[1], 27);
         return res;
     }
 };
@@ -617,21 +693,21 @@ public:
 // --- CSPRNGs ---
 // ---------------
 
-// Implementation of ChaCha20 CPRNG conforming to RFC 7539 standard
+// Implementation of ChaCha20 CSPRNG conforming to RFC 7539 standard
 // see https://datatracker.ietf.org/doc/html/rfc7539
 //     https://www.rfc-editor.org/rfc/rfc7539#section-2.4
 //     https://en.wikipedia.org/wiki/Salsa20
 
-// Quarted-round operation for ChaCha20 stream cipher
-constexpr void _quarter_round(std::uint32_t& a, std::uint32_t& b, std::uint32_t& c, std::uint32_t& d) {
-    a += b, d ^= a, d = _rotl_value(d, 16);
-    c += d, b ^= c, b = _rotl_value(b, 12);
-    a += b, d ^= a, d = _rotl_value(d, 8);
-    c += d, b ^= c, b = _rotl_value(b, 7);
+// Quarter-round operation for ChaCha20 stream cipher
+constexpr void quarter_round(std::uint32_t& a, std::uint32_t& b, std::uint32_t& c, std::uint32_t& d) {
+    a += b, d ^= a, d = rotl(d, 16);
+    c += d, b ^= c, b = rotl(b, 12);
+    a += b, d ^= a, d = rotl(d, 8);
+    c += d, b ^= c, b = rotl(b, 7);
 }
 
 template <std::size_t rounds>
-[[nodiscard]] constexpr std::array<std::uint32_t, 16> _chacha_rounds(const std::array<std::uint32_t, 16>& input) {
+[[nodiscard]] constexpr std::array<std::uint32_t, 16> chacha_rounds(const std::array<std::uint32_t, 16>& input) {
     auto state = input;
 
     static_assert(rounds % 2 == 0, "ChaCha rounds happen in pairs, total number should be divisible by 2.");
@@ -644,16 +720,16 @@ template <std::size_t rounds>
 
     for (std::size_t i = 0; i < alternating_round_pairs; ++i) {
         // Column rounds
-        _quarter_round(state[0], state[4], state[8], state[12]);
-        _quarter_round(state[1], state[5], state[9], state[13]);
-        _quarter_round(state[2], state[6], state[10], state[14]);
-        _quarter_round(state[3], state[7], state[11], state[15]);
+        quarter_round(state[0], state[4], state[8], state[12]);
+        quarter_round(state[1], state[5], state[9], state[13]);
+        quarter_round(state[2], state[6], state[10], state[14]);
+        quarter_round(state[3], state[7], state[11], state[15]);
 
         // Diagonal rounds
-        _quarter_round(state[0], state[5], state[10], state[15]);
-        _quarter_round(state[1], state[6], state[11], state[12]);
-        _quarter_round(state[2], state[7], state[8], state[13]);
-        _quarter_round(state[3], state[4], state[9], state[14]);
+        quarter_round(state[0], state[5], state[10], state[15]);
+        quarter_round(state[1], state[6], state[11], state[12]);
+        quarter_round(state[2], state[7], state[8], state[13]);
+        quarter_round(state[3], state[4], state[9], state[14]);
     }
 
     for (std::size_t i = 0; i < state.size(); ++i) state[i] += input[i];
@@ -696,14 +772,14 @@ private:
         };
 
         // Fill new block
-        this->block = _chacha_rounds<rounds>(input);
+        this->block = chacha_rounds<rounds>(input);
         ++this->counter;
     }
 
 public:
-    constexpr explicit ChaCha(result_type seed = _default_seed<result_type>) noexcept { this->seed(seed); }
+    constexpr explicit ChaCha(result_type seed = default_seed<result_type>) noexcept { this->seed(seed); }
 
-    template <class SeedSeq, _is_seed_seq_enable_if<SeedSeq> = true>
+    template <class SeedSeq, require_is_seed_seq<SeedSeq> = true>
     explicit ChaCha(SeedSeq&& seq) {
         this->seed(seq);
     }
@@ -722,7 +798,7 @@ public:
         this->generate_new_block();
     }
 
-    template <class SeedSeq, _is_seed_seq_enable_if<SeedSeq> = true>
+    template <class SeedSeq, require_is_seed_seq<SeedSeq> = true>
     void seed(SeedSeq&& seq) {
         // Seed sequence allows user to introduce more entropy into the state
 
@@ -751,26 +827,20 @@ using ChaCha8  = ChaCha<8>;
 using ChaCha12 = ChaCha<12>;
 using ChaCha20 = ChaCha<20>;
 
-
 } // namespace generators
 
-// ===========================
-// --- Default global PRNG ---
-// ===========================
-
-using default_generator_type = generators::Xoshiro256PP;
-using default_result_type    = default_generator_type::result_type;
-
-inline default_generator_type default_generator;
+// ===============
+// --- Entropy ---
+// ===============
 
 inline std::seed_seq entropy_seq() {
-    // Ensure thread safery of our entropy source, it should generally work fine even without
+    // Ensure thread safety of our entropy source, it should generally work fine even without
     // it, but with this we can be sure things never race
     static std::mutex     entropy_mutex;
     const std::lock_guard entropy_guard(entropy_mutex);
 
     // Hardware entropy (if implemented),
-    // some platfroms (mainly MinGW) implements random device as a regular PRNG that
+    // some platforms (mainly MinGW) implements random device as a regular PRNG that
     // doesn't change from run to run, this is horrible, but we can somewhat improve
     // things by mixing other sources of entropy. Since hardware entropy is a rather
     // limited resource we only call it once.
@@ -792,29 +862,33 @@ inline std::seed_seq entropy_seq() {
     // CPU counter (if available, hashed compilation time otherwise)
     const auto cpu_counter = static_cast<std::uint64_t>(utl_random_cpu_counter);
 
+    // Thread ID (guarantees different seeding for thread-local PRNGs)
+    const std::size_t thread_id = std::hash<std::thread::id>{}(std::this_thread::get_id());
+
     // Note:
-    // There are other sources of entropy, such as function adresses,
+    // There are other sources of entropy, such as function addresses,
     // but those can be rather "constant" on some platforms
 
-    return {seed_rd, _crush_to_uint32(seed_time), _crush_to_uint32(heap_address_hash),
-            _crush_to_uint32(stack_address_hash), _crush_to_uint32(cpu_counter)};
+    return {
+        seed_rd,                             //
+        crush_to_uint32(seed_time),          //
+        crush_to_uint32(heap_address_hash),  //
+        crush_to_uint32(stack_address_hash), //
+        crush_to_uint32(cpu_counter),        //
+        crush_to_uint32(thread_id)           //
+    };
 }
 
 inline std::uint32_t entropy() {
     auto seq = entropy_seq();
-    return _seed_seq_to_uint32(seq);
+
+    std::uint32_t res;
+    seed_seq_generate(std::move(seq), res);
+    return res;
     // returns 'std::uint32_t' to mimic the return type of 'std::random_device', if we return uint64_t
     // brace-initializers will complain about narrowing conversion on some generators. If someone want
     // more entropy than that they can always use the whole sequence as a generic solution.
     // Also having one 'random::entropy()' is much nicer than 'random::entropy_32()' & 'random::entropy_64()'.
-}
-
-inline void seed(default_result_type random_seed) noexcept { default_generator.seed(random_seed); }
-
-inline void seed_with_entropy() {
-    auto seq = entropy_seq();
-    default_generator.seed(seq);
-    // for some god-forsaken reason seeding sequence constructors std:: generators take only l-value sequences
 }
 
 // =====================
@@ -824,14 +898,14 @@ inline void seed_with_entropy() {
 // --- Uniform int distribution ---
 // --------------------------------
 
-template <class T, class Gen, _require<std::is_integral_v<T> && std::is_unsigned_v<T>> = true>
-constexpr T _uniform_uint_lemier(Gen& gen, T range) noexcept(noexcept(gen())) {
-    using W = _wider_t<T>;
+template <class T, class Gen, require_uint<T> = true>
+constexpr T uniform_uint_lemire(Gen& gen, T range) noexcept(noexcept(gen())) {
+    using W = wider_t<T>;
 
     W product = W(gen()) * W(range);
     T low     = T(product);
     if (low < range) {
-        while (low < -range % range) {
+        while (low < uint_minus(range) % range) {
             product = W(gen()) * W(range);
             low     = T(product);
         }
@@ -839,26 +913,16 @@ constexpr T _uniform_uint_lemier(Gen& gen, T range) noexcept(noexcept(gen())) {
     return product >> std::numeric_limits<T>::digits;
 }
 
-template <class T, class Gen, _require<std::is_integral_v<T> && std::is_unsigned_v<T>> = true>
-constexpr T _uniform_uint_modx1(Gen& gen, T range) noexcept(noexcept(gen())) {
-    T x{}, r{};
-    do {
-        x = gen();
-        r = x % range;
-    } while (x - r > T(-range));
-    return r;
-} // slightly slower than lemier, but doesn't require a wider type
-
-// Reimplementation of libc++ `std::uniform_int_distribution<>` except
+// Reimplementation of libstdc++ 'std::uniform_int_distribution<>' except
 // - constexpr
 // - const-qualified (relative to distribution parameters)
 // - noexcept as long as 'Gen::operator()' is noexcept, which is true for all generators in this module
-// - supports `std::uint8_t`, `std::int8_t`, `char`
+// - supports 'std::uint8_t', 'std::int8_t', 'char'
 // - produces the same sequence on each platform
-// Performance is exactly the same a libc++ version of `std::uniform_int_distribution<>`,
-// in fact, it is likely to return the exact same sequence for all types except 64-bit integers
-template <class T, class Gen, _require<std::is_integral_v<T>> = true>
-constexpr T _generate_uniform_int(Gen& gen, T min, T max) noexcept {
+// Performance is exactly the same a libstdc++ version of 'std::uniform_int_distribution<>',
+// in fact, it is likely to return the exact same sequence for most types
+template <class T, class Gen, require_integral<T> = true>
+constexpr T generate_uniform_int(Gen& gen, T min, T max) noexcept(noexcept(gen())) {
     using result_type    = T;
     using unsigned_type  = std::make_unsigned_t<result_type>;
     using generated_type = typename Gen::result_type;
@@ -877,17 +941,16 @@ constexpr T _generate_uniform_int(Gen& gen, T min, T max) noexcept {
 
     // PRNG has enough state for the range
     if (prng_range > range) {
-        const common_type ext_range = range + 1; // range can be zero
+        const common_type ext_range = range + 1; // never overflows due to branch condition
 
-        // PRNG uses all 'common_type' bits uniformly
-        // => use Lemier's algorithm if possible, fallback onto modx1 otherwise,
-        //    libc++ uses conditionally compiled lemier's with 128-bit ints intead of doing a fallback,
-        //    this is slightly faster, but leads to platforms-dependant sequences
+        // PRNG is bit-uniform
+        // => use Lemire's algorithm, GCC/clang provide 128-bit arithmetics natively, other
+        //    compilers use emulation, Lemire with emulated 128-bit ints performs about the
+        //    same as Java's "modx1", which is the best algorithm without wide arithmetics
         if constexpr (prng_range == type_range) {
-            if constexpr (_has_wider<common_type>) res = _uniform_uint_lemier(gen, ext_range);
-            else res = _uniform_uint_modx1(gen, ext_range);
+            res = uniform_uint_lemire<common_type>(gen, ext_range);
         }
-        // PRNG doesn't use all bits uniformly (usually because 'prng_min' is '1')
+        // PRNG is non-uniform (usually because 'prng_min' is '1')
         // => fallback onto a 2-division algorithm
         else {
             const common_type scaling = prng_range / ext_range;
@@ -897,19 +960,19 @@ constexpr T _generate_uniform_int(Gen& gen, T min, T max) noexcept {
             res /= scaling;
         }
     }
-    // PRNG needs several invocations to aquire enough state for the range
+    // PRNG needs several invocations to acquire enough state for the range
     else if (prng_range < range) {
         common_type temp{};
         do {
             constexpr common_type ext_prng_range = (prng_range < type_range) ? prng_range + 1 : type_range;
-            temp = ext_prng_range * _generate_uniform_int<common_type>(gen, 0, range / ext_prng_range);
+            temp = ext_prng_range * generate_uniform_int<common_type>(gen, 0, range / ext_prng_range);
             res  = temp + (common_type(gen()) - prng_min);
         } while (res >= range || res < temp);
     } else {
         res = common_type(gen()) - prng_min;
     }
 
-    return min + res;
+    return static_cast<T>(min + res);
 
     // Note 1:
     // 'static_cast<>()' preserves bit pattern of signed/unsigned integers of the same size as long as
@@ -921,20 +984,16 @@ constexpr T _generate_uniform_int(Gen& gen, T min, T max) noexcept {
     // This would be a bit nicer semantically with C++20 `std::bit_cast<>`, but not ultimately any different.
 
     // Note 2:
-    // 'ext_prng_range' has a ternary purely to silence a false compiler warning from about division by zero due to
+    // 'ext_prng_range' has a ternary purely to silence a false compiler warning about division by zero due to
     // 'prng_range + 1' overflowing into '0' when 'prng_range' is equal to 'type_range'. Falling into this runtime
     // branch requires 'prng_range < range <= type_range' making such situation impossible, here we simply clamp the
     // value to 'type_range' so it doesn't overflow and trip the compiler when analyzing constexpr for potential UB.
+
+    // Note 3:
+    // 'static_cast<T>()' in return is functionally useless, but prevents some false positive warnings on MSVC
 }
 
-// 'static_cast<>()' preserves bit pattern of signed/unsigned integers of the same size as long as
-// those integers are two-complement (see https://en.wikipedia.org/wiki/Two's_complement), this is
-// true for most platforms and is in fact guaranteed for standard fixed-width types like 'uint32_t'
-// on any platform (see https://en.cppreference.com/w/cpp/types/integer)
-//
-// This means signed integer distribution can simply use unsigned algorithm and reinterpret the result internally.
-// This would be a bit nicer semantically with C++20 `std::bit_cast<>`, but not ultimately any different.
-template <class T = int, _require<std::is_integral_v<T>> = true>
+template <class T = int, require_integral<T> = true>
 struct UniformIntDistribution {
     using result_type = T;
 
@@ -949,16 +1008,16 @@ struct UniformIntDistribution {
 
     template <class Gen>
     constexpr T operator()(Gen& gen) const noexcept(noexcept(gen())) {
-        return _generate_uniform_int<result_type>(gen, this->pars.min, this->pars.max);
+        return generate_uniform_int<result_type>(gen, this->pars.min, this->pars.max);
     }
 
     template <class Gen>
     constexpr T operator()(Gen& gen, const param_type& p) const noexcept(noexcept(gen())) {
         assert(p.min < p.max);
-        return _generate_uniform_int<result_type>(gen, p.min, p.max);
+        return generate_uniform_int<result_type>(gen, p.min, p.max);
     } // for std-compatibility
 
-    constexpr result_type               reset() const noexcept {} // nothing to reset, provided for std-compatibility
+    constexpr void                      reset() const noexcept {} // nothing to reset, provided for std-compatibility
     [[nodiscard]] constexpr param_type  params() const noexcept { return this->pars; }
     constexpr void                      params(const param_type& p) noexcept { *this = UniformIntDistribution(p); }
     [[nodiscard]] constexpr result_type a() const noexcept { return this->pars.min; }
@@ -966,14 +1025,14 @@ struct UniformIntDistribution {
     [[nodiscard]] constexpr result_type min() const noexcept { return this->pars.min; }
     [[nodiscard]] constexpr result_type max() const noexcept { return this->pars.max; }
 
+    constexpr bool operator==(const UniformIntDistribution& other) noexcept {
+        return this->a() == other.a() && this->b() == other.b();
+    }
+    constexpr bool operator!=(const UniformIntDistribution& other) noexcept { return !(*this == other); }
+
 private:
     param_type pars{};
 };
-
-template <class T>
-constexpr bool operator==(const UniformIntDistribution<T>& lhs, const UniformIntDistribution<T>& rhs) noexcept {
-    return lhs.a() == rhs.a() && lhs.b() == rhs.b();
-}
 
 // --- Uniform real distribution ---
 // ---------------------------------
@@ -985,7 +1044,7 @@ static_assert(std::numeric_limits<double>::digits == 53, "Platform not supported
 static_assert(std::numeric_limits<float>::digits == 24, "Platform not supported, 'double' is expected to be 64-bit.");
 
 template <class T>
-constexpr int _bit_width(T value) noexcept {
+constexpr int bit_width(T value) noexcept {
     int width = 0;
     while (value >>= 1) ++width;
     return width;
@@ -993,7 +1052,7 @@ constexpr int _bit_width(T value) noexcept {
 
 // Constexpr reimplementation of 'std::generate_canonical<>()'
 template <class T, class Gen>
-constexpr T _generate_canonical_generic(Gen& gen) noexcept(noexcept(gen())) {
+constexpr T generate_canonical_generic(Gen& gen) noexcept(noexcept(gen())) {
     using float_type     = T;
     using generated_type = typename Gen::result_type;
 
@@ -1006,7 +1065,7 @@ constexpr T _generate_canonical_generic(Gen& gen) noexcept(noexcept(gen())) {
     constexpr generated_type prng_range = prng_max - prng_min;
     constexpr generated_type type_range = std::numeric_limits<generated_type>::max();
 
-    constexpr int prng_bits = (prng_range < type_range) ? _bit_width(prng_range + 1) : 1 + _bit_width(prng_range);
+    constexpr int prng_bits = (prng_range < type_range) ? bit_width(prng_range + 1) : 1 + bit_width(prng_range);
     // how many full bits of randomness PRNG produces on each invocation, prng_bits == floor(log2(prng_range + 1)),
     // ternary handles the case that would overflow when (prng_range == type_range)
 
@@ -1016,14 +1075,14 @@ constexpr T _generate_canonical_generic(Gen& gen) noexcept(noexcept(gen())) {
         return count;
     }();
     // GCC and MSVC use runtime conversion to floating point and std::ceil() & std::log() to obtain
-    // this value, in MSVC for example we have something like this:
+    // this value, in MSVC (before LWG 2524 implementation) for example we had something like this:
     //    > invocations_needed = std::ceil( float_type(float_bits) / std::log2( float_type(prng_range) + 1 ) )
     // which is not constexpr due to math functions, we can do a similar thing much easier by just counting bits
     // generated per each invocation. This returns the same thing for any sane PRNG, except since it only counts
     // "full bits" esoteric ranges such as [1, 3] which technically have 1.5 bits of randomness will be counted
     // as 1 bit of randomness, thus overestimating the invocations a little. In practice this makes 0 difference
     // since its only matters for exceedingly small 'prng_range' and such PRNGs simply don't exist in nature, and
-    // even if they are theoretically used they will simply use a few more invocation to produce a proper result
+    // even if they are theoretically used they will simply use a few more invocations to produce a proper result
 
     constexpr float_type prng_float_max   = static_cast<float_type>(prng_max);
     constexpr float_type prng_float_min   = static_cast<float_type>(prng_min);
@@ -1035,12 +1094,18 @@ constexpr T _generate_canonical_generic(Gen& gen) noexcept(noexcept(gen())) {
     for (int i = 0; i < invocations_needed; ++i) {
         res += (static_cast<float_type>(gen()) - static_cast<float_type>(prng_min)) * factor;
         factor *= prng_float_range;
-    } // same algorithm is used by 'std::generate_canonical<>' in all major compilers as of 2025
+    }
+    res /= factor;
+    // same algorithm is used by 'std::generate_canonical<>' in GCC/clang as of 2025, MSVC used to do the same
+    // before the P0952R2 overhaul (see https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2023/p0952r2.html)
 
-    return res / factor;
+    if (res >= float_type(1)) res = float_type(1) - std::numeric_limits<float_type>::epsilon() / float_type(2);
+    // GCC patch that fixes occasional generation of '1's, has non-zero effect on performance
+
+    return res;
 }
 
-// Wrapper that adds special case optimizations for `_generate_canonical_generic<>()'
+// Wrapper that adds special case optimizations for `generate_canonical_generic<>()'
 template <class T, class Gen>
 constexpr T generate_canonical(Gen& gen) noexcept(noexcept(gen())) {
     using float_type     = T;
@@ -1066,15 +1131,16 @@ constexpr T generate_canonical(Gen& gen) noexcept(noexcept(gen())) {
 
     // Note 1: Note hexadecimal float literals, 'p' separates hex-base from the exponent
     // Note 2: Floats have 'mantissa_size + 1' significant bits due to having a sign bit
+    // Note 3: All of the methods below produce [0, 1) range
 
     // Bit-uniform PRNGs can be simply bitmasked & shifted to obtain mantissa
     // 64-bit float, 64-bit uniform PRNG
-    // => multiplication algorithm, see [https://prng.di.unimi.it/]
+    // => multiplication algorithm, see https://prng.di.unimi.it/
     if constexpr (prng_is_bit_uniform && sizeof(float_type) == 8 && sizeof(generated_type) == 8) {
         return (gen() >> exponent_bits_64) * mantissa_hex_64;
     }
     // 64-bit float, 32-bit uniform PRNG
-    // => "low-high" algorithm, see [https://www.doornik.com/research/randomdouble.pdf]
+    // => "low-high" algorithm, see https://www.doornik.com/research/randomdouble.pdf
     else if constexpr (prng_is_bit_uniform && sizeof(T) == 8 && sizeof(generated_type) == 4) {
         return (gen() * pow2_minus_64) + (gen() * pow2_minus_32);
     }
@@ -1090,11 +1156,11 @@ constexpr T generate_canonical(Gen& gen) noexcept(noexcept(gen())) {
     }
     // Generic case, no particular optimizations can be made
     else {
-        return _generate_canonical_generic<T>(gen);
+        return generate_canonical_generic<T>(gen);
     }
 }
 
-template <class T = double, _require<std::is_floating_point_v<T>> = true>
+template <class T = double, require_float<T> = true>
 struct UniformRealDistribution {
     using result_type = T;
 
@@ -1118,87 +1184,375 @@ struct UniformRealDistribution {
         return p.min + generate_canonical<result_type>(gen) * (p.max - p.min);
     } // for std-compatibility
 
-    constexpr result_type reset() const noexcept {} // there is nothing to reset, provided for std-API compatibility
+    constexpr void        reset() const noexcept {} // nothing to reset, provided for std-API compatibility
     constexpr param_type  params() const noexcept { return this->pars; }
     constexpr void        params(const param_type& p) noexcept { *this = UniformRealDistribution(p); }
     constexpr result_type a() const noexcept { return this->pars.min; }
     constexpr result_type b() const noexcept { return this->pars.max; }
     constexpr result_type min() const noexcept { return this->pars.min; }
     constexpr result_type max() const noexcept { return this->pars.max; }
+
+    constexpr bool operator==(const UniformRealDistribution& other) noexcept {
+        return this->a() == other.a() && this->b() == other.b();
+    }
+    constexpr bool operator!=(const UniformRealDistribution& other) noexcept { return !(*this == other); }
 };
 
+// --- Normal distribution ---
+// ---------------------------
+
+template <class T = double, require_float<T> = true>
+struct NormalDistribution {
+    using result_type = T;
+
+    struct param_type {
+        result_type mean   = 0;
+        result_type stddev = 1;
+    } pars{};
+
+private:
+    // Marsaglia Polar algorithm generates values in pairs so we need to cache the 2nd one
+    result_type saved           = 0;
+    bool        saved_available = false;
+
+    // Implementation of Marsaglia Polar method for N(0, 1) based on libstdc++,
+    // the algorithm is exactly the same, except we use a faster uniform distribution
+    // ('generate_canonical()' that was implemented earlier)
+    //
+    // Note 1:
+    // Even if 'generate_canonical()' produced [0, 1] range instead of [0, 1),
+    // this would not be an issue since Marsaglia Polar is a rejection method and does
+    // not care about the inclusion of upper-boundaries, they get rejected by 'r2 > T(1)' check
+    //
+    // Note 2:
+    // As far as normal distributions go we have 3 options:
+    //    - Box-Muller
+    //    - Marsaglia Polar
+    //    - Ziggurat
+    // Box-Muller performance is similar to Marsaglia Polar, but it has issues working with [0, 1]
+    // 'generate_canonical()'. Ziggurat is usually ~50% faster, but involver several KB of lookup tables
+    // and a MUCH more cumbersome and difficult to generalize implementation. Most (in fact, all I've seen so far)
+    // ziggurat implementations found online are absolutely atrocious. There is a very interesting and well-made
+    // paper by Christopher McFarland (2015, see https://pmc.ncbi.nlm.nih.gov/articles/PMC4812161/ for pdf) that
+    // proposes several significant improvements, but it has even more lookup tables (~12 KB in total) and even
+    // harder implementation. For the sake of robustness we will stick to Polar method for now.
+    //
+    // Note 3:
+    // Not 'constexpr' due to the <cmath> nonsense, can't do anything about it, will be fixed with C++23.
+    //
+    template <class Gen>
+    result_type generate_standard_normal(Gen& gen) noexcept {
+        if (this->saved_available) {
+            this->saved_available = false;
+            return this->saved;
+        }
+
+        result_type x, y, r2;
+
+        do {
+            x  = T(2) * generate_canonical<result_type>(gen) - T(1);
+            y  = T(2) * generate_canonical<result_type>(gen) - T(1);
+            r2 = x * x + y * y;
+        } while (r2 > T(1) || r2 == T(0));
+
+        const result_type mult = std::sqrt(-2 * std::log(r2) / r2);
+
+        this->saved_available = true;
+        this->saved           = x * mult;
+
+        return y * mult;
+    }
+
+public:
+    constexpr NormalDistribution() = default;
+    constexpr NormalDistribution(T mean, T stddev) noexcept : pars({mean, stddev}) { assert(stddev >= T(0)); }
+    constexpr NormalDistribution(const param_type& p) noexcept : pars(p) { assert(p.stddev >= T(0)); }
+
+    template <class Gen>
+    result_type operator()(Gen& gen) noexcept {
+        return this->generate_standard_normal(gen) * this->pars.stddev + this->pars.mean;
+    }
+
+    template <class Gen>
+    result_type operator()(Gen& gen, const param_type& params) noexcept {
+        assert(params.stddev >= T(0));
+        return this->generate_standard_normal(gen) * params.stddev + params.mean;
+    }
+
+    constexpr void reset() noexcept {
+        this->saved           = 0;
+        this->saved_available = false;
+    }
+    [[nodiscard]] constexpr param_type  param() const noexcept { return this->pars; }
+    constexpr void                      param(const param_type& p) noexcept { *this = NormalDistribution(p); }
+    [[nodiscard]] constexpr result_type mean() const noexcept { return this->pars.mean; }
+    [[nodiscard]] constexpr result_type stddev() const noexcept { return this->pars.stddev; }
+    [[nodiscard]] constexpr result_type min() const noexcept { return std::numeric_limits<result_type>::lowest(); }
+    [[nodiscard]] constexpr result_type max() const noexcept { return std::numeric_limits<result_type>::max(); }
+
+    constexpr bool operator==(const NormalDistribution& other) noexcept {
+        return this->mean() == other.mean() && this->stddev() == other.stddev() &&
+               this->saved_available == other.saved_available && this->saved == other.saved;
+    }
+    constexpr bool operator!=(const NormalDistribution& other) noexcept { return !(*this == other); }
+};
+
+// --- Approximate normal distribution ---
+// ---------------------------------------
+
+// Extremely fast, but noticeably imprecise normal distribution, can be very useful for fuzzing & gamedev
+
+template <class T, require_uint<T> = true>
+[[nodiscard]] constexpr int popcount(T x) noexcept {
+    constexpr auto bitmask_1 = static_cast<T>(0x5555555555555555UL);
+    constexpr auto bitmask_2 = static_cast<T>(0x3333333333333333UL);
+    constexpr auto bitmask_3 = static_cast<T>(0x0F0F0F0F0F0F0F0FUL);
+
+    constexpr auto bitmask_16 = static_cast<T>(0x00FF00FF00FF00FFUL);
+    constexpr auto bitmask_32 = static_cast<T>(0x0000FFFF0000FFFFUL);
+    constexpr auto bitmask_64 = static_cast<T>(0x00000000FFFFFFFFUL);
+
+    x = (x & bitmask_1) + ((x >> 1) & bitmask_1);
+    x = (x & bitmask_2) + ((x >> 2) & bitmask_2);
+    x = (x & bitmask_3) + ((x >> 4) & bitmask_3);
+
+    if constexpr (sizeof(T) > 1) x = (x & bitmask_16) + ((x >> 8) & bitmask_16);
+    if constexpr (sizeof(T) > 2) x = (x & bitmask_32) + ((x >> 16) & bitmask_32);
+    if constexpr (sizeof(T) > 4) x = (x & bitmask_64) + ((x >> 32) & bitmask_64);
+
+    return x; // GCC seem to be smart enough to replace this with a built-in
+} // C++20 adds a proper 'std::popcount()'
+
+// Quick approximation of normal distribution based on this excellent reddit thread:
+// https://www.reddit.com/r/algorithms/comments/yyz59u/fast_approximate_gaussian_generator/
+//
+// Lack of <cmath> functions also allows us to 'constexpr' everything
+
 template <class T>
-constexpr bool operator==(const UniformRealDistribution<T>& lhs, const UniformRealDistribution<T>& rhs) noexcept {
-    return lhs.a() == rhs.a() && lhs.b() == rhs.b();
+[[nodiscard]] constexpr T approx_standard_normal_from_u32_pair(std::uint32_t major, std::uint32_t minor) noexcept {
+    constexpr T delta = T(1) / T(4294967296); // (1 / 2^32)
+
+    T x = T(popcount(major)); // random binomially distributed integer 0 to 32
+    x += minor * delta;       // linearly fill the gaps between integers
+    x -= T(16.5);             // re-center around 0 (the mean should be 16+0.5)
+    x *= T(0.3535534);        // scale to ~1 standard deviation
+    return x;
+
+    // 'x' now has a mean of 0, stddev very close to 1, and lies strictly in [-5.833631, 5.833631] range,
+    // there are exactly 33 * 2^32 possible outputs which is slightly more than 37 bits of entropy,
+    // the distribution is approximated via 33 equally spaced intervals each of which is further subdivided
+    // into 2^32 parts. As a result we have a very fast, but noticeably inaccurate approximation, not suitable
+    // for research, but might prove very useful in fuzzing / gamedev where quality is not that important.
 }
 
-// ========================
-// --- Random Functions ---
-// ========================
+template <class T>
+[[nodiscard]] constexpr T approx_standard_normal_from_u64(std::uint64_t rng) noexcept {
+    return approx_standard_normal_from_u32_pair<T>(static_cast<std::uint32_t>(rng >> 32),
+                                                   static_cast<std::uint32_t>(rng));
+}
+
+template <class T, class Gen>
+constexpr T approx_standard_normal(Gen& gen) noexcept {
+    // Ensure PRNG is bit-uniform
+    using generated_type = typename Gen::result_type;
+
+    static_assert(Gen::min() == 0);
+    static_assert(Gen::max() == std::numeric_limits<generated_type>::max());
+
+    // Forward PRNG to a fast approximation
+    if constexpr (sizeof(generated_type) == 8) {
+        return approx_standard_normal_from_u64<T>(gen());
+    } else if constexpr (sizeof(generated_type) == 4) {
+        return approx_standard_normal_from_u32_pair<T>(gen(), gen());
+    } else {
+        static_assert(always_false_v<T>, "ApproxNormalDistribution<> only supports bit-uniform 32/64-bit PRNGs.");
+        // we could use a slower fallback for esoteric PRNGs, but I think it's better to explicitly state when "fast
+        // approximate" is not available, esoteric PRNGs are already handled by a regular NormalDistribution
+    }
+}
+
+template <class T = double, require_float<T> = true>
+struct ApproxNormalDistribution {
+    using result_type = T;
+
+    struct param_type {
+        result_type mean   = 0;
+        result_type stddev = 1;
+    } pars{};
+
+    constexpr ApproxNormalDistribution() = default;
+    constexpr ApproxNormalDistribution(T mean, T stddev) noexcept : pars({mean, stddev}) { assert(stddev >= T(0)); }
+    constexpr ApproxNormalDistribution(const param_type& p) noexcept : pars(p) { assert(p.stddev >= T(0)); }
+
+    template <class Gen>
+    constexpr result_type operator()(Gen& gen) const noexcept {
+        return approx_standard_normal<result_type>(gen) * this->pars.stddev + this->pars.mean;
+    }
+
+    template <class Gen>
+    constexpr result_type operator()(Gen& gen, const param_type& params) const noexcept {
+        assert(params.stddev >= T(0));
+        return approx_standard_normal<result_type>(gen) * params.stddev + params.mean;
+    }
+
+    constexpr void                     reset() const noexcept {} // nothing to reset, provided for std-API compatibility
+    [[nodiscard]] constexpr param_type param() const noexcept { return this->pars; }
+    constexpr void                     param(const param_type& p) noexcept { *this = NormalDistribution(p); }
+    [[nodiscard]] constexpr result_type mean() const noexcept { return this->pars.mean; }
+    [[nodiscard]] constexpr result_type stddev() const noexcept { return this->pars.stddev; }
+    [[nodiscard]] constexpr result_type min() const noexcept { return std::numeric_limits<result_type>::lowest(); }
+    [[nodiscard]] constexpr result_type max() const noexcept { return std::numeric_limits<result_type>::max(); }
+
+    constexpr bool operator==(const ApproxNormalDistribution& other) noexcept {
+        return this->mean() == other.mean() && this->stddev() == other.stddev();
+    }
+    constexpr bool operator!=(const ApproxNormalDistribution& other) noexcept { return !(*this == other); }
+};
+
+// =========================
+// --- Convenient random ---
+// =========================
 
 // Note 1:
-// Despite the intuitive judgement, benchmarks don't seem to indicate that creating
-// new distribution objects on each call introduces any noticeble overhead
-//
-// sizeof(std::uniform_int_distribution<int>)     ==  8
-// sizeof(std::uniform_real_distribution<double>) == 16
-// sizeof(std::normal_distribution<double>)       == 32
-//
-// and same thing for 'UniformIntDistribution', 'UniformRealDistribution'
+// Despite the intuitive judgement, creating new distribution objects on each call doesn't introduce
+// any meaningful overhead. There is however a bit of additional overhead due to 'thread_local' branch
+// caused by the thread local PRNG. It is still much faster than 'rand()' or regular <random> usage, but
+// if user wants to have the bleeding edge performance they should use distributions manually.
 
 // Note 2:
 // No '[[nodiscard]]' since random functions inherently can't be pure due to advancing the generator state.
 // Discarding return values while not very sensible, can still be done for the sake of advancing state.
-// Ideally we would want users to advance the state directly, but I'm not sure how to communicate that in
-// '[[nodiscard]]' warnings.
 
-inline int rand_int(int min, int max) noexcept {
-    const UniformIntDistribution<int> distr{min, max};
-    return distr(default_generator);
+// Note 3:
+// "Convenient" random uses a thread-local PRNG lazily initialized with entropy, this is a very sane default for
+// most cases. If explicit seeding is needed it can be achieved with 'thread_local_prng().seed(...)'.
+
+// --- Global PRNG ---
+// -------------------
+
+using PRNG = generators::Xoshiro256PP;
+
+inline PRNG& thread_local_prng() {
+    // no '[[nodiscard]]' as it can be used for a side effect of initializing PRNG
+    // no 'noexcept' because entropy source can allocate & fail
+    thread_local PRNG prng(entropy_seq());
+    return prng;
 }
 
-inline int rand_uint(unsigned int min, unsigned int max) noexcept {
-    const UniformIntDistribution<unsigned int> distr{min, max};
-    return distr(default_generator);
+// --- Distribution functions ---
+// ------------------------------
+
+// Generic variate, other functions are implemented in terms of this one
+template <class Dist>
+auto variate(Dist&& dist) -> typename std::decay_t<Dist>::result_type {
+    return dist(thread_local_prng());
 }
 
-inline float rand_float() noexcept { return generate_canonical<float>(default_generator); }
-
-inline float rand_float(float min, float max) noexcept {
-    const UniformRealDistribution<float> distr{min, max};
-    return distr(default_generator);
+// Integer U[min, max]
+template <class T, require_integral<T> = true>
+T uniform(T min, T max) {
+    return variate(UniformIntDistribution<T>{min, max});
 }
 
-inline float rand_normal_float() {
-    std::normal_distribution<float> distr;
-    return distr(default_generator);
+// Boolean U[0, 1]
+template <class T, require_integral<T> = true, require_bool<T> = true>
+T uniform() {
+    return variate(UniformIntDistribution<std::uint8_t>{0, 1});
 }
 
-inline double rand_double() noexcept { return generate_canonical<double>(default_generator); }
-
-inline double rand_double(double min, double max) noexcept {
-    const UniformRealDistribution<double> distr{min, max};
-    return distr(default_generator);
+// Float U[min, max)
+template <class T, require_float<T> = true>
+T uniform(T min, T max) {
+    return variate(UniformRealDistribution<T>{min, max});
 }
 
-inline double rand_normal_double() {
-    std::normal_distribution<double> distr;
-    return distr(default_generator);
+// Float U[0, 1)
+template <class T, require_float<T> = true>
+T uniform() {
+    return variate(UniformRealDistribution<T>{0, 1});
 }
 
-inline bool rand_bool() noexcept { return static_cast<bool>(rand_uint(0, 1)); }
+// Float N(mean, stddev)
+template <class T, require_float<T> = true>
+T normal(T mean, T stddev) {
+    return variate(NormalDistribution<T>{mean, stddev});
+    // slower due to discarding state, but that is unavoidable in this API
+}
 
+// Float N(0, 1)
+template <class T, require_float<T> = true>
+T normal() {
+    thread_local NormalDistribution<T> dist{};
+    return variate(dist);
+    // this version can use distribution state properly due to the constant parameters
+}
+
+// Choose random element from a list
 template <class T>
-const T& rand_choice(std::initializer_list<T> objects) noexcept {
-    const int random_index = rand_int(0, static_cast<int>(objects.size()) - 1);
-    return objects.begin()[random_index];
+T choose(std::initializer_list<T> list) {
+    return list.begin()[uniform<std::size_t>(0, list.size() - 1)];
 }
 
-template <class T>
-T rand_linear_combination(const T& A, const T& B) noexcept(noexcept(A + B) && noexcept(A * 1.)) {
-    const auto coef = rand_double();
-    return A * coef + B * (1. - coef);
-} // random linear combination of 2 colors/vectors/etc
+template <class Container>
+auto choose(const Container& list) {
+    return list.at(uniform<std::size_t>(0, list.size() - 1));
+}
+
+// --- Typed shortcuts ---
+// -----------------------
+
+using Uint = unsigned int;
+
+// clang-format off
+inline    int uniform_int   (   int min,    int max) { return uniform<   int>(min, max); }
+inline   Uint uniform_uint  (  Uint min,   Uint max) { return uniform<  Uint>(min, max); }
+inline   bool uniform_bool  (                      ) { return uniform<  bool>(        ); }
+inline  float uniform_float ( float min,  float max) { return uniform< float>(min, max); }
+inline double uniform_double(double min, double max) { return uniform<double>(min, max); }
+inline  float uniform_float (                      ) { return uniform< float>(        ); }
+inline double uniform_double(                      ) { return uniform<double>(        ); }
+
+inline  float normal_float ( float mean,  float stddev) { return  normal< float>(mean, stddev); }
+inline double normal_double(double mean, double stddev) { return  normal<double>(mean, stddev); }
+inline  float normal_float (                          ) { return  normal< float>(            ); }
+inline double normal_double(                          ) { return  normal<double>(            ); }
+// clang-format on
+
+} // namespace utl::random::impl
+
+// ______________________ PUBLIC API ______________________
+
+namespace utl::random {
+
+namespace generators = impl::generators;
+
+using impl::entropy_seq;
+using impl::entropy;
+
+using impl::UniformIntDistribution;
+using impl::UniformRealDistribution;
+using impl::NormalDistribution;
+using impl::ApproxNormalDistribution;
+using impl::generate_canonical;
+
+using impl::PRNG;
+using impl::thread_local_prng;
+
+using impl::choose;
+using impl::variate;
+using impl::uniform;
+using impl::normal;
+
+using impl::Uint;
+using impl::uniform_int;
+using impl::uniform_uint;
+using impl::uniform_bool;
+using impl::uniform_float;
+using impl::uniform_double;
+using impl::normal_float;
+using impl::normal_double;
+
+using impl::choose;
 
 } // namespace utl::random
 

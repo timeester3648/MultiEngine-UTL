@@ -1,118 +1,334 @@
+[<img src ="images/badge_language_cpp_17.svg">](https://en.cppreference.com/w/cpp/17.html)
+[<img src ="images/badge_license_mit.svg">](LICENSE.md)
+[<img src ="images/badge_semver.svg">](guide_versioning.md)
+[<img src ="images/badge_docs.svg">](https://dmitribogdanov.github.io/UTL/)
+[<img src ="images/badge_header_only.svg">](https://en.wikipedia.org/wiki/Header-only)
+[<img src ="images/badge_no_dependencies.svg">](https://github.com/DmitriBogdanov/UTL/tree/master/include/UTL)
+
+[<img src ="images/badge_workflow_windows.svg">](https://github.com/DmitriBogdanov/UTL/actions/workflows/windows.yml)
+[<img src ="images/badge_workflow_ubuntu.svg">](https://github.com/DmitriBogdanov/UTL/actions/workflows/ubuntu.yml)
+[<img src ="images/badge_workflow_macos.svg">](https://github.com/DmitriBogdanov/UTL/actions/workflows/macos.yml)
+[<img src ="images/badge_workflow_freebsd.svg">](https://github.com/DmitriBogdanov/UTL/actions/workflows/freebsd.yml)
+
 # utl::integral
 
 [<- to README.md](..)
 
 [<- to implementation.hpp](../include/UTL/integral.hpp)
 
-**integral** module implements various utilities for that deal with integer types & bit twiddling. Main highlights are:
+**utl::integral** module implements various utilities for dealing with integer types. Main features are:
 
-- Integer bit operations
-- Integer math
-- Fixed-size literals
-- Arbitrary precision integers / bitsets
+- Integer division with different rounding modes
+- Overflow/underflow detection
+- Saturated math
+- Heterogeneous (mathematically correct) integer comparison
+- "Safe" integer casts
+- Fixed-size & `std::size_t` literals
 
-Such functionality is mostly useful in `constexpr` context when dealing with optimizations such as compile-time creation of bit-masks, bit-buffers, computation of different alignments, coefficients and etc. `BigUint<>` also serves as a "better" alternative to `std::bitset<>`.
+Such functionality is often useful in `constexpr` context when dealing with optimizations such as compile-time creation of bit-masks, bit-buffers, computation of different alignments, coefficients and etc. Also convenience.
 
 > [!Note]
-> Significant part of this module gets added into the standard library with **C++20** `<bits>` and `<utility>`
+> Significant part of this module gets added into the standard library with **C++20** `<bits>` and `<utility>`, saturated math ships with **C++26** `<numeric>`. All such functions provide the same API as their `std::` variants to allow seamless future transition.
 
 ## Definitions
 
 ```cpp
-// Integer bit operations
-using bit_type = bool;
+// Rounding integer division
+template <class T> constexpr T div_floor(T dividend, T divisor) noexcept;
+template <class T> constexpr T div_ceil (T dividend, T divisor) noexcept;
+template <class T> constexpr T div_down (T dividend, T divisor) noexcept;
+template <class T> constexpr T div_up   (T dividend, T divisor) noexcept;
 
-namespace bits {
-    template <class T> constexpr T    get(T  value, int bit)                 noexcept;
-    template <class T> constexpr void set(T& value, int bit, bit_type state) noexcept;
+// Saturated math
+template <class T> constexpr bool add_overflows(T lhs, T rhs) noexcept;
+template <class T> constexpr bool sub_overflows(T lhs, T rhs) noexcept;
+template <class T> constexpr bool mul_overflows(T lhs, T rhs) noexcept;
+template <class T> constexpr bool div_overflows(T lhs, T rhs) noexcept;
 
-    template <class T> constexpr std::size_t bit_width(T value) noexcept;
+template <class T> constexpr T add_sat(T lhs, T rhs) noexcept;
+template <class T> constexpr T sub_sat(T lhs, T rhs) noexcept;
+template <class T> constexpr T mul_sat(T lhs, T rhs) noexcept;
+template <class T> constexpr T div_sat(T lhs, T rhs) noexcept;
 
-    template <class T> constexpr T rotl(T value, int shift) noexcept;
-    template <class T> constexpr T rotr(T value, int shift) noexcept;
-}
-
-// Integer math
-namespace math {
-template <class T> constexpr T int_divide_ceil( T numerator, T denominator) noexcept;
-template <class T> constexpr T int_divide_floor(T numerator, T denominator) noexcept;
-    
-template <class T> constexpr bool addition_overflows(     T lhs, T rhs) noexcept;
-template <class T> constexpr bool substraction_underflows(T lhs, T rhs) noexcept;
-    
-template <class T> constexpr T clamped_add(      T lhs, T rhs) noexcept;
-template <class T> constexpr T clamped_substract(T lhs, T rhs) noexcept;
-    
-template <class T1, class T2> constexpr bool cmp_equal(        T1 lhs, T2 rhs) noexcept;
-template <class T1, class T2> constexpr bool cmp_not_equal(    T1 lhs, T2 rhs) noexcept;
-template <class T1, class T2> constexpr bool cmp_less(         T1 lhs, T2 rhs) noexcept;
-template <class T1, class T2> constexpr bool cmp_greater(      T1 lhs, T2 rhs) noexcept;
-template <class T1, class T2> constexpr bool cmp_less_equal(   T1 lhs, T2 rhs) noexcept;
+// Heterogeneous integer comparison
+template <class T1, class T2> constexpr bool cmp_equal        (T1 lhs, T2 rhs) noexcept;
+template <class T1, class T2> constexpr bool cmp_not_equal    (T1 lhs, T2 rhs) noexcept;
+template <class T1, class T2> constexpr bool cmp_less         (T1 lhs, T2 rhs) noexcept;
+template <class T1, class T2> constexpr bool cmp_greater      (T1 lhs, T2 rhs) noexcept;
+template <class T1, class T2> constexpr bool cmp_less_equal   (T1 lhs, T2 rhs) noexcept;
 template <class T1, class T2> constexpr bool cmp_greater_equal(T1 lhs, T2 rhs) noexcept;
-    
+
 template <class To, class From> constexpr bool in_range(From value) noexcept;
-    
-template <class To, class From> constexpr To narrow_cast(From value);
-    
-template <class T> constexpr T reverse_idx(T idx, T size) noexcept;
-}
+
+// Casts
+template <class To, class From> constexpr To narrow_cast  (From value);
+template <class To, class From> constexpr To saturate_cast(From value) noexcept;
+
+template <class T> constexpr auto to_signed  (T value);
+template <class T> constexpr auto to_unsigned(T value);
 
 // Integer literals
 namespace literals {
-    constexpr std::int8_t   operator"" _i8( unsigned long long v) noexcept;
-    constexpr std::uint8_t  operator"" _u8( unsigned long long v) noexcept;
-    constexpr std::uint16_t operator"" _i16(unsigned long long v) noexcept;
-    constexpr std::int16_t  operator"" _u16(unsigned long long v) noexcept;
-    constexpr std::int32_t  operator"" _i32(unsigned long long v) noexcept;
-    constexpr std::uint32_t operator"" _u32(unsigned long long v) noexcept;
-    constexpr std::int64_t  operator"" _i64(unsigned long long v) noexcept;
-    constexpr std::uint64_t operator"" _u64(unsigned long long v) noexcept;
-    constexpr std::size_t   operator"" _sz( unsigned long long v) noexcept;
+    constexpr std::int8_t    operator""_i8  (unsigned long long v) noexcept;
+    constexpr std::uint8_t   operator""_u8  (unsigned long long v) noexcept;
+    constexpr std::int16_t   operator""_i16 (unsigned long long v) noexcept;
+    constexpr std::uint16_t  operator""_u16 (unsigned long long v) noexcept;
+    constexpr std::int32_t   operator""_i32 (unsigned long long v) noexcept;
+    constexpr std::uint32_t  operator""_u32 (unsigned long long v) noexcept;
+    constexpr std::int64_t   operator""_i64 (unsigned long long v) noexcept;
+    constexpr std::uint64_t  operator""_u64 (unsigned long long v) noexcept;
+    constexpr std::size_t    operator""_sz  (unsigned long long v) noexcept;
+    constexpr std::ptrdiff_t operator""_ptrd(unsigned long long v) noexcept;
 }
-
-// Arbitrary sized integers & bitsets
-template <std::size_t bits_to_fit>
-struct BigUint {
-    using word_type = std::uint64_t;
-    
-    constexpr static std::size_t word_size;
-   	constexpr static std::size_t words;
-   	constexpr static std::size_t bits;
-    
-    constexpr explicit BigUint(word_type number) noexcept;
-};
 ```
 
 ## Methods
 
+### Rounding integer division
+
 > ```cpp
-> DEFINITION:
+> template <class T> constexpr T div_floor(T dividend, T divisor) noexcept;
+> template <class T> constexpr T div_ceil (T dividend, T divisor) noexcept;
+> template <class T> constexpr T div_down (T dividend, T divisor) noexcept;
+> template <class T> constexpr T div_up   (T dividend, T divisor) noexcept;
 > ```
 
-DESCRIPTION:
+Returns the result of integer division with a given rounding mode.
+
+| Function      | Rounding mode         |
+| ------------- | --------------------- |
+| `div_floor()` | Towards larger value  |
+| `div_ceil()`  | Towards smaller value |
+| `div_down()`  | Towards `0`           |
+| `div_up()`    | Away from `0`         |
+
+**Note:** There is a lot of partial or even blatantly erroneous implementations for this published online, the task is surprisingly tricky. Here signed values are properly handled and overflow behaves as it should.
+
+### Saturated math
+
+> ```cpp
+> template <class T> constexpr bool add_overflows(T lhs, T rhs) noexcept;
+> template <class T> constexpr bool sub_overflows(T lhs, T rhs) noexcept;
+> template <class T> constexpr bool mul_overflows(T lhs, T rhs) noexcept;
+> template <class T> constexpr bool div_overflows(T lhs, T rhs) noexcept;
+> ```
+
+Returns whether operator  `+`/`-`/`*`/`/` would overflow/underflow when applied to `lhs`, `rhs`.
+
+> ```cpp
+> template <class T> constexpr T add_sat(T lhs, T rhs) noexcept;
+> template <class T> constexpr T sub_sat(T lhs, T rhs) noexcept;
+> template <class T> constexpr T mul_sat(T lhs, T rhs) noexcept;
+> template <class T> constexpr T div_sat(T lhs, T rhs) noexcept;
+> ```
+
+Returns the result of `+`/`-`/`*`/`/` computed in [saturated arithmetic](https://en.wikipedia.org/wiki/Saturation_arithmetic), which means instead of overflowing operations get clamped to a min/max value.
+
+**Note:** This gets standardized in **C++26** as a part of [`<numeric>`](https://en.cppreference.com/w/cpp/header/numeric) header.
+
+### Heterogeneous integer comparison
+
+> ```cpp
+> template <class T1, class T2> constexpr bool cmp_equal        (T1 lhs, T2 rhs) noexcept;
+> template <class T1, class T2> constexpr bool cmp_not_equal    (T1 lhs, T2 rhs) noexcept;
+> template <class T1, class T2> constexpr bool cmp_less         (T1 lhs, T2 rhs) noexcept;
+> template <class T1, class T2> constexpr bool cmp_greater      (T1 lhs, T2 rhs) noexcept;
+> template <class T1, class T2> constexpr bool cmp_less_equal   (T1 lhs, T2 rhs) noexcept;
+> template <class T1, class T2> constexpr bool cmp_greater_equal(T1 lhs, T2 rhs) noexcept;
+> ```
+
+Functions that compare the values of two integers `lhs` and `rhs`. Unlike regular comparison operators, comparison is always mathematically correct for arbitrary types of `lhs` and `rhs`.
+
+For example, `-1 > 0u` is `true` due to non-value-preserving integer conversion, while `cmp_greater(-1, 0u)` is `false` (as it should be mathematically).
+
+**Note:** This gets standardized in **C++26** as [intcmp](https://en.cppreference.com/w/cpp/utility/intcmp).
+
+> ```cpp
+> template <class To, class From> constexpr bool in_range(From value) noexcept;
+> ```
+
+Returns whether `value` is in `[std::numeric_limits<To>::min(), std::numeric_limits<To>::max()]` range using heterogeneous comparison.
+
+### Casts
+
+> ```cpp
+> template <class To, class From> constexpr To narrow_cast(From value);
+> ```
+
+Integer-to-integer cast that throws `std::domain_error` if conversion would overflow/underflow the result.
+
+> ```cpp
+> template <class To, class From> constexpr To saturate_cast(From value) noexcept;
+> ```
+
+Integer-to-integer cast that uses saturated math. If `value` lies outside of `[std::numeric_limits<To>::min(), std::numeric_limits<To>::max()]` range, it gets clamped to the appropriate side of that range.
+
+> ```cpp
+> template <class T> constexpr auto to_signed  (T value);
+> template <class T> constexpr auto to_unsigned(T value);
+> ```
+
+Cast integer to a corresponding signed/unsigned type using `narrow_cast()`.
+
+### Integer literals
+
+> ```cpp
+> namespace literals {
+>     constexpr std::int8_t    operator""_i8  (unsigned long long v) noexcept;
+>     constexpr std::uint8_t   operator""_u8  (unsigned long long v) noexcept;
+>     constexpr std::int16_t   operator""_i16 (unsigned long long v) noexcept;
+>     constexpr std::uint16_t  operator""_u16 (unsigned long long v) noexcept;
+>     constexpr std::int32_t   operator""_i32 (unsigned long long v) noexcept;
+>     constexpr std::uint32_t  operator""_u32 (unsigned long long v) noexcept;
+>     constexpr std::int64_t   operator""_i64 (unsigned long long v) noexcept;
+>     constexpr std::uint64_t  operator""_u64 (unsigned long long v) noexcept;
+>     constexpr std::size_t    operator""_sz  (unsigned long long v) noexcept;
+>     constexpr std::ptrdiff_t operator""_ptrd(unsigned long long v) noexcept;
+> }
+> ```
+
+Literal suffixes for several integer types not included in `std`.
+
+**Note 1:** Literals always evaluate to a valid value, if `v` doesn't convert to a valid value internal cast throws `std::domain_error` at `constexpr`, making it a compilation error.
+
+**Note 2:** Literal for `std::size_t` gets standardized in **C++23** as a `zu` suffix. 
 
 ## Examples
 
-### EXAMPLENAME:
+### Integer division
 
-[ [Run this code](https://godbolt.org/#z:OYLghAFBqd5QCxAYwPYBMCmBRdBLAF1QCcAaPECAMzwBtMA7AQwFtMQByARg9KtQYEAysib0QXACx8BBAKoBnTAAUAHpwAMvAFYTStJg1DIApACYAQuYukl9ZATwDKjdAGFUtAK4sGe1wAyeAyYAHI%2BAEaYxCAArKQADqgKhE4MHt6%2BekkpjgJBIeEsUTHxdpgOaUIETMQEGT5%2BXLaY9nkM1bUEBWGR0XG2NXUNWc0KQ93BvcX9sQCUtqhexMjsHOYAzMHI3lgA1CYbbggEBAkKIAD0l8RMAO4AdMCECF4RXkorsowED2gslwAIixCMQ8BZUMB0IZUAA3S5yAAqAUuLCY42ilxSRnoAH1trtMAjkQ8EAkEodsCYNABBak04IEPZo4IQOYHADsVlpe15ew%2BwWAe2YbAUCSYq35BFoh25dJ5fLQDAxqgSxD2jL2xEwCUwTAICgOG0BewAbLL6Xy9kqVWq9uglhF6HsFPQdbj0Mt9WlcSxDYcTVxTQ9TRyLbTLXzxugQCglkzDm5EwczGYhG6EoK9vx1eYzEak0cXRmPV72r7/Udk3nmQoHiZYm4GHnw/KaVbo7G0F4E1Wiy3G8qM7GxcFaKhkABrNkgBtNlsbOVWnN7CCavBGk0aWUagtanV6g076zWPDskxcyNW3lMHuoF0TTcPmMoBDEASoEcEPXoACeuJ2CdJ1jBhUDuNlWyva9XUwHUR0zBhxynCAYPdT1bnLP05kghVrz2W8iD2Vwn07V931Ar8f3/QCpxAsCIMXKCOwIF9u17Qs3GfLs3w/WN0O9AQAPRAhE1I5AeIokBmFApQlXQBRKQgYiAFoHy6OY/iWQQ2T2S49i4TBTQLatU1rOdm1TVsrQvQF6SgsT42M/tLMHVCEljBBfwiMF0BncyFyXPkVzXQRdwDPZt0XMKi21XV9QUqKT0sM9OUCvCCPvcYuhIljuPIz8QAxJg/wApDgKk%2BjsMYiNcOg4cQE87y8F8tzSwwn0sJw9s8Pwu8iIYdActYiSCqKkqaPK0DwKqtLoNyuMeyczixJGviyx9URxlE%2BbxPykCYVkgR5MUlS1LqDTu209k9IMozExM/M/X8yzqu63kbLs2qHMW%2B7nLMcy3JHX8MRYPzBwCqDgvXJ9IosaLONiw8ErhpKLBSi9ZqtDKzt7E0Vr2wrv2K6iyro6aup64tYPcwrge/UHWv4zCFBmz63uvbHiPC/HeMJqjSqAsmGMxqMdsc37lp21aQCZjbhO24aCek5IKiOhLsCUga9lUrLzs0rwrt0/TDKWlNHoU8GXtmj6Iw5WzaQ4BZaE4WJeD8DgtFIT8OCTSxrBdJYVkwFMNh4UgCE0R2FmAjkuAeWOOQADlDyRE7MU0AE4uA0eJnY4SQ3cjr3OF4C4NHDyOFjgWAYEQOMWEzegyAoCB/kb/odkMYAgw0cuaFob9iAuCAIiLiJglqX9ODD8fmGIX8AHkIm0CoI%2B4Xh/jYQQF8QqePd4LB3mANwxFoC519ILA0RxNZPfwbVKlhTBz89zBVAqHtb94RlWiL2g8G8pPDwWAi4EDBCwaevAn7EAiCrQEmBr7AH/kYSufADDAAUAANTwJgO4C9dTuzDvwQQIgxDsCkDIQQigVDqH3qQXQzQDAoNMH7Sw%2BgAEXEgAsVACR2jn2UtGAMLCrCWC4BybWC8zC8DhNEHyz94ALHKJUZwmt3CeEaP4AaPQiglGyMkVIAgRhNESPo9o2i%2BgxDGK0VeVQJhGL0Eo9onQ6jmJmJYwYXR7FjAmK43RXBFGB1WBIJ2LtC50O9nsVQidTTKVNJIa0TChRBgeBoFJq5cCEBICHfxvA15aDmAsBAP5%2Bhsn0JwAupAIGxHLu7T23tS4gHLnkx2pBq513jAkHs5BKBtzoNEUIrA1hRJiXEhJXd9LBlSa/fARAfJ6GIcIUQ4gKELOoWoIuDDSB3FuO5deISOCu1ILU6RnAF49k6UyVAVBInRNifEzuRgJkpLSRADwDc%2Bm5jMKHOYuTK7RxAJIYMmdJBmC4NEnOGdY5BjKfnXgVSalF3qbYRpFd94FNIMBMwicHhYtBaaROsQxEbA0InDOgKYUbDCXUkuqL8n7KkUcxFNLmnougSkZwkggA%3D%3D%3D) ]
+[ [Run this code](https://godbolt.org/z/8rfGE1dKh) ] [ [Open source file](../examples/module_integral/integer_division.cpp) ]
+
 ```cpp
 using namespace utl;
 
-integral::bits::rotl();
-integral::bits::bit_width();
+static_assert( integral::div_floor( 7, 5) == 1 ); // round to smaller
+static_assert( integral::div_ceil ( 7, 5) == 2 ); // round to larger
+static_assert( integral::div_down ( 7, 5) == 1 ); // round to 0
+static_assert( integral::div_up   ( 7, 5) == 2 ); // round away from 0
 
-integral::math::divide_ceil();
-integral::math::narrow_cast();
-    
+static_assert( integral::div_floor(-7, 5) == -2 ); // round to smaller
+static_assert( integral::div_ceil (-7, 5) == -1 ); // round to larger
+static_assert( integral::div_down (-7, 5) == -1 ); // round to 0
+static_assert( integral::div_up   (-7, 5) == -2 ); // round away from 0
+```
+
+### Saturated math
+
+[ [Run this code](https://godbolt.org/z/6YerhvTGe) ] [ [Open source file](../examples/module_integral/saturated_math.cpp) ]
+
+```cpp
+using namespace utl;
 using namespace integral::literals;
-using integral::BigUint;
 
-// 1280-bit integer, can easily hold 2^648
-const auto two_power_648 = BigUint<1280>(1) << 640;
+// Helper functions to avoid ugly casting
+template <class T> constexpr T add(T lhs, T rhs) noexcept { return lhs + rhs; }
+template <class T> constexpr T sub(T lhs, T rhs) noexcept { return lhs - rhs; }
+
+// std::uint8_t has range [0, 255]
+static_assert(               add<std::uint8_t>(255, 15) ==  14 ); // overflow
+static_assert( integral::add_sat<std::uint8_t>(255, 15) == 255 ); // result gets clamped to max
+
+// std::int8_t has range [-128, 127]
+static_assert(               sub<std::int8_t>(-128, 14) ==  114 ); // underflow
+// if we used 'int' instead of 'std::int8_t' this could even be UB due to underflow during signed
+// arithmetic operation, for smaller types it's underflow during cast which is defined to wrap
+static_assert( integral::sub_sat<std::int8_t>(-128, 14) == -128 ); // result gets clamped to min
+
+// Saturated cast
+static_assert( integral::saturate_cast<std::uint8_t>(  17) ==  17 ); // regular cast
+static_assert( integral::saturate_cast<std::uint8_t>(1753) == 255 ); // value clamped to max
+static_assert( integral::saturate_cast<std::uint8_t>(-143) ==   0 ); // value clamped to min
+```
+
+### Heterogeneous comparison
+
+[ [Run this code](https://godbolt.org/z/5W6EGW3dz) ] [ [Open source file](../examples/module_integral/heterogeneous_comparison.cpp) ]
+
+```cpp
+using namespace utl;
+
+// static_assert( std::size_t(15) < int(-7) == true );
+// evaluates to 'true' due to implicit conversion, mathematically incorrect result,
+// sensible compilers will issue a warning
+
+static_assert( integral::cmp_less(std::size_t(15), int(-7)) == false );
+// evaluates to 'false', mathematically correct result
+```
+
+### Narrow cast
+
+[ [Run this code](https://godbolt.org/z/sch65GG7e) ] [ [Open source file](../examples/module_integral/narrow_cast.cpp) ]
+
+```cpp
+try {
+    using namespace utl;
+
+    // Narrow cast
+    [[maybe_unused]] char c1 =           static_cast<char>(  34); // this is fine, returns 34
+    [[maybe_unused]] char c2 = integral::narrow_cast<char>(  34); // this is fine, returns 34
+    [[maybe_unused]] char c3 =           static_cast<char>(1753); // silently overflows, returns -39
+    [[maybe_unused]] char c4 = integral::narrow_cast<char>(1753); // throws 'std::domain_error'
+
+} catch (std::domain_error &e) { 
+    std::cerr << "ERROR: Caught exception:\n\n" << e.what();
+}
 ```
 
 Output:
+
+```
+ERROR: Caught exception:
+
+narrow_cast() overflows the result.
 ```
 
+### Sign conversion
+
+[ [Run this code](https://godbolt.org/z/YhbYoMWhj) ] [ [Open source file](../examples/module_integral/sign_conversion.cpp) ]
+
+```cpp
+try {
+    constexpr int N = -14;
+
+    // for (std::size_t i = 0; i < N; ++i) std::cout << i;
+    // compiler warns about signed/unsigned comparison, doesn't compile with -Werror
+
+    // for (std::size_t i = 0; i < static_cast<std::size_t>(N); ++i) std::cout << i;
+    // casts 'N' to '18446744073709551602' since we forgot to check for negative 'N'
+
+    for (std::size_t i = 0; i < utl::integral::to_unsigned(N); ++i) std::cout << i;
+    // this is good, comparison is unsigned/unsigned and incorrect 'N' will cause an exception
+
+} catch (std::domain_error &e) {
+    std::cerr << "ERROR: Caught exception:\n\n" << e.what();
+}
+```
+
+Output:
+
+```
+ERROR: Caught exception:
+
+narrow_cast() overflows the result.
+```
+
+### Integral literals
+
+[ [Run this code](https://godbolt.org/z/W687695c9) ] [ [Open source file](../examples/module_integral/integral_literals.cpp) ]
+
+```cpp
+using namespace utl::integral::literals;
+
+// constexpr auto x = 129_i8;
+// won't compile, std::int8_t has range [-128, 127]
+
+constexpr auto x = 124_i8;
+// this is fine, 'x' has type 'std::int8_t'
+
+// constexpr auto x = -17_i8;
+// be wary of this, C++ has no concept of signed literals and treats it as an unary minus
+// applied to 'std::int8_t', which triggers integer promotion and returns an 'int'
+
+static_assert(sizeof(x) == 1);
 ```
