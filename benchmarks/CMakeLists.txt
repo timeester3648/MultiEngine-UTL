@@ -13,6 +13,9 @@ function(utl_add_benchmark file_name)
 endfunction()
 
 # Benchmarks
+utl_add_benchmark("generic/ankerl")
+utl_add_benchmark("generic/pmr")
+utl_add_benchmark("generic/unseq")
 utl_add_benchmark("module_json/parse_serialize")
 utl_add_benchmark("module_log/logging_overhead")
 utl_add_benchmark("module_log/stringification")
